@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "go run ./cmd/server",
+    "startCommand": "./out",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100
   }
