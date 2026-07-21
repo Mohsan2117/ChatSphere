@@ -1,33 +1,104 @@
-import { CheckCheck, CircleDot, FileText, Image, Mic, ShieldAlert, Users } from "lucide-react";
-
 export const chats = [
   {
-    id: "private-1",
-    name: "Maya Chen",
-    avatar: "MC",
-    type: "Private",
-    preview: "Design review is done. Sending final files now.",
-    time: "09:42",
-    unread: 2,
-    online: true
-  },
-  {
-    id: "group-1",
-    name: "Launch Squad",
-    avatar: "LS",
-    type: "Group",
-    preview: "Hamza: Backend health check passed.",
-    time: "09:30",
-    unread: 5,
-    online: true
-  },
-  {
-    id: "private-2",
-    name: "Ava Martins",
-    avatar: "AM",
-    type: "Private",
-    preview: "Can you forward the media samples?",
+    id: "nextgames",
+    name: "NextGames Prod",
+    avatar: "NG",
+    color: "bg-[#075e54]",
+    preview: "~NA: @ahmad khawaja Nextadge",
     time: "Yesterday",
+    unread: 0,
+    online: true
+  },
+  {
+    id: "gameverse",
+    name: "GameVerse Studio",
+    avatar: "GV",
+    color: "bg-[#5b3b2a]",
+    preview: "Mam Nadia Gameverse removed ...",
+    time: "05/07/2026",
+    unread: 0,
+    online: false
+  },
+  {
+    id: "devs",
+    name: "Dev's Paradise",
+    avatar: "DP",
+    color: "bg-[#1f1b5d]",
+    preview: "+92 313 5067430 joined via an invite",
+    time: "Yesterday",
+    unread: 0,
+    online: true
+  },
+  {
+    id: "ahmad",
+    name: "ahmad khawaja Nextadge",
+    avatar: "AK",
+    color: "bg-[#6b7280]",
+    preview: "Ok",
+    time: "11:01 am",
+    unread: 0,
+    online: true
+  },
+  {
+    id: "amir",
+    name: "M Amir Raza",
+    avatar: "AR",
+    color: "bg-[#0f766e]",
+    preview: "Ok",
+    time: "10:59 am",
+    unread: 0,
+    online: true
+  },
+  {
+    id: "mubeen",
+    name: "Mubeen Ameen",
+    avatar: "MA",
+    color: "bg-[#6b442e]",
+    preview: "You reacted to: website main ne...",
+    time: "10:37 am",
+    unread: 1,
+    online: false
+  },
+  {
+    id: "bots",
+    name: "WE ARE BOTS",
+    avatar: "WB",
+    color: "bg-[#7f1d1d]",
+    preview: "+92 347 0630207: 10 UC",
+    time: "9:37 am",
+    unread: 3,
+    online: true
+  },
+  {
+    id: "ahsan",
+    name: "Ahsan",
+    avatar: "A",
+    color: "bg-[#92400e]",
+    preview: "Photo",
+    time: "9:03 am",
+    unread: 0,
+    online: false
+  },
+  {
+    id: "you",
+    name: "+92 304 3285741 (You)",
+    avatar: "YO",
+    color: "bg-[#854d0e]",
+    preview: "City Police Car Chase Games.apk",
+    time: "Yesterday",
+    unread: 0,
+    online: true
+  }
+];
+
+export const emptyContacts = [
+  {
+    id: "empty-1",
+    name: "No messages yet",
+    avatar: "CS",
+    color: "bg-[#075e54]",
+    preview: "Add contacts to start chatting",
+    time: "",
     unread: 0,
     online: false
   }
@@ -36,69 +107,26 @@ export const chats = [
 export const messages = [
   {
     id: "m1",
-    author: "Maya",
-    body: "I created the group, added roles, and uploaded the new avatar.",
-    time: "09:31",
-    mine: false,
-    status: "seen"
+    body: "Assalam o Alaikum, the new ChatSphere UI is ready.",
+    time: "10:53 am",
+    mine: false
   },
   {
     id: "m2",
-    author: "You",
-    body: "Perfect. I am checking read receipts and typing events now.",
-    time: "09:34",
-    mine: true,
-    status: "delivered"
+    body: "Great. Phone login first, then this chat screen.",
+    time: "10:54 am",
+    mine: true
   },
   {
     id: "m3",
-    author: "Maya",
-    body: "The contacts search feels fast. Blocking and reporting are visible in profile actions.",
-    time: "09:38",
-    mine: false,
-    status: "seen"
+    body: "Contacts and groups will appear here after real database integration.",
+    time: "10:55 am",
+    mine: false
   },
   {
     id: "m4",
-    author: "You",
-    body: "Great. I will connect uploads to Supabase buckets after API auth is locked.",
-    time: "09:40",
-    mine: true,
-    status: "sent"
+    body: "Perfect. Next we connect real OTP and user sessions.",
+    time: "10:56 am",
+    mine: true
   }
 ];
-
-export const modules = [
-  { label: "Private Chat", value: "1:1 messages", icon: CheckCheck },
-  { label: "Groups", value: "Roles and invites", icon: Users },
-  { label: "Media", value: "Images and files", icon: Image },
-  { label: "Voice Notes", value: "Storage-ready", icon: Mic },
-  { label: "Moderation", value: "Reports queue", icon: ShieldAlert },
-  { label: "Documents", value: "Secure uploads", icon: FileText }
-];
-
-export const events = [
-  "connect",
-  "join_chat",
-  "send_message",
-  "typing",
-  "delivered",
-  "seen",
-  "online",
-  "new_message"
-];
-
-export const contacts = [
-  { name: "Hamza Ali", status: "Online", meta: "Backend engineer" },
-  { name: "Lina Torres", status: "Away", meta: "Product manager" },
-  { name: "Noah Reed", status: "Blocked", meta: "Spam report pending" }
-];
-
-export const health = [
-  { label: "Latency target", value: "<300ms", state: "ready" },
-  { label: "Availability", value: "99.9%", state: "ready" },
-  { label: "JWT auth", value: "Planned", state: "pending" },
-  { label: "Rate limits", value: "Planned", state: "pending" }
-];
-
-export { CircleDot };
