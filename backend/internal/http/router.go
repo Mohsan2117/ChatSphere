@@ -26,9 +26,11 @@ func NewRouter(cfg config.Config, hub *realtime.Hub) *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	router.GET("/health", func(c *gin.Context) {
+	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "chatsphere-api"})
-	})
+	}
+	router.GET("/", healthHandler)
+	router.GET("/health", healthHandler)
 	router.GET("/ws", func(c *gin.Context) {
 		realtime.Serve(c.Writer, c.Request, hub)
 	})
