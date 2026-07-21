@@ -28,6 +28,9 @@ export function AppShell() {
   const [authStep, setAuthStep] = useState<AuthStep>("email");
   const [email, setEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState(chats[0]?.id ?? "");
   const [hasMessages] = useState(true);
 
@@ -37,24 +40,62 @@ export function AppShell() {
     setIsAuthed(window.localStorage.getItem("chatsphere-auth") === "true");
   }, []);
 
-  function requestCode(event: FormEvent<HTMLFormElement>) {
+  async function requestCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!email.includes("@")) return;
-    setAuthStep("code");
+    setAuthError("");
+    setAuthMessage("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/auth/email/request-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not send code");
+      setAuthMessage("Check your inbox for the ChatSphere verification code.");
+      setAuthStep("code");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not send code");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  function verifyCode(event: FormEvent<HTMLFormElement>) {
+  async function verifyCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (verificationCode.trim().length < 4) return;
-    window.localStorage.setItem("chatsphere-auth", "true");
-    setIsAuthed(true);
+    setAuthError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/auth/email/verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code: verificationCode })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Invalid code");
+      window.localStorage.setItem("chatsphere-auth", "true");
+      window.localStorage.setItem("chatsphere-email", email);
+      setIsAuthed(true);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Invalid code");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function logout() {
     window.localStorage.removeItem("chatsphere-auth");
+    window.localStorage.removeItem("chatsphere-email");
     setIsAuthed(false);
     setAuthStep("email");
     setVerificationCode("");
+    setAuthMessage("");
+    setAuthError("");
   }
 
   if (!isAuthed) {
@@ -107,15 +148,17 @@ export function AppShell() {
                   />
                 </label>
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
-                  Send email code
-                  <Send size={18} />
+                  {isSubmitting ? "Sending code..." : "Send email code"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
                 </button>
                 <p className="text-xs leading-5 text-[#8696a0]">
-                  Production will send this code with Brevo after the backend API key is connected.
+                  We will send a 6-digit login code to your inbox.
                 </p>
+                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : (
               <form className="mt-5 space-y-4" onSubmit={verifyCode}>
+                {authMessage ? <p className="rounded-md bg-[#00a884]/10 px-3 py-2 text-sm text-[#98ffd4]">{authMessage}</p> : null}
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Verification code</span>
                   <input
@@ -127,9 +170,10 @@ export function AppShell() {
                   />
                 </label>
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
-                  Verify and continue
-                  <Loader2 size={18} />
+                  {isSubmitting ? "Checking code..." : "Verify and continue"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                 </button>
+                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             )}
           </div>
@@ -272,4 +316,8 @@ export function AppShell() {
       </section>
     </main>
   );
+}
+
+function apiUrl() {
+  return process.env.NEXT_PUBLIC_API_URL ?? "https://chatsphere-production-a4fd.up.railway.app";
 }

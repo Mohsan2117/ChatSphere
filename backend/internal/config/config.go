@@ -11,6 +11,9 @@ type Config struct {
 	MongoURI       string
 	SupabaseURL    string
 	SupabaseKey    string
+	BrevoAPIKey    string
+	BrevoSenderEmail string
+	BrevoSenderName  string
 }
 
 func Load() Config {
@@ -23,6 +26,9 @@ func Load() Config {
 		MongoURI:       os.Getenv("MONGO_URI"),
 		SupabaseURL:    os.Getenv("SUPABASE_URL"),
 		SupabaseKey:    os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		BrevoAPIKey:    os.Getenv("BREVO_API_KEY"),
+		BrevoSenderEmail: os.Getenv("BREVO_SENDER_EMAIL"),
+		BrevoSenderName:  env("BREVO_SENDER_NAME", "ChatSphere"),
 	}
 }
 

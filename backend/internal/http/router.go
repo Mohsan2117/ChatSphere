@@ -36,7 +36,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub) *gin.Engine {
 	})
 
 	api := router.Group("/api/v1")
-	registerAuthRoutes(api.Group("/auth"))
+	registerAuthRoutes(api.Group("/auth"), cfg)
 	registerUserRoutes(api.Group("/users"))
 	registerProfileRoutes(api.Group("/profile"))
 	registerContactRoutes(api.Group("/contacts"))
@@ -48,7 +48,8 @@ func NewRouter(cfg config.Config, hub *realtime.Hub) *gin.Engine {
 	return router
 }
 
-func registerAuthRoutes(group *gin.RouterGroup) {
+func registerAuthRoutes(group *gin.RouterGroup, cfg config.Config) {
+	newEmailAuthHandler(cfg).register(group)
 	group.POST("/register", accepted("register user"))
 	group.POST("/login", accepted("login user"))
 	group.POST("/refresh", accepted("refresh token"))
