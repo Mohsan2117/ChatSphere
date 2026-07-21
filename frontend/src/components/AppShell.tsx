@@ -10,7 +10,7 @@ import {
   MessageCircle,
   MoreVertical,
   Paperclip,
-  Phone,
+  Mail,
   Plus,
   Search,
   Send,
@@ -21,13 +21,13 @@ import {
 } from "lucide-react";
 import { chats, emptyContacts, messages } from "@/lib/data";
 
-type AuthStep = "phone" | "otp";
+type AuthStep = "email" | "code";
 
 export function AppShell() {
   const [isAuthed, setIsAuthed] = useState(false);
-  const [authStep, setAuthStep] = useState<AuthStep>("phone");
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
+  const [authStep, setAuthStep] = useState<AuthStep>("email");
+  const [email, setEmail] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
   const [selectedChatId, setSelectedChatId] = useState(chats[0]?.id ?? "");
   const [hasMessages] = useState(true);
 
@@ -39,13 +39,13 @@ export function AppShell() {
 
   function requestCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (phone.trim().length < 8) return;
-    setAuthStep("otp");
+    if (!email.includes("@")) return;
+    setAuthStep("code");
   }
 
   function verifyCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (otp.trim().length < 4) return;
+    if (verificationCode.trim().length < 4) return;
     window.localStorage.setItem("chatsphere-auth", "true");
     setIsAuthed(true);
   }
@@ -53,8 +53,8 @@ export function AppShell() {
   function logout() {
     window.localStorage.removeItem("chatsphere-auth");
     setIsAuthed(false);
-    setAuthStep("phone");
-    setOtp("");
+    setAuthStep("email");
+    setVerificationCode("");
   }
 
   if (!isAuthed) {
@@ -67,12 +67,12 @@ export function AppShell() {
             </div>
             <h1 className="mt-8 text-4xl font-bold tracking-normal sm:text-5xl">ChatSphere</h1>
             <p className="mt-4 max-w-xl text-lg leading-8 text-[#c3d0d6]">
-              Sign in with your phone number, verify a one-time code, and open your private chats, groups, contacts, and shared media.
+              Create an account with email, verify a one-time code, and open your private chats, groups, contacts, and shared media.
             </p>
             <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-3">
               {[
-                ["Phone only", Phone],
-                ["OTP secure", ShieldCheck],
+                ["Email account", Mail],
+                ["Code secure", ShieldCheck],
                 ["Realtime chat", CheckCheck]
               ].map(([label, Icon]) => (
                 <div key={label as string} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
@@ -85,32 +85,33 @@ export function AppShell() {
 
           <div className="rounded-lg border border-white/10 bg-[#111b21] p-5 shadow-2xl">
             <div className="border-b border-white/10 pb-5">
-              <h2 className="text-2xl font-bold">{authStep === "phone" ? "Login or signup" : "Enter code"}</h2>
+              <h2 className="text-2xl font-bold">{authStep === "email" ? "Login or signup" : "Enter email code"}</h2>
               <p className="mt-2 text-sm leading-6 text-[#aebac1]">
-                {authStep === "phone"
-                  ? "Use your mobile number. Email login is not required."
-                  : `We sent a demo verification code to ${phone}.`}
+                {authStep === "email"
+                  ? "Use your email address to create an account or sign in."
+                  : `We sent a demo verification code to ${email}.`}
               </p>
             </div>
 
-            {authStep === "phone" ? (
+            {authStep === "email" ? (
               <form className="mt-5 space-y-4" onSubmit={requestCode}>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Phone number</span>
+                  <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
                   <input
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
                     className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
-                    placeholder="+92 300 1234567"
-                    inputMode="tel"
+                    placeholder="you@example.com"
+                    inputMode="email"
+                    type="email"
                   />
                 </label>
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
-                  Send verification code
+                  Send email code
                   <Send size={18} />
                 </button>
                 <p className="text-xs leading-5 text-[#8696a0]">
-                  Production can send this code by SMS or WhatsApp after a provider is connected.
+                  Production will send this code with Brevo after the backend API key is connected.
                 </p>
               </form>
             ) : (
@@ -118,8 +119,8 @@ export function AppShell() {
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Verification code</span>
                   <input
-                    value={otp}
-                    onChange={(event) => setOtp(event.target.value)}
+                    value={verificationCode}
+                    onChange={(event) => setVerificationCode(event.target.value)}
                     className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
                     placeholder="123456"
                     inputMode="numeric"
@@ -129,8 +130,8 @@ export function AppShell() {
                   Verify and continue
                   <Loader2 size={18} />
                 </button>
-                <button type="button" onClick={() => setAuthStep("phone")} className="h-11 w-full rounded-md border border-white/10 text-sm font-bold text-[#d1d7db]">
-                  Change phone number
+                <button type="button" onClick={() => setAuthStep("email")} className="h-11 w-full rounded-md border border-white/10 text-sm font-bold text-[#d1d7db]">
+                  Change email address
                 </button>
               </form>
             )}
