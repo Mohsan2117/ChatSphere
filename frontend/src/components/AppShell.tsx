@@ -130,9 +130,6 @@ export function AppShell() {
                   Verify and continue
                   <Loader2 size={18} />
                 </button>
-                <button type="button" onClick={() => setAuthStep("email")} className="h-11 w-full rounded-md border border-white/10 text-sm font-bold text-[#d1d7db]">
-                  Change email address
-                </button>
               </form>
             )}
           </div>
