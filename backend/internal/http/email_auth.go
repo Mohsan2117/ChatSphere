@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/mail"
@@ -150,6 +151,13 @@ func (h *emailAuthHandler) sendBrevoCode(email string, code string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		var brevoError struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(body, &brevoError); err == nil && brevoError.Message != "" {
+			return fmt.Errorf(brevoError.Message)
+		}
 		return fmt.Errorf("brevo rejected the email request")
 	}
 
