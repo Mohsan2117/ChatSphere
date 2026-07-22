@@ -35,7 +35,7 @@ type emailAuthHandler struct {
 
 func newEmailAuthHandler(cfg config.Config) *emailAuthHandler {
 	return &emailAuthHandler{
-		cfg: cfg,
+		cfg:   cfg,
 		store: &emailCodeStore{codes: make(map[string]emailCode)},
 	}
 }
@@ -121,12 +121,9 @@ func (h *emailAuthHandler) sendBrevoCode(email string, code string) error {
 			"name":  h.cfg.BrevoSenderName,
 			"email": h.cfg.BrevoSenderEmail,
 		},
-		"to": []map[string]string{{"email": email}},
-		"subject": "Your ChatSphere verification code",
-		"htmlContent": fmt.Sprintf(
-			`<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827"><h2>ChatSphere verification</h2><p>Your verification code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:4px">%s</p><p>This code expires in 10 minutes.</p></div>`,
-			code,
-		),
+		"to":          []map[string]string{{"email": email}},
+		"subject":     "Your ChatSphere verification code",
+		"htmlContent": verificationEmailHTML(code),
 		"textContent": fmt.Sprintf("Your ChatSphere verification code is %s. This code expires in 10 minutes.", code),
 	}
 
@@ -162,6 +159,44 @@ func (h *emailAuthHandler) sendBrevoCode(email string, code string) error {
 	}
 
 	return nil
+}
+
+func verificationEmailHTML(code string) string {
+	return fmt.Sprintf(`<!doctype html>
+<html>
+  <body style="margin:0;background:#07130f;color:#f4fbf7;font-family:Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background:#07130f;padding:28px 14px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#111b21;border:1px solid rgba(255,255,255,.10);border-radius:20px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.32);">
+            <tr>
+              <td style="background:#0b141a;padding:26px 24px 18px;border-bottom:1px solid rgba(255,255,255,.08);">
+                <div style="display:inline-block;background:#00a884;color:#06130f;border-radius:12px;padding:10px 13px;font-size:22px;font-weight:900;">CS</div>
+                <div style="margin-top:18px;font-size:26px;line-height:1.2;font-weight:900;color:#ffffff;">ChatSphere</div>
+                <div style="margin-top:7px;font-size:14px;line-height:1.6;color:#aebac1;">Secure email verification</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:28px 24px 30px;">
+                <h1 style="margin:0 0 12px;font-size:25px;line-height:1.25;color:#ffffff;">Your login code</h1>
+                <p style="margin:0 0 22px;font-size:15px;line-height:1.7;color:#c9d4d9;">Use this one-time code to continue signing in to ChatSphere.</p>
+                <div style="background:#0b141a;border:1px solid rgba(0,168,132,.45);border-radius:18px;padding:20px 12px;text-align:center;">
+                  <div style="font-size:36px;line-height:1.15;letter-spacing:10px;font-weight:900;color:#ffffff;">%s</div>
+                </div>
+                <p style="margin:22px 0 0;font-size:14px;line-height:1.7;color:#aebac1;">This code expires in 10 minutes. If you did not request it, you can safely ignore this email.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#0b141a;padding:16px 24px;border-top:1px solid rgba(255,255,255,.08);font-size:12px;line-height:1.6;color:#7f9199;">
+                Sent by ChatSphere authentication.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`, code)
 }
 
 func normalizeEmail(email string) string {
