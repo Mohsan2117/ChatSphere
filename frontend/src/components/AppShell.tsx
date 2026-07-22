@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import {
   CheckCheck,
   FileText,
@@ -16,12 +16,13 @@ import {
   Send,
   ShieldCheck,
   Smile,
+  Upload,
   UserPlus,
   Users
 } from "lucide-react";
 import { chats, emptyContacts, messages } from "@/lib/data";
 
-type AuthStep = "email" | "code";
+type AuthStep = "email" | "code" | "profile";
 
 export function AppShell() {
   const [isAuthed, setIsAuthed] = useState(false);
@@ -31,17 +32,38 @@ export function AppShell() {
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resendSeconds, setResendSeconds] = useState(0);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const [profileError, setProfileError] = useState("");
   const [selectedChatId, setSelectedChatId] = useState(chats[0]?.id ?? "");
   const [hasMessages] = useState(true);
 
   const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) ?? chats[0], [selectedChatId]);
 
   useEffect(() => {
-    setIsAuthed(window.localStorage.getItem("chatsphere-auth") === "true");
+    const hasVerifiedEmail = window.localStorage.getItem("chatsphere-auth") === "true";
+    const hasProfile = window.localStorage.getItem("chatsphere-profile-complete") === "true";
+    const savedEmail = window.localStorage.getItem("chatsphere-email");
+
+    if (savedEmail) setEmail(savedEmail);
+    setIsAuthed(hasVerifiedEmail && hasProfile);
+    if (hasVerifiedEmail && !hasProfile) setAuthStep("profile");
   }, []);
 
-  async function requestCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  useEffect(() => {
+    if (resendSeconds <= 0) return;
+
+    const timer = window.setInterval(() => {
+      setResendSeconds((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [resendSeconds]);
+
+  async function sendCode() {
     if (!email.includes("@")) return;
     setAuthError("");
     setAuthMessage("");
@@ -55,13 +77,20 @@ export function AppShell() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Could not send code");
-      setAuthMessage("Check your inbox for the ChatSphere verification code.");
+      setAuthMessage("Code sent. Check your inbox, spam, or promotions folder.");
       setAuthStep("code");
+      setVerificationCode("");
+      setResendSeconds(60);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Could not send code");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function requestCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await sendCode();
   }
 
   async function verifyCode(event: FormEvent<HTMLFormElement>) {
@@ -80,9 +109,59 @@ export function AppShell() {
       if (!response.ok) throw new Error(data.error ?? "Invalid code");
       window.localStorage.setItem("chatsphere-auth", "true");
       window.localStorage.setItem("chatsphere-email", email);
-      setIsAuthed(true);
+      setAuthStep("profile");
+      setAuthMessage("");
+      setAuthError("");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Invalid code");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function chooseAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  }
+
+  async function completeProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!firstName.trim()) {
+      setProfileError("First name is required");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setProfileError("");
+
+    try {
+      const formData = new FormData();
+      formData.set("email", email);
+      formData.set("firstName", firstName.trim());
+      formData.set("lastName", lastName.trim());
+      if (avatarFile) formData.set("avatar", avatarFile);
+
+      const response = await fetch(`${apiUrl()}/api/v1/profile/onboarding`, {
+        method: "POST",
+        body: formData
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not save profile");
+
+      window.localStorage.setItem("chatsphere-profile-complete", "true");
+      window.localStorage.setItem(
+        "chatsphere-profile",
+        JSON.stringify({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          avatarPreview
+        })
+      );
+      setIsAuthed(true);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "Could not save profile");
     } finally {
       setIsSubmitting(false);
     }
@@ -91,11 +170,19 @@ export function AppShell() {
   function logout() {
     window.localStorage.removeItem("chatsphere-auth");
     window.localStorage.removeItem("chatsphere-email");
+    window.localStorage.removeItem("chatsphere-profile-complete");
+    window.localStorage.removeItem("chatsphere-profile");
     setIsAuthed(false);
     setAuthStep("email");
     setVerificationCode("");
     setAuthMessage("");
     setAuthError("");
+    setResendSeconds(0);
+    setFirstName("");
+    setLastName("");
+    setAvatarFile(null);
+    setAvatarPreview("");
+    setProfileError("");
   }
 
   if (!isAuthed) {
@@ -126,11 +213,15 @@ export function AppShell() {
 
           <div className="rounded-lg border border-white/10 bg-[#111b21] p-5 shadow-2xl">
             <div className="border-b border-white/10 pb-5">
-              <h2 className="text-2xl font-bold">{authStep === "email" ? "Login or signup" : "Enter email code"}</h2>
+              <h2 className="text-2xl font-bold">
+                {authStep === "email" ? "Login or signup" : authStep === "code" ? "Enter email code" : "Create your profile"}
+              </h2>
               <p className="mt-2 text-sm leading-6 text-[#aebac1]">
                 {authStep === "email"
                   ? "Use your email address to create an account or sign in."
-                  : `We sent a demo verification code to ${email}.`}
+                  : authStep === "code"
+                    ? `Enter the 6-digit code sent to ${email}.`
+                    : "Add your name and profile photo before opening chats."}
               </p>
             </div>
 
@@ -156,6 +247,51 @@ export function AppShell() {
                 </p>
                 {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
+            ) : authStep === "profile" ? (
+              <form className="mt-5 space-y-4" onSubmit={completeProfile}>
+                <div className="flex items-center gap-4 rounded-md border border-white/10 bg-[#0b141a] p-4">
+                  <label className="grid h-20 w-20 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-full border border-white/10 bg-[#202c33] text-[#00a884]">
+                    {avatarPreview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img alt="Profile preview" className="h-full w-full object-cover" src={avatarPreview} />
+                    ) : (
+                      <Upload size={28} />
+                    )}
+                    <input accept="image/*" className="hidden" onChange={chooseAvatar} type="file" />
+                  </label>
+                  <div className="min-w-0">
+                    <div className="font-bold text-white">Profile picture</div>
+                    <div className="mt-1 text-sm leading-5 text-[#aebac1]">Upload a photo so contacts can recognize you.</div>
+                  </div>
+                </div>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">First name</span>
+                  <input
+                    value={firstName}
+                    onChange={(event) => setFirstName(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
+                    placeholder="Ahsan"
+                    type="text"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">
+                    Last name <span className="text-[#8696a0]">(optional)</span>
+                  </span>
+                  <input
+                    value={lastName}
+                    onChange={(event) => setLastName(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
+                    placeholder="Khan"
+                    type="text"
+                  />
+                </label>
+                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
+                  {isSubmitting ? "Saving profile..." : "Done / Continue"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
+                </button>
+                {profileError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{profileError}</p> : null}
+              </form>
             ) : (
               <form className="mt-5 space-y-4" onSubmit={verifyCode}>
                 {authMessage ? <p className="rounded-md bg-[#00a884]/10 px-3 py-2 text-sm text-[#98ffd4]">{authMessage}</p> : null}
@@ -164,11 +300,23 @@ export function AppShell() {
                   <input
                     value={verificationCode}
                     onChange={(event) => setVerificationCode(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
+                    className="mt-2 h-14 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-center text-2xl font-bold tracking-[0.35em] text-white outline-none placeholder:text-[#8696a0]"
                     placeholder="123456"
+                    maxLength={6}
                     inputMode="numeric"
                   />
                 </label>
+                <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/10 bg-[#0b141a] px-3 py-2 text-sm text-[#aebac1]">
+                  <span>{resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Did not get the code?"}</span>
+                  <button
+                    className="rounded-md px-3 py-2 font-bold text-[#00a884] disabled:cursor-not-allowed disabled:text-[#64757d]"
+                    disabled={resendSeconds > 0 || isSubmitting}
+                    onClick={sendCode}
+                    type="button"
+                  >
+                    Resend
+                  </button>
+                </div>
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
                   {isSubmitting ? "Checking code..." : "Verify and continue"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}

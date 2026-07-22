@@ -2,6 +2,8 @@ package http
 
 import (
 	"net/http"
+	"net/mail"
+	"strings"
 	"time"
 
 	"chatsphere/backend/internal/config"
@@ -64,9 +66,46 @@ func registerUserRoutes(group *gin.RouterGroup) {
 
 func registerProfileRoutes(group *gin.RouterGroup) {
 	group.GET("", accepted("get profile"))
+	group.POST("/onboarding", completeOnboarding)
 	group.PATCH("", accepted("update profile"))
 	group.PATCH("/privacy", accepted("update privacy"))
 	group.PATCH("/status", accepted("update status"))
+}
+
+func completeOnboarding(c *gin.Context) {
+	if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "profile request is too large"})
+		return
+	}
+
+	email := normalizeEmail(c.PostForm("email"))
+	firstName := strings.TrimSpace(c.PostForm("firstName"))
+	lastName := strings.TrimSpace(c.PostForm("lastName"))
+
+	if _, err := mail.ParseAddress(email); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		return
+	}
+	if firstName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "first name is required"})
+		return
+	}
+
+	avatarUploaded := false
+	file, err := c.FormFile("avatar")
+	if err == nil && file.Size > 0 {
+		avatarUploaded = true
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "completed",
+		"profile": gin.H{
+			"email":          email,
+			"firstName":      firstName,
+			"lastName":       lastName,
+			"avatarUploaded": avatarUploaded,
+		},
+	})
 }
 
 func registerContactRoutes(group *gin.RouterGroup) {
