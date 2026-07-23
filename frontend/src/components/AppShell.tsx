@@ -1,7 +1,8 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   CheckCheck,
   FileText,
   Image,
@@ -11,7 +12,6 @@ import {
   MoreVertical,
   Paperclip,
   Mail,
-  Plus,
   Search,
   Send,
   ShieldCheck,
@@ -20,13 +20,29 @@ import {
   UserPlus,
   Users
 } from "lucide-react";
-import { chats, emptyContacts, messages } from "@/lib/data";
+import { chats } from "@/lib/data";
+import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 
-type AuthStep = "email" | "code" | "profile";
+type AuthStep = "signup" | "login" | "code" | "profile";
+type ChatMessage = {
+  id: string;
+  body: string;
+  time: string;
+  mine: boolean;
+  senderEmail?: string;
+  attachment?: {
+    name: string;
+    type: string;
+    url: string;
+    kind: "image" | "video" | "file";
+  };
+};
+type MessageStore = Record<string, ChatMessage[]>;
+type WorkspaceMode = "inbox" | "search" | "contacts" | "files";
 
 export function AppShell() {
   const [isAuthed, setIsAuthed] = useState(false);
-  const [authStep, setAuthStep] = useState<AuthStep>("email");
+  const [authStep, setAuthStep] = useState<AuthStep>("signup");
   const [email, setEmail] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -35,13 +51,70 @@ export function AppShell() {
   const [resendSeconds, setResendSeconds] = useState(0);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState("");
   const [profileError, setProfileError] = useState("");
-  const [selectedChatId, setSelectedChatId] = useState(chats[0]?.id ?? "");
-  const [hasMessages] = useState(true);
+  const [selectedChatId, setSelectedChatId] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
+  const [messageDraft, setMessageDraft] = useState("");
+  const [attachmentDraft, setAttachmentDraft] = useState<ChatMessage["attachment"] | null>(null);
+  const [isEmojiOpen, setIsEmojiOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<MessageStore>({});
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("inbox");
+  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
+  const [chatMessageSearch, setChatMessageSearch] = useState("");
+  const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null);
+  const chatSearchRef = useRef<HTMLInputElement | null>(null);
+  const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
 
-  const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) ?? chats[0], [selectedChatId]);
+  const searchResults = useMemo(() => {
+    const query = chatSearch.trim().toLowerCase();
+    if (!query) return [];
+    return chats.filter((chat) => chat.name.toLowerCase().includes(query));
+  }, [chatSearch]);
+  const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId), [selectedChatId]);
+  const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
+  const visibleSelectedMessages = useMemo(() => {
+    const query = chatMessageSearch.trim().toLowerCase();
+    if (!query) return selectedMessages;
+    return selectedMessages.filter((message) =>
+      `${message.body} ${message.attachment?.name ?? ""}`.toLowerCase().includes(query)
+    );
+  }, [chatMessageSearch, selectedMessages]);
+  const inboxChats = useMemo(() => {
+    return chats
+      .filter((chat) => (chatMessages[chat.id] ?? []).length > 0)
+      .sort((first, second) => {
+        const firstMessages = chatMessages[first.id] ?? [];
+        const secondMessages = chatMessages[second.id] ?? [];
+        return (secondMessages.at(-1)?.id ?? "").localeCompare(firstMessages.at(-1)?.id ?? "");
+      });
+  }, [chatMessages]);
+  const contactResults = useMemo(() => {
+    const query = chatSearch.trim().toLowerCase();
+    if (!query) return chats;
+    return chats.filter((chat) => chat.name.toLowerCase().includes(query));
+  }, [chatSearch]);
+  const userInitials = useMemo(() => initials(firstName, lastName), [firstName, lastName]);
+  const attachedMessages = useMemo(() => {
+    return Object.entries(chatMessages).flatMap(([chatId, messages]) =>
+      messages
+        .filter((message) => message.attachment)
+        .map((message) => ({
+          chat: chats.find((chat) => chat.id === chatId),
+          message
+        }))
+    );
+  }, [chatMessages]);
+  const workspaceTitle = {
+    inbox: "Inbox",
+    search: "Search",
+    contacts: "Contacts",
+    files: "Files"
+  }[workspaceMode];
 
   useEffect(() => {
     const hasVerifiedEmail = window.localStorage.getItem("chatsphere-auth") === "true";
@@ -52,6 +125,71 @@ export function AppShell() {
     setIsAuthed(hasVerifiedEmail && hasProfile);
     if (hasVerifiedEmail && !hasProfile) setAuthStep("profile");
   }, []);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    setSelectedChatId("");
+    setChatSearch("");
+  }, [isAuthed]);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("chatsphere-messages");
+    if (!saved) return;
+    try {
+      setChatMessages(JSON.parse(saved) as MessageStore);
+    } catch {
+      setChatMessages({});
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("chatsphere-messages", JSON.stringify(chatMessages));
+  }, [chatMessages]);
+
+  useEffect(() => {
+    if (!isAuthed || !email) return;
+
+    const socket = new WebSocket(wsUrl());
+    socketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as {
+          type?: string;
+          conversationId?: string;
+          payload?: ChatMessage;
+        };
+        if (data.type !== "chat.message" || !data.conversationId || !data.payload) return;
+        if (!data.payload.id || !data.payload.body || !data.payload.time) return;
+        if (data.payload.senderEmail === email) return;
+
+        setChatMessages((current) => {
+          const conversationId = data.conversationId as string;
+          const incomingMessage: ChatMessage = {
+            id: data.payload?.id as string,
+            body: data.payload?.body as string,
+            time: data.payload?.time as string,
+            mine: false,
+            senderEmail: data.payload?.senderEmail,
+            attachment: data.payload?.attachment
+          };
+          const existing = current[conversationId] ?? [];
+          if (existing.some((message) => message.id === incomingMessage.id)) return current;
+          return {
+            ...current,
+            [conversationId]: [...existing, incomingMessage]
+          };
+        });
+      } catch {
+        // Ignore malformed realtime events from older clients.
+      }
+    };
+
+    return () => {
+      socket.close();
+      if (socketRef.current === socket) socketRef.current = null;
+    };
+  }, [email, isAuthed]);
 
   useEffect(() => {
     if (resendSeconds <= 0) return;
@@ -90,7 +228,69 @@ export function AppShell() {
 
   async function requestCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!firstName.trim()) {
+      setAuthError("First name is required");
+      return;
+    }
+    if (!email.includes("@")) {
+      setAuthError("Enter a valid email");
+      return;
+    }
+    if (password.length < 8) {
+      setAuthError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setAuthError("Passwords do not match");
+      return;
+    }
     await sendCode();
+  }
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!email.includes("@")) {
+      setAuthError("Enter a valid email");
+      return;
+    }
+    if (password.length < 8) {
+      setAuthError("Enter your password");
+      return;
+    }
+
+    setAuthError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Invalid email or password");
+
+      const user = data.user ?? {};
+      setFirstName(user.firstName ?? "");
+      setLastName(user.lastName ?? "");
+      setAvatarPreview(user.avatarUrl && !String(user.avatarUrl).startsWith("uploaded:") ? user.avatarUrl : "");
+      window.localStorage.setItem("chatsphere-auth", "true");
+      window.localStorage.setItem("chatsphere-email", user.email ?? email);
+      window.localStorage.setItem("chatsphere-profile-complete", "true");
+      window.localStorage.setItem(
+        "chatsphere-profile",
+        JSON.stringify({
+          firstName: user.firstName ?? "",
+          lastName: user.lastName ?? "",
+          avatarPreview: user.avatarUrl ?? ""
+        })
+      );
+      setIsAuthed(true);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not login");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function verifyCode(event: FormEvent<HTMLFormElement>) {
@@ -126,10 +326,32 @@ export function AppShell() {
     setAvatarPreview(URL.createObjectURL(file));
   }
 
+  function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";
+    setAttachmentDraft({
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      url: URL.createObjectURL(file),
+      kind
+    });
+  }
+
   async function completeProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!firstName.trim()) {
       setProfileError("First name is required");
+      return;
+    }
+    if (password.length < 8) {
+      setProfileError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setProfileError("Passwords do not match");
       return;
     }
 
@@ -141,6 +363,7 @@ export function AppShell() {
       formData.set("email", email);
       formData.set("firstName", firstName.trim());
       formData.set("lastName", lastName.trim());
+      formData.set("password", password);
       if (avatarFile) formData.set("avatar", avatarFile);
 
       const response = await fetch(`${apiUrl()}/api/v1/profile/onboarding`, {
@@ -151,14 +374,17 @@ export function AppShell() {
       if (!response.ok) throw new Error(data.error ?? "Could not save profile");
 
       window.localStorage.setItem("chatsphere-profile-complete", "true");
+      const profile = data.profile ?? {};
       window.localStorage.setItem(
         "chatsphere-profile",
         JSON.stringify({
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
+          firstName: profile.firstName ?? firstName.trim(),
+          lastName: profile.lastName ?? lastName.trim(),
           avatarPreview
         })
       );
+      setSelectedChatId("");
+      setChatSearch("");
       setIsAuthed(true);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "Could not save profile");
@@ -167,30 +393,120 @@ export function AppShell() {
     }
   }
 
+  function sendChatMessage() {
+    const body = messageDraft.trim();
+    if ((!body && !attachmentDraft) || !selectedChatId) return;
+
+    const message: ChatMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      body,
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      mine: true,
+      senderEmail: email,
+      attachment: attachmentDraft ?? undefined
+    };
+
+    setChatMessages((current) => ({
+      ...current,
+      [selectedChatId]: [...(current[selectedChatId] ?? []), message]
+    }));
+    setMessageDraft("");
+    setAttachmentDraft(null);
+    setIsEmojiOpen(false);
+
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({
+          type: "chat.message",
+          conversationId: selectedChatId,
+          payload: message
+        })
+      );
+    }
+  }
+
+  function sendOnEnter(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    sendChatMessage();
+  }
+
+  function addEmoji(emoji: EmojiClickData) {
+    setMessageDraft((draft) => `${draft}${emoji.emoji}`);
+  }
+
   function logout() {
     window.localStorage.removeItem("chatsphere-auth");
     window.localStorage.removeItem("chatsphere-email");
     window.localStorage.removeItem("chatsphere-profile-complete");
     window.localStorage.removeItem("chatsphere-profile");
     setIsAuthed(false);
-    setAuthStep("email");
+    setAuthStep("signup");
     setVerificationCode("");
     setAuthMessage("");
     setAuthError("");
     setResendSeconds(0);
     setFirstName("");
     setLastName("");
+    setPassword("");
+    setConfirmPassword("");
     setAvatarFile(null);
     setAvatarPreview("");
     setProfileError("");
+    setSelectedChatId("");
+    setChatSearch("");
+    setIsChatSearchOpen(false);
+    setChatMessageSearch("");
+    setIsChatMenuOpen(false);
+  }
+
+  function openWorkspace(mode: WorkspaceMode) {
+    setWorkspaceMode(mode);
+    setChatSearch("");
+    if (mode === "inbox") {
+      return;
+    }
+    if (mode === "search") {
+      window.setTimeout(() => chatSearchRef.current?.focus(), 0);
+    }
+  }
+
+  function toggleChatSearch() {
+    setIsChatSearchOpen((open) => {
+      const nextOpen = !open;
+      if (nextOpen) {
+        window.setTimeout(() => chatMessageSearchRef.current?.focus(), 0);
+      } else {
+        setChatMessageSearch("");
+      }
+      return nextOpen;
+    });
+  }
+
+  function clearCurrentChat() {
+    if (!selectedChatId) return;
+    setChatMessages((current) => {
+      const next = { ...current };
+      delete next[selectedChatId];
+      return next;
+    });
+    setIsChatMenuOpen(false);
+  }
+
+  function closeCurrentChat() {
+    setSelectedChatId("");
+    setIsChatSearchOpen(false);
+    setChatMessageSearch("");
+    setIsChatMenuOpen(false);
   }
 
   if (!isAuthed) {
     return (
-      <main className="min-h-screen bg-[#0b141a] text-white">
-        <section className="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_420px]">
+      <main className="min-h-screen bg-[#07130f] text-white">
+        <section className="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
           <div className="max-w-2xl">
-            <div className="flex h-14 w-14 items-center justify-center rounded-md bg-[#00a884] text-[#0b141a]">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#00a884] text-[#07130f] shadow-[0_18px_50px_rgba(0,168,132,.25)]">
               <MessageCircle size={31} />
             </div>
             <h1 className="mt-8 text-4xl font-bold tracking-normal sm:text-5xl">ChatSphere</h1>
@@ -211,44 +527,153 @@ export function AppShell() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-white/10 bg-[#111b21] p-5 shadow-2xl">
+          <div className="rounded-2xl border border-white/10 bg-[#101b17] p-6 shadow-[0_30px_90px_rgba(0,0,0,.38)]">
+            {(authStep === "signup" || authStep === "login") ? (
+              <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/10 bg-[#07130f] p-1">
+                <button
+                  className={`h-10 rounded-lg text-sm font-bold ${authStep === "signup" ? "bg-[#00a884] text-[#06130f]" : "text-[#aebac1]"}`}
+                  onClick={() => {
+                    setAuthStep("signup");
+                    setAuthError("");
+                  }}
+                  type="button"
+                >
+                  Signup
+                </button>
+                <button
+                  className={`h-10 rounded-lg text-sm font-bold ${authStep === "login" ? "bg-[#00a884] text-[#06130f]" : "text-[#aebac1]"}`}
+                  onClick={() => {
+                    setAuthStep("login");
+                    setAuthError("");
+                  }}
+                  type="button"
+                >
+                  Login
+                </button>
+              </div>
+            ) : null}
+
             <div className="border-b border-white/10 pb-5">
               <h2 className="text-2xl font-bold">
-                {authStep === "email" ? "Login or signup" : authStep === "code" ? "Enter email code" : "Create your profile"}
+                {authStep === "signup" ? "Create account" : authStep === "login" ? "Login" : authStep === "code" ? "Enter email code" : "Profile picture"}
               </h2>
               <p className="mt-2 text-sm leading-6 text-[#aebac1]">
-                {authStep === "email"
-                  ? "Use your email address to create an account or sign in."
+                {authStep === "signup"
+                  ? "Enter your details first. We will send the OTP after signup."
+                  : authStep === "login"
+                    ? "Already have an account? Use your email and password."
                   : authStep === "code"
                     ? `Enter the 6-digit code sent to ${email}.`
-                    : "Add your name and profile photo before opening chats."}
+                    : "Add a profile photo before opening chats."}
               </p>
             </div>
 
-            {authStep === "email" ? (
-              <form className="mt-5 space-y-4" onSubmit={requestCode}>
+            {authStep === "signup" ? (
+              <form className="mt-5 space-y-5" onSubmit={requestCode}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">First name</span>
+                  <input
+                    value={firstName}
+                    onChange={(event) => setFirstName(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Enter first name"
+                    type="text"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">
+                    Last name <span className="text-[#8696a0]">(optional)</span>
+                  </span>
+                  <input
+                    value={lastName}
+                    onChange={(event) => setLastName(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Enter last name"
+                    type="text"
+                  />
+                </label>
+                </div>
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
                   <input
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
                     placeholder="you@example.com"
                     inputMode="email"
                     type="email"
                   />
                 </label>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
-                  {isSubmitting ? "Sending code..." : "Send email code"}
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Set password</span>
+                  <input
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Create password"
+                    type="password"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Confirm password</span>
+                  <input
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Repeat password"
+                    type="password"
+                  />
+                </label>
+                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                  {isSubmitting ? "Creating account..." : "Signup"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
                 </button>
-                <p className="text-xs leading-5 text-[#8696a0]">
-                  We will send a 6-digit login code to your inbox.
-                </p>
+                <p className="rounded-xl border border-white/10 bg-[#07130f] px-3 py-2 text-xs leading-5 text-[#8696a0]">After signup, we will send a 6-digit code to your Gmail.</p>
+                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+              </form>
+            ) : authStep === "login" ? (
+              <form className="mt-5 space-y-5" onSubmit={login}>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
+                  <input
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="you@example.com"
+                    inputMode="email"
+                    type="email"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Password</span>
+                  <input
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Enter password"
+                    type="password"
+                  />
+                </label>
+                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                  Login
+                  <ShieldCheck size={18} />
+                </button>
                 {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : authStep === "profile" ? (
               <form className="mt-5 space-y-4" onSubmit={completeProfile}>
+                <div className="rounded-md border border-white/10 bg-[#0b141a] p-4">
+                  <div className="text-sm font-bold text-[#00a884]">Account details</div>
+                  <div className="mt-3 space-y-2 text-sm text-[#d1d7db]">
+                    <div>
+                      <span className="text-[#8696a0]">Name:</span> {firstName} {lastName}
+                    </div>
+                    <div>
+                      <span className="text-[#8696a0]">Email:</span> {email}
+                    </div>
+                  </div>
+                </div>
                 <div className="flex items-center gap-4 rounded-md border border-white/10 bg-[#0b141a] p-4">
                   <label className="grid h-20 w-20 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-full border border-white/10 bg-[#202c33] text-[#00a884]">
                     {avatarPreview ? (
@@ -264,30 +689,8 @@ export function AppShell() {
                     <div className="mt-1 text-sm leading-5 text-[#aebac1]">Upload a photo so contacts can recognize you.</div>
                   </div>
                 </div>
-                <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">First name</span>
-                  <input
-                    value={firstName}
-                    onChange={(event) => setFirstName(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
-                    placeholder="Ahsan"
-                    type="text"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">
-                    Last name <span className="text-[#8696a0]">(optional)</span>
-                  </span>
-                  <input
-                    value={lastName}
-                    onChange={(event) => setLastName(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-white outline-none placeholder:text-[#8696a0]"
-                    placeholder="Khan"
-                    type="text"
-                  />
-                </label>
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
-                  {isSubmitting ? "Saving profile..." : "Done / Continue"}
+                  {isSubmitting ? "Saving profile..." : "Continue to chats"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                 </button>
                 {profileError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{profileError}</p> : null}
@@ -331,141 +734,371 @@ export function AppShell() {
   }
 
   return (
-    <main className="min-h-screen bg-[#111b21] text-[#e9edef]">
-      <section className="grid min-h-screen lg:grid-cols-[505px_minmax(0,1fr)]">
-        <aside className="border-r border-[#313d45] bg-[#111b21]">
-          <header className="flex items-center justify-between px-7 py-7">
-            <h1 className="text-3xl font-bold tracking-normal">Chats</h1>
-            <div className="flex items-center gap-5 text-[#d1d7db]">
-              <button aria-label="New chat" className="hover:text-white">
-                <Plus size={25} />
+    <main className="min-h-screen bg-[#eef1f5] text-[#18212f]">
+      <section className="grid min-h-screen lg:grid-cols-[86px_350px_minmax(0,1fr)] xl:grid-cols-[92px_390px_minmax(0,1fr)]">
+        <aside className="hidden border-r border-[#dce1e8] bg-[#111827] px-3 py-5 text-white lg:block">
+          <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#00a884] text-lg font-black text-[#06130f]">C</div>
+          <nav className="mt-8 space-y-3">
+            {[
+              { label: "Inbox", mode: "inbox" as const, icon: MessageCircle },
+              { label: "Search", mode: "search" as const, icon: Search },
+              { label: "Contacts", mode: "contacts" as const, icon: Users },
+              { label: "Files", mode: "files" as const, icon: FileText }
+            ].map(({ icon: Icon, label, mode }) => {
+              return (
+              <button
+                aria-label={label}
+                className={`grid h-11 w-11 place-items-center rounded-xl ${workspaceMode === mode ? "bg-white text-[#111827]" : "text-[#94a3b8] hover:bg-white/10 hover:text-white"}`}
+                key={mode}
+                onClick={() => openWorkspace(mode)}
+                title={label}
+                type="button"
+              >
+                <Icon size={20} />
               </button>
-              <button aria-label="Logout" className="hover:text-white" onClick={logout}>
-                <LogOut size={22} />
-              </button>
-              <button aria-label="More options" className="hover:text-white">
-                <MoreVertical size={25} />
-              </button>
+            );})}
+          </nav>
+          <button aria-label="Logout" className="mt-auto grid h-11 w-11 place-items-center rounded-xl text-[#94a3b8] hover:bg-white/10 hover:text-white" onClick={logout}>
+            <LogOut size={20} />
+          </button>
+        </aside>
+
+        <aside className={`min-h-screen border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+          <header className="border-b border-[#e5e9f0] px-5 py-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere</p>
+                <h1 className="mt-2 text-2xl font-black tracking-normal">{workspaceTitle}</h1>
+              </div>
+              <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-[#e7f8f2] text-sm font-black text-[#008f70]" title="Your profile">
+                {avatarPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img alt="Your profile" className="h-full w-full object-cover" src={avatarPreview} />
+                ) : (
+                  userInitials
+                )}
+              </div>
             </div>
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              {[
+                ["Me", "0"],
+                ["Open", String(inboxChats.length)],
+                ["All", String(chats.length)]
+              ].map(([label, count], index) => (
+                <button key={label} className={`rounded-xl border px-3 py-2 text-left ${index === 1 ? "border-[#00a884] bg-[#e7f8f2]" : "border-[#e5e9f0] bg-[#f7f9fb]"}`} type="button">
+                  <div className="text-xs font-bold text-[#64748b]">{label}</div>
+                  <div className="mt-1 text-lg font-black">{count}</div>
+                </button>
+              ))}
+            </div>
+            <label className="mt-5 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b]">
+              <Search size={19} />
+              <input
+                ref={chatSearchRef}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
+                onChange={(event) => setChatSearch(event.target.value)}
+                placeholder="Search by name"
+                value={chatSearch}
+              />
+            </label>
           </header>
 
-          <div className="px-7">
-            <label className="flex h-14 items-center gap-4 rounded-full bg-[#2a3942] px-5 text-[#aebac1]">
-              <Search size={24} />
-              <input className="w-full bg-transparent text-lg outline-none placeholder:text-[#aebac1]" placeholder="Search or start a new chat" />
-            </label>
-          </div>
-
-          <div className="flex gap-2 px-7 py-4">
-            {["All", "Unread", "Favourites"].map((filter, index) => (
-              <button
-                key={filter}
-                className={`rounded-full border px-4 py-2 text-lg font-semibold ${
-                  index === 0 ? "border-[#0b6b56] bg-[#0b3b31] text-[#98ffd4]" : "border-[#2a3942] text-[#aebac1]"
-                }`}
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-
-          <div className="h-[calc(100vh-188px)] overflow-y-auto px-3 pb-5">
-            {(hasMessages ? chats : emptyContacts).map((chat) => (
-              <button
-                key={chat.id}
-                onClick={() => setSelectedChatId(chat.id)}
-                className={`flex w-full items-center gap-5 rounded-lg px-5 py-4 text-left ${
-                  selectedChatId === chat.id ? "ring-2 ring-[#00a884]" : "hover:bg-[#202c33]"
-                }`}
-              >
-                <span className={`grid h-16 w-16 shrink-0 place-items-center rounded-full ${chat.color} text-xl font-bold text-white`}>
-                  {chat.avatar}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between gap-3">
-                    <strong className="truncate text-xl">{chat.name}</strong>
-                    <span className="text-sm font-semibold text-[#aebac1]">{chat.time}</span>
-                  </span>
-                  <span className="mt-2 flex items-center justify-between gap-3">
-                    <span className="truncate text-lg text-[#aebac1]">{chat.preview}</span>
-                    {chat.unread ? <span className="rounded-full bg-[#00a884] px-2 py-0.5 text-xs font-bold text-[#06130f]">{chat.unread}</span> : null}
-                  </span>
-                </span>
-              </button>
-            ))}
+          <div className="px-3 py-4">
+            <div className="mb-3 flex items-center justify-between px-2">
+              <h2 className="text-sm font-black">
+                {workspaceMode === "files" ? "Shared files" : workspaceMode === "contacts" ? "All contacts" : "Open conversations"}
+              </h2>
+              <span className="text-xs font-bold text-[#94a3b8]">{workspaceMode === "files" ? attachedMessages.length : workspaceMode === "contacts" ? contactResults.length : "Date"}</span>
+            </div>
+            {workspaceMode === "files" ? (
+              <div className="space-y-2">
+                {attachedMessages.length ? (
+                  attachedMessages.map(({ chat, message }) => (
+                    <button
+                      className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3 text-left transition hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
+                      key={message.id}
+                      onClick={() => chat && setSelectedChatId(chat.id)}
+                      type="button"
+                    >
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70]">
+                        <FileText size={20} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate text-sm">{message.attachment?.name}</strong>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat?.name ?? "Unknown chat"} - {message.time}</span>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
+                      <FileText size={24} />
+                    </div>
+                    <h2 className="mt-5 text-base font-black">No files yet</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#64748b]">Images, videos, and documents you send will show here.</p>
+                  </div>
+                )}
+              </div>
+            ) : workspaceMode === "contacts" ? (
+              <div className="space-y-2">
+                {contactResults.length ? (
+                  contactResults.map((chat) => (
+                    <button
+                      key={chat.id}
+                      onClick={() => setSelectedChatId(chat.id)}
+                      className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                        selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
+                      }`}
+                      type="button"
+                    >
+                      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${chat.color} text-sm font-black text-white`}>{chat.avatar}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <strong className="truncate text-sm">{chat.name}</strong>
+                          <span className="text-xs font-bold text-[#00a884]">{chat.online ? "online" : "offline"}</span>
+                        </span>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat.online ? "Online now" : "Offline"}</span>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-8 text-center text-sm text-[#64748b]">No contact found. Try another name or email.</div>
+                )}
+              </div>
+            ) : chatSearch.trim() ? (
+              <div className="space-y-2">
+                {searchResults.length ? (
+                  searchResults.map((chat) => (
+                    <button
+                      key={chat.id}
+                      onClick={() => setSelectedChatId(chat.id)}
+                      className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                        selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
+                      }`}
+                    >
+                      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${chat.color} text-sm font-black text-white`}>{chat.avatar}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <strong className="truncate text-sm">{chat.name}</strong>
+                          <span className="text-xs font-bold text-[#94a3b8]">{chatMessages[chat.id]?.at(-1)?.time ?? "new"}</span>
+                        </span>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat.online ? "Online now" : "Offline"}</span>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-8 text-center text-sm text-[#64748b]">No user found. Try another name or email.</div>
+                )}
+              </div>
+            ) : workspaceMode === "inbox" ? (
+              <div className="space-y-2">
+                {inboxChats.length ? (
+                  inboxChats.map((chat) => {
+                    const lastMessage = chatMessages[chat.id]?.at(-1);
+                    return (
+                      <button
+                        key={chat.id}
+                        onClick={() => setSelectedChatId(chat.id)}
+                        className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                          selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
+                        }`}
+                        type="button"
+                      >
+                        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${chat.color} text-sm font-black text-white`}>{chat.avatar}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center justify-between gap-2">
+                            <strong className="truncate text-sm">{chat.name}</strong>
+                            <span className="text-xs font-bold text-[#94a3b8]">{lastMessage?.time}</span>
+                          </span>
+                          <span className="mt-1 block truncate text-sm text-[#64748b]">{lastMessage?.body || lastMessage?.attachment?.name || "Attachment"}</span>
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
+                      <MessageCircle size={24} />
+                    </div>
+                    <h2 className="mt-5 text-base font-black">Inbox is empty</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#64748b]">People appear here after you send or receive a message.</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
+                  <Search size={24} />
+                </div>
+                <h2 className="mt-5 text-base font-black">Find someone to message</h2>
+                <p className="mt-2 text-sm leading-6 text-[#64748b]">Search by name or email to open the first chat.</p>
+              </div>
+            )}
           </div>
         </aside>
 
-        <section className="flex min-h-screen flex-col bg-[#0b141a]">
+        <section className={`min-h-screen flex-col bg-[#f7f9fb] ${selectedChat ? "flex" : "hidden lg:flex"}`}>
           {selectedChat ? (
             <>
-              <header className="flex h-[77px] items-center justify-between border-b border-[#202c33] bg-[#202c33] px-6">
-                <div className="flex min-w-0 items-center gap-4">
-                  <span className={`grid h-12 w-12 place-items-center rounded-full ${selectedChat.color} font-bold text-white`}>{selectedChat.avatar}</span>
+              <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
+                <div className={`min-w-0 items-center gap-3 sm:gap-4 ${isChatSearchOpen ? "hidden sm:flex" : "flex"}`}>
+                  <button aria-label="Back to chats" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={closeCurrentChat} type="button">
+                    <ArrowLeft size={22} />
+                  </button>
+                  <span className={`grid h-12 w-12 place-items-center rounded-2xl ${selectedChat.color} font-black text-white`}>{selectedChat.avatar}</span>
                   <div className="min-w-0">
-                    <h2 className="truncate text-xl font-bold">{selectedChat.name}</h2>
-                    <p className="text-sm text-[#aebac1]">{selectedChat.online ? "online" : "last seen recently"}</p>
+                    <h2 className="truncate text-xl font-black">{selectedChat.name}</h2>
+                    <p className={`text-sm font-semibold ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : "Offline"}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-6 text-[#d1d7db]">
-                  <Search size={24} />
-                  <MoreVertical size={24} />
+                <div className={`relative flex min-w-0 items-center justify-end gap-2 text-[#64748b] sm:gap-4 ${isChatSearchOpen ? "flex-1" : ""}`}>
+                  {isChatSearchOpen ? (
+                    <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 sm:w-72 sm:flex-none">
+                      <Search size={18} />
+                      <input
+                        ref={chatMessageSearchRef}
+                        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
+                        onChange={(event) => setChatMessageSearch(event.target.value)}
+                        placeholder="Search this chat"
+                        value={chatMessageSearch}
+                      />
+                    </label>
+                  ) : null}
+                  <button aria-label="Search this chat" className="grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={toggleChatSearch} type="button">
+                    <Search size={23} />
+                  </button>
+                  <button aria-label="Chat options" className="grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={() => setIsChatMenuOpen((open) => !open)} type="button">
+                    <MoreVertical size={23} />
+                  </button>
+                  {isChatMenuOpen ? (
+                    <div className="absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white py-2 text-sm font-bold text-[#334155] shadow-[0_18px_45px_rgba(15,23,42,.14)]">
+                      <div className="border-b border-[#edf1f5] px-4 py-3">
+                        <div className="truncate text-[#18212f]">{selectedChat.name}</div>
+                        <div className={`mt-1 text-xs ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : "Offline"}</div>
+                      </div>
+                      <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={toggleChatSearch} type="button">Search messages</button>
+                      <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={clearCurrentChat} type="button">Clear chat</button>
+                      <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={closeCurrentChat} type="button">Close chat</button>
+                    </div>
+                  ) : null}
                 </div>
               </header>
 
-              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-6">
-                <div className="mx-auto w-fit rounded-md bg-[#182229] px-3 py-2 text-sm text-[#aebac1]">Today</div>
-                {messages.map((message) => (
-                  <div key={message.id} className={`flex ${message.mine ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[70%] rounded-md px-4 py-2 shadow ${message.mine ? "bg-[#005c4b]" : "bg-[#202c33]"}`}>
-                      <p className="text-base leading-7">{message.body}</p>
-                      <div className="mt-1 flex justify-end gap-1 text-xs text-[#aebac1]">
-                        {message.time}
-                        {message.mine ? <CheckCheck size={16} className="text-[#53bdeb]" /> : null}
+              <div className="flex-1 overflow-y-auto px-6 py-8">
+                <div className="mx-auto mb-8 w-fit rounded-full border border-[#dce1e8] bg-white px-4 py-2 text-xs font-bold text-[#64748b]">Conversation started</div>
+                {visibleSelectedMessages.length ? (
+                  <div className="space-y-4">
+                    {visibleSelectedMessages.map((message) => (
+                      <div key={message.id} className={`flex ${message.mine ? "justify-end" : "justify-start"}`}>
+                        <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+                          {message.attachment ? <AttachmentPreview attachment={message.attachment} /> : null}
+                          {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
+                          <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
+                            {message.time}
+                            {message.mine ? <CheckCheck size={15} className="text-[#00a884]" /> : null}
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <div className="mx-auto mt-20 max-w-md rounded-3xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center text-sm leading-6 text-[#64748b]">
+                    <MessageCircle className="mx-auto text-[#00a884]" size={34} />
+                    <h3 className="mt-4 text-lg font-black text-[#18212f]">{chatMessageSearch.trim() ? "No matching messages" : "No messages yet"}</h3>
+                    <p className="mt-2">{chatMessageSearch.trim() ? "Try a different word from this conversation." : "Write the first message below. Attachments and emojis are ready."}</p>
+                  </div>
+                )}
               </div>
 
-              <footer className="flex min-h-[72px] items-center gap-3 bg-[#202c33] px-5">
-                <button aria-label="Emoji" className="text-[#aebac1]">
-                  <Smile size={26} />
-                </button>
-                <button aria-label="Attach" className="text-[#aebac1]">
-                  <Paperclip size={26} />
-                </button>
-                <input className="h-12 min-w-0 flex-1 rounded-lg bg-[#2a3942] px-5 text-lg outline-none placeholder:text-[#aebac1]" placeholder="Type a message" />
-                <button aria-label="Send" className="grid h-12 w-12 place-items-center rounded-full bg-[#00a884] text-[#06130f]">
-                  <Send size={22} />
-                </button>
+              <footer className="relative border-t border-[#e5e9f0] bg-white px-5 py-4">
+                {isEmojiOpen ? (
+                  <div className="absolute bottom-[92px] left-5 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl">
+                    <EmojiPicker height={390} onEmojiClick={addEmoji} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
+                  </div>
+                ) : null}
+                {attachmentDraft ? (
+                  <div className="mb-3 flex items-center justify-between rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
+                    <div className="min-w-0 truncate">
+                      <span className="font-black text-[#00a884]">{attachmentDraft.kind.toUpperCase()}</span> {attachmentDraft.name}
+                    </div>
+                    <button className="ml-3 text-[#64748b] hover:text-[#18212f]" onClick={() => setAttachmentDraft(null)} type="button">Remove</button>
+                  </div>
+                ) : null}
+                <div className="flex w-full items-center gap-3">
+                  <button aria-label="Emoji" className={`grid h-11 w-11 place-items-center rounded-xl border border-[#dce1e8] ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "bg-white text-[#64748b]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
+                    <Smile size={23} />
+                  </button>
+                  <label aria-label="Attach file" className="grid h-11 w-11 cursor-pointer place-items-center rounded-xl border border-[#dce1e8] bg-white text-[#64748b] hover:text-[#18212f]">
+                    <Paperclip size={23} />
+                    <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />
+                  </label>
+                  <div className="flex min-w-0 flex-1 overflow-hidden rounded-xl border border-[#dce1e8] bg-[#f8fafc] focus-within:border-[#00a884] focus-within:bg-white">
+                    <input
+                      className="h-12 min-w-0 flex-1 border-0 bg-transparent px-4 text-sm outline-none placeholder:text-[#94a3b8]"
+                      onChange={(event) => setMessageDraft(event.target.value)}
+                      onKeyDown={sendOnEnter}
+                      placeholder="Write a message"
+                      value={messageDraft}
+                    />
+                    <button aria-label="Send" className="flex h-12 items-center gap-2 bg-[#00a884] px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!messageDraft.trim() && !attachmentDraft} onClick={sendChatMessage}>
+                      <span>Send</span>
+                      <Send size={18} />
+                    </button>
+                  </div>
+                </div>
               </footer>
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center">
-              <div className="grid grid-cols-3 gap-14 text-center">
-                {[
-                  ["Send document", FileText],
-                  ["Add contact", UserPlus],
-                  ["Create group", Users],
-                  ["Share media", Image]
-                ].map(([label, Icon]) => (
-                  <button key={label as string} className="group">
-                    <span className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-[#2a3942] text-[#d1d7db] group-hover:bg-[#00a884] group-hover:text-[#06130f]">
-                      <Icon size={32} />
-                    </span>
-                    <span className="mt-4 block text-lg font-semibold">{label as string}</span>
-                  </button>
-                ))}
+            <div className="flex flex-1 items-center justify-center px-6">
+              <div className="max-w-lg text-center">
+                <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-white text-[#00a884] shadow-sm">
+                  <MessageCircle size={36} />
+                </div>
+                <h2 className="mt-6 text-3xl font-black tracking-normal">No conversation selected</h2>
+                <p className="mt-3 text-base leading-7 text-[#64748b]">Search a user from the inbox queue. The active conversation will appear here.</p>
               </div>
             </div>
           )}
         </section>
+
       </section>
     </main>
   );
 }
 
 function apiUrl() {
-  return process.env.NEXT_PUBLIC_API_URL ?? "https://chatsphere-production-a4fd.up.railway.app";
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") return "http://localhost:8080";
+  return "https://chatsphere-production-a4fd.up.railway.app";
+}
+
+function wsUrl() {
+  const base = apiUrl();
+  return `${base.replace(/^http/, "ws").replace(/\/$/, "")}/ws`;
+}
+
+function AttachmentPreview({ attachment }: { attachment: NonNullable<ChatMessage["attachment"]> }) {
+  if (attachment.kind === "image") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img alt={attachment.name} className="mb-3 max-h-64 rounded-md object-cover" src={attachment.url} />
+    );
+  }
+
+  if (attachment.kind === "video") {
+    return <video className="mb-3 max-h-64 rounded-md" controls src={attachment.url} />;
+  }
+
+  return (
+    <a className="mb-3 flex items-center gap-3 rounded-md border border-white/10 bg-black/10 px-3 py-3 text-sm text-white" href={attachment.url} download={attachment.name}>
+      <FileText size={20} />
+      <span className="min-w-0 truncate">{attachment.name}</span>
+    </a>
+  );
+}
+
+function initials(firstName: string, lastName: string) {
+  const first = firstName.trim()[0] ?? "C";
+  const last = lastName.trim()[0] ?? "";
+  return `${first}${last}`.toUpperCase();
 }

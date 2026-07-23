@@ -8,12 +8,13 @@ import (
 
 	"chatsphere/backend/internal/config"
 	"chatsphere/backend/internal/realtime"
+	"chatsphere/backend/internal/store"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-func NewRouter(cfg config.Config, hub *realtime.Hub) *gin.Engine {
+func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gin.Engine {
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -38,9 +39,9 @@ func NewRouter(cfg config.Config, hub *realtime.Hub) *gin.Engine {
 	})
 
 	api := router.Group("/api/v1")
-	registerAuthRoutes(api.Group("/auth"), cfg)
+	registerAuthRoutes(api.Group("/auth"), cfg, dataStore)
 	registerUserRoutes(api.Group("/users"))
-	registerProfileRoutes(api.Group("/profile"))
+	registerProfileRoutes(api.Group("/profile"), dataStore)
 	registerContactRoutes(api.Group("/contacts"))
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"))
@@ -50,13 +51,37 @@ func NewRouter(cfg config.Config, hub *realtime.Hub) *gin.Engine {
 	return router
 }
 
-func registerAuthRoutes(group *gin.RouterGroup, cfg config.Config) {
+func registerAuthRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
 	newEmailAuthHandler(cfg).register(group)
 	group.POST("/register", accepted("register user"))
-	group.POST("/login", accepted("login user"))
+	group.POST("/login", loginUser(dataStore))
 	group.POST("/refresh", accepted("refresh token"))
 	group.POST("/logout", accepted("logout user"))
 	group.POST("/forgot-password", accepted("start password reset"))
+}
+
+func loginUser(dataStore *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+
+		user, err := dataStore.Authenticate(normalizeEmail(body.Email), body.Password)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+			"user":   publicUser(user),
+		})
+	}
 }
 
 func registerUserRoutes(group *gin.RouterGroup) {
@@ -64,48 +89,72 @@ func registerUserRoutes(group *gin.RouterGroup) {
 	group.GET("/:id", accepted("get user"))
 }
 
-func registerProfileRoutes(group *gin.RouterGroup) {
+func registerProfileRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 	group.GET("", accepted("get profile"))
-	group.POST("/onboarding", completeOnboarding)
+	group.POST("/onboarding", completeOnboarding(dataStore))
 	group.PATCH("", accepted("update profile"))
 	group.PATCH("/privacy", accepted("update privacy"))
 	group.PATCH("/status", accepted("update status"))
 }
 
-func completeOnboarding(c *gin.Context) {
-	if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile request is too large"})
-		return
-	}
+func completeOnboarding(dataStore *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "profile request is too large"})
+			return
+		}
 
-	email := normalizeEmail(c.PostForm("email"))
-	firstName := strings.TrimSpace(c.PostForm("firstName"))
-	lastName := strings.TrimSpace(c.PostForm("lastName"))
+		email := normalizeEmail(c.PostForm("email"))
+		firstName := strings.TrimSpace(c.PostForm("firstName"))
+		lastName := strings.TrimSpace(c.PostForm("lastName"))
+		password := strings.TrimSpace(c.PostForm("password"))
 
-	if _, err := mail.ParseAddress(email); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
-		return
-	}
-	if firstName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "first name is required"})
-		return
-	}
+		if _, err := mail.ParseAddress(email); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+			return
+		}
+		if firstName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "first name is required"})
+			return
+		}
+		if len(password) < 8 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 8 characters"})
+			return
+		}
 
-	avatarUploaded := false
-	file, err := c.FormFile("avatar")
-	if err == nil && file.Size > 0 {
-		avatarUploaded = true
-	}
+		avatarURL := ""
+		avatarUploaded := false
+		file, err := c.FormFile("avatar")
+		if err == nil && file.Size > 0 {
+			avatarUploaded = true
+			avatarURL = "uploaded:" + file.Filename
+		}
 
-	c.JSON(http.StatusOK, gin.H{
-		"status": "completed",
-		"profile": gin.H{
-			"email":          email,
-			"firstName":      firstName,
-			"lastName":       lastName,
+		user, err := dataStore.UpsertUser(email, firstName, lastName, password, avatarURL)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save profile"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":         "completed",
+			"profile":        publicUser(user),
 			"avatarUploaded": avatarUploaded,
-		},
-	})
+			"passwordSet":    true,
+		})
+	}
+}
+
+func publicUser(user store.User) gin.H {
+	return gin.H{
+		"id":        user.ID,
+		"email":     user.Email,
+		"firstName": user.FirstName,
+		"lastName":  user.LastName,
+		"avatarUrl": user.AvatarURL,
+		"createdAt": user.CreatedAt,
+		"updatedAt": user.UpdatedAt,
+	}
 }
 
 func registerContactRoutes(group *gin.RouterGroup) {
