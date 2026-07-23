@@ -20,7 +20,7 @@ import {
   UserPlus,
   Users
 } from "lucide-react";
-import { chats } from "@/lib/data";
+import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 
 type AuthStep = "signup" | "login" | "code" | "profile";
@@ -62,6 +62,7 @@ export function AppShell() {
   const [attachmentDraft, setAttachmentDraft] = useState<ChatMessage["attachment"] | null>(null);
   const [isEmojiOpen, setIsEmojiOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<MessageStore>({});
+  const [directoryChats, setDirectoryChats] = useState<ChatSeed[]>([]);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("inbox");
   const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
   const [chatMessageSearch, setChatMessageSearch] = useState("");
@@ -73,9 +74,9 @@ export function AppShell() {
   const searchResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return [];
-    return chats.filter((chat) => chat.name.toLowerCase().includes(query));
-  }, [chatSearch]);
-  const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId), [selectedChatId]);
+    return directoryChats.filter((chat) => chat.name.toLowerCase().includes(query));
+  }, [chatSearch, directoryChats]);
+  const selectedChat = useMemo(() => directoryChats.find((chat) => chat.id === selectedChatId), [directoryChats, selectedChatId]);
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
   const visibleSelectedMessages = useMemo(() => {
     const query = chatMessageSearch.trim().toLowerCase();
@@ -85,30 +86,30 @@ export function AppShell() {
     );
   }, [chatMessageSearch, selectedMessages]);
   const inboxChats = useMemo(() => {
-    return chats
+    return directoryChats
       .filter((chat) => (chatMessages[chat.id] ?? []).length > 0)
       .sort((first, second) => {
         const firstMessages = chatMessages[first.id] ?? [];
         const secondMessages = chatMessages[second.id] ?? [];
         return (secondMessages.at(-1)?.id ?? "").localeCompare(firstMessages.at(-1)?.id ?? "");
       });
-  }, [chatMessages]);
+  }, [chatMessages, directoryChats]);
   const contactResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
-    if (!query) return chats;
-    return chats.filter((chat) => chat.name.toLowerCase().includes(query));
-  }, [chatSearch]);
+    if (!query) return directoryChats;
+    return directoryChats.filter((chat) => chat.name.toLowerCase().includes(query));
+  }, [chatSearch, directoryChats]);
   const userInitials = useMemo(() => initials(firstName, lastName), [firstName, lastName]);
   const attachedMessages = useMemo(() => {
     return Object.entries(chatMessages).flatMap(([chatId, messages]) =>
       messages
         .filter((message) => message.attachment)
         .map((message) => ({
-          chat: chats.find((chat) => chat.id === chatId),
+          chat: directoryChats.find((chat) => chat.id === chatId),
           message
         }))
     );
-  }, [chatMessages]);
+  }, [chatMessages, directoryChats]);
   const workspaceTitle = {
     inbox: "Inbox",
     search: "Search",
@@ -188,6 +189,30 @@ export function AppShell() {
     return () => {
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
+    };
+  }, [email, isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+
+    let cancelled = false;
+    fetch(`${apiUrl()}/api/v1/users`)
+      .then((response) => (response.ok ? response.json() : { users: [] }))
+      .then((data) => {
+        if (cancelled) return;
+        const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
+        setDirectoryChats(
+          users
+            .filter((user) => user.email !== email)
+            .map(userToChat)
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setDirectoryChats([]);
+      });
+
+    return () => {
+      cancelled = true;
     };
   }, [email, isAuthed]);
 
@@ -783,7 +808,7 @@ export function AppShell() {
               {[
                 ["Me", "0"],
                 ["Open", String(inboxChats.length)],
-                ["All", String(chats.length)]
+                ["All", String(directoryChats.length)]
               ].map(([label, count], index) => (
                 <button key={label} className={`rounded-xl border px-3 py-2 text-left ${index === 1 ? "border-[#00a884] bg-[#e7f8f2]" : "border-[#e5e9f0] bg-[#f7f9fb]"}`} type="button">
                   <div className="text-xs font-bold text-[#64748b]">{label}</div>

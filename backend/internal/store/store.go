@@ -106,6 +106,25 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 	return User{}, errors.New("invalid email or password")
 }
 
+func (s *Store) SearchUsers(query string) []User {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	users := make([]User, 0, len(s.data.Users))
+	for _, user := range s.data.Users {
+		fullName := strings.ToLower(strings.TrimSpace(user.FirstName + " " + user.LastName))
+		if query == "" || strings.Contains(fullName, query) || strings.Contains(user.Email, query) {
+			users = append(users, user)
+		}
+	}
+	return users
+}
+
+func (s *Store) AllUsers() []User {
+	return s.SearchUsers("")
+}
+
 func (s *Store) load() error {
 	content, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {

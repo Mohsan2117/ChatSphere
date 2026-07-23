@@ -40,7 +40,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 
 	api := router.Group("/api/v1")
 	registerAuthRoutes(api.Group("/auth"), cfg, dataStore)
-	registerUserRoutes(api.Group("/users"))
+	registerUserRoutes(api.Group("/users"), dataStore)
 	registerProfileRoutes(api.Group("/profile"), dataStore)
 	registerContactRoutes(api.Group("/contacts"))
 	registerGroupRoutes(api.Group("/groups"))
@@ -84,8 +84,16 @@ func loginUser(dataStore *store.Store) gin.HandlerFunc {
 	}
 }
 
-func registerUserRoutes(group *gin.RouterGroup) {
-	group.GET("", accepted("search users"))
+func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	group.GET("", func(c *gin.Context) {
+		query := c.Query("q")
+		users := dataStore.SearchUsers(query)
+		results := make([]gin.H, 0, len(users))
+		for _, user := range users {
+			results = append(results, publicUser(user))
+		}
+		c.JSON(http.StatusOK, gin.H{"users": results})
+	})
 	group.GET("/:id", accepted("get user"))
 }
 
