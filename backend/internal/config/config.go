@@ -12,6 +12,7 @@ type Config struct {
 	JWTSecret      string
 	MySQLDSN       string
 	MongoURI       string
+	DatabaseURL    string
 	SupabaseURL    string
 	SupabaseKey    string
 	BrevoAPIKey    string
@@ -30,6 +31,7 @@ func Load() Config {
 		JWTSecret:      env("JWT_SECRET", "dev-only-secret"),
 		MySQLDSN:       os.Getenv("MYSQL_DSN"),
 		MongoURI:       os.Getenv("MONGO_URI"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		SupabaseURL:    os.Getenv("SUPABASE_URL"),
 		SupabaseKey:    os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
 		BrevoAPIKey:    os.Getenv("BREVO_API_KEY"),

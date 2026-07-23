@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -18,6 +20,7 @@ type Store struct {
 	mu   sync.Mutex
 	path string
 	data dataFile
+	db   *pgxpool.Pool
 }
 
 type dataFile struct {
@@ -36,8 +39,33 @@ type User struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-func New(path string) (*Store, error) {
+type Message struct {
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversationId"`
+	SenderEmail    string    `json:"senderEmail"`
+	RecipientID    string    `json:"recipientId"`
+	Body           string    `json:"body"`
+	AttachmentName string    `json:"attachmentName,omitempty"`
+	AttachmentType string    `json:"attachmentType,omitempty"`
+	AttachmentKind string    `json:"attachmentKind,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+func New(path string, databaseURL string) (*Store, error) {
 	s := &Store{path: path}
+	if strings.TrimSpace(databaseURL) != "" {
+		pool, err := pgxpool.New(context.Background(), databaseURL)
+		if err != nil {
+			return nil, err
+		}
+		s.db = pool
+		if err := s.migrate(context.Background()); err != nil {
+			pool.Close()
+			return nil, err
+		}
+		return s, nil
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -48,6 +76,10 @@ func New(path string) (*Store, error) {
 }
 
 func (s *Store) UpsertUser(email, firstName, lastName, password, avatarURL string) (User, error) {
+	if s.db != nil {
+		return s.upsertUserDB(email, firstName, lastName, password, avatarURL)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -92,6 +124,10 @@ func (s *Store) UpsertUser(email, firstName, lastName, password, avatarURL strin
 }
 
 func (s *Store) Authenticate(email, password string) (User, error) {
+	if s.db != nil {
+		return s.authenticateDB(email, password)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -111,6 +147,11 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 }
 
 func (s *Store) SearchUsers(query string) []User {
+	if s.db != nil {
+		users, _ := s.searchUsersDB(query, false)
+		return users
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -129,6 +170,11 @@ func (s *Store) SearchUsers(query string) []User {
 }
 
 func (s *Store) AllUsers() []User {
+	if s.db != nil {
+		users, _ := s.searchUsersDB("", true)
+		return users
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -138,6 +184,16 @@ func (s *Store) AllUsers() []User {
 }
 
 func (s *Store) DeleteUser(id string) bool {
+	if s.db != nil {
+		var email string
+		if err := s.db.QueryRow(context.Background(), `select email from app_users where id = $1`, id).Scan(&email); err != nil {
+			return false
+		}
+		_, _ = s.db.Exec(context.Background(), `delete from messages where sender_email = $1 or recipient_id = $2`, email, id)
+		result, err := s.db.Exec(context.Background(), `delete from app_users where id = $1`, id)
+		return err == nil && result.RowsAffected() > 0
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -152,6 +208,16 @@ func (s *Store) DeleteUser(id string) bool {
 }
 
 func (s *Store) SetUserBlocked(id string, blocked bool) (User, bool) {
+	if s.db != nil {
+		var user User
+		err := s.db.QueryRow(context.Background(), `
+			update app_users set blocked = $2, updated_at = now()
+			where id = $1
+			returning id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		`, id, blocked).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+		return user, err == nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -164,6 +230,157 @@ func (s *Store) SetUserBlocked(id string, blocked bool) (User, bool) {
 		}
 	}
 	return User{}, false
+}
+
+func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind string) (Message, error) {
+	if s.db == nil {
+		return Message{}, errors.New("database is not configured")
+	}
+	message := Message{
+		ID:             randomID(),
+		ConversationID: conversationID(senderEmail, recipientID),
+		SenderEmail:    strings.ToLower(strings.TrimSpace(senderEmail)),
+		RecipientID:    strings.TrimSpace(recipientID),
+		Body:           strings.TrimSpace(body),
+		AttachmentName: strings.TrimSpace(attachmentName),
+		AttachmentType: strings.TrimSpace(attachmentType),
+		AttachmentKind: strings.TrimSpace(attachmentKind),
+		CreatedAt:      time.Now().UTC(),
+	}
+	_, err := s.db.Exec(context.Background(), `
+		insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, created_at)
+		values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+	`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.CreatedAt)
+	return message, err
+}
+
+func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
+	if s.db == nil {
+		return []Message{}, nil
+	}
+	rows, err := s.db.Query(context.Background(), `
+		select id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, created_at
+		from messages
+		where conversation_id = $1
+		order by created_at asc
+	`, conversationID(userEmail, otherUserID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := []Message{}
+	for rows.Next() {
+		var message Message
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.CreatedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (s *Store) migrate(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+		create table if not exists app_users (
+			id text primary key,
+			email text unique not null,
+			first_name text not null,
+			last_name text not null default '',
+			password_hash text not null,
+			avatar_url text not null default '',
+			blocked boolean not null default false,
+			created_at timestamptz not null default now(),
+			updated_at timestamptz not null default now()
+		);
+		create table if not exists messages (
+			id text primary key,
+			conversation_id text not null,
+			sender_email text not null,
+			recipient_id text not null,
+			body text not null default '',
+			attachment_name text not null default '',
+			attachment_type text not null default '',
+			attachment_kind text not null default '',
+			created_at timestamptz not null default now()
+		);
+		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at);
+	`)
+	return err
+}
+
+func (s *Store) upsertUserDB(email, firstName, lastName, password, avatarURL string) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+	var user User
+	err = s.db.QueryRow(context.Background(), `
+		insert into app_users (id, email, first_name, last_name, password_hash, avatar_url)
+		values ($1,$2,$3,$4,$5,$6)
+		on conflict (email) do update set
+			first_name = excluded.first_name,
+			last_name = excluded.last_name,
+			password_hash = excluded.password_hash,
+			avatar_url = case when excluded.avatar_url = '' then app_users.avatar_url else excluded.avatar_url end,
+			updated_at = now()
+		returning id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+	`, randomID(), email, strings.TrimSpace(firstName), strings.TrimSpace(lastName), string(passwordHash), avatarURL).
+		Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+	return user, err
+}
+
+func (s *Store) authenticateDB(email, password string) (User, error) {
+	var user User
+	err := s.db.QueryRow(context.Background(), `
+		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		from app_users where email = $1
+	`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		return User{}, errors.New("invalid email or password")
+	}
+	if user.Blocked {
+		return User{}, errors.New("account blocked")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		return User{}, errors.New("invalid email or password")
+	}
+	return user, nil
+}
+
+func (s *Store) searchUsersDB(query string, includeBlocked bool) ([]User, error) {
+	query = strings.ToLower(strings.TrimSpace(query))
+	rows, err := s.db.Query(context.Background(), `
+		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		from app_users
+		where ($1 = '' or lower(first_name || ' ' || last_name) like '%' || $1 || '%' or lower(email) like '%' || $1 || '%')
+		  and ($2 = true or blocked = false)
+		order by created_at desc
+	`, query, includeBlocked)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := []User{}
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func conversationID(email string, otherUserID string) string {
+	left := strings.ToLower(strings.TrimSpace(email))
+	right := strings.TrimSpace(otherUserID)
+	if left < right {
+		return left + ":" + right
+	}
+	return right + ":" + left
 }
 
 func (s *Store) load() error {

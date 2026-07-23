@@ -44,7 +44,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerProfileRoutes(api.Group("/profile"), dataStore)
 	registerContactRoutes(api.Group("/contacts"))
 	registerGroupRoutes(api.Group("/groups"))
-	registerMessageRoutes(api.Group("/messages"))
+	registerMessageRoutes(api.Group("/messages"), dataStore)
 	registerUploadRoutes(api.Group("/upload"))
 	registerAdminRoutes(api.Group("/admin"), dataStore)
 
@@ -181,12 +181,82 @@ func registerGroupRoutes(group *gin.RouterGroup) {
 	group.DELETE("/:id/members/:userId", accepted("remove group member"))
 }
 
-func registerMessageRoutes(group *gin.RouterGroup) {
-	group.GET("/:conversationId", accepted("list messages"))
-	group.POST("", accepted("create message"))
+func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	group.GET("/:recipientId", func(c *gin.Context) {
+		email := normalizeEmail(c.Query("email"))
+		if _, err := mail.ParseAddress(email); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+			return
+		}
+		messages, err := dataStore.ListMessages(email, c.Param("recipientId"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load messages"})
+			return
+		}
+		results := make([]gin.H, 0, len(messages))
+		for _, message := range messages {
+			results = append(results, publicMessage(message, email))
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": results})
+	})
+	group.POST("", func(c *gin.Context) {
+		var body struct {
+			SenderEmail string `json:"senderEmail"`
+			RecipientID string `json:"recipientId"`
+			Body        string `json:"body"`
+			Attachment  struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+				Kind string `json:"kind"`
+			} `json:"attachment"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		email := normalizeEmail(body.SenderEmail)
+		if _, err := mail.ParseAddress(email); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sender email is required"})
+			return
+		}
+		if strings.TrimSpace(body.RecipientID) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "recipient is required"})
+			return
+		}
+		if strings.TrimSpace(body.Body) == "" && strings.TrimSpace(body.Attachment.Name) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "message is empty"})
+			return
+		}
+		message, err := dataStore.SaveMessage(email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, email)})
+	})
 	group.PATCH("/:id", accepted("edit message"))
 	group.DELETE("/:id", accepted("delete message"))
 	group.POST("/:id/reactions", accepted("react to message"))
+}
+
+func publicMessage(message store.Message, viewerEmail string) gin.H {
+	result := gin.H{
+		"id":          message.ID,
+		"body":        message.Body,
+		"time":        message.CreatedAt.Format("3:04 PM"),
+		"mine":        strings.EqualFold(message.SenderEmail, viewerEmail),
+		"senderEmail": message.SenderEmail,
+		"createdAt":   message.CreatedAt,
+	}
+	if message.AttachmentName != "" {
+		result["attachment"] = gin.H{
+			"name": message.AttachmentName,
+			"type": message.AttachmentType,
+			"kind": message.AttachmentKind,
+			"url":  "",
+		}
+	}
+	return result
 }
 
 func registerUploadRoutes(group *gin.RouterGroup) {

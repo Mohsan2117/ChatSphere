@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -153,7 +154,7 @@ func (h *emailAuthHandler) sendBrevoCode(email string, code string) error {
 			Message string `json:"message"`
 		}
 		if err := json.Unmarshal(body, &brevoError); err == nil && brevoError.Message != "" {
-			return fmt.Errorf(brevoError.Message)
+			return errors.New(brevoError.Message)
 		}
 		return fmt.Errorf("brevo rejected the email request")
 	}

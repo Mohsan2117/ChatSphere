@@ -58,6 +58,7 @@ export function AppShell() {
   const [adminError, setAdminError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState("");
   const [adminToken, setAdminToken] = useState("");
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [resendSeconds, setResendSeconds] = useState(0);
@@ -140,8 +141,10 @@ export function AppShell() {
     const hasVerifiedEmail = window.localStorage.getItem("chatsphere-auth") === "true";
     const hasProfile = window.localStorage.getItem("chatsphere-profile-complete") === "true";
     const savedEmail = window.localStorage.getItem("chatsphere-email");
+    const savedUserId = window.localStorage.getItem("chatsphere-user-id");
 
     if (savedEmail) setEmail(savedEmail);
+    if (savedUserId) setCurrentUserId(savedUserId);
     setIsAuthed(hasVerifiedEmail && hasProfile);
     if (hasVerifiedEmail && !hasProfile) setAuthStep("profile");
   }, []);
@@ -156,6 +159,27 @@ export function AppShell() {
     if (!isAdmin || !adminToken) return;
     loadAdminUsers(adminToken);
   }, [adminToken, isAdmin]);
+
+  useEffect(() => {
+    if (!isAuthed || !email || !selectedChatId) return;
+
+    let cancelled = false;
+    fetch(`${apiUrl()}/api/v1/messages/${selectedChatId}?email=${encodeURIComponent(email)}`)
+      .then((response) => (response.ok ? response.json() : { messages: [] }))
+      .then((data) => {
+        if (cancelled) return;
+        const messages = Array.isArray(data.messages) ? data.messages : [];
+        setChatMessages((current) => ({
+          ...current,
+          [selectedChatId]: messages
+        }));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [email, isAuthed, selectedChatId]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("chatsphere-messages");
@@ -324,11 +348,13 @@ export function AppShell() {
       if (!response.ok) throw new Error(data.error ?? "Invalid email or password");
 
       const user = data.user ?? {};
+      setCurrentUserId(user.id ?? "");
       setFirstName(user.firstName ?? "");
       setLastName(user.lastName ?? "");
       setAvatarPreview(user.avatarUrl && !String(user.avatarUrl).startsWith("uploaded:") ? user.avatarUrl : "");
       window.localStorage.setItem("chatsphere-auth", "true");
       window.localStorage.setItem("chatsphere-email", user.email ?? email);
+      window.localStorage.setItem("chatsphere-user-id", user.id ?? "");
       window.localStorage.setItem("chatsphere-profile-complete", "true");
       window.localStorage.setItem(
         "chatsphere-profile",
@@ -417,6 +443,7 @@ export function AppShell() {
       if (!response.ok) throw new Error(data.error ?? "Invalid code");
       window.localStorage.setItem("chatsphere-auth", "true");
       window.localStorage.setItem("chatsphere-email", email);
+      window.localStorage.setItem("chatsphere-user-id", data.user?.id ?? "");
       setAuthStep("profile");
       setAuthMessage("");
       setAuthError("");
@@ -483,6 +510,8 @@ export function AppShell() {
 
       window.localStorage.setItem("chatsphere-profile-complete", "true");
       const profile = data.profile ?? {};
+      setCurrentUserId(profile.id ?? "");
+      window.localStorage.setItem("chatsphere-user-id", profile.id ?? "");
       window.localStorage.setItem(
         "chatsphere-profile",
         JSON.stringify({
@@ -501,7 +530,7 @@ export function AppShell() {
     }
   }
 
-  function sendChatMessage() {
+  async function sendChatMessage() {
     const body = messageDraft.trim();
     if ((!body && !attachmentDraft) || !selectedChatId) return;
 
@@ -521,6 +550,25 @@ export function AppShell() {
     setMessageDraft("");
     setAttachmentDraft(null);
     setIsEmojiOpen(false);
+
+    fetch(`${apiUrl()}/api/v1/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        senderEmail: email,
+        recipientId: selectedChatId,
+        body,
+        attachment: attachmentDraft
+          ? {
+              name: attachmentDraft.name,
+              type: attachmentDraft.type,
+              kind: attachmentDraft.kind
+            }
+          : undefined
+      })
+    }).catch(() => {
+      // Realtime UI remains optimistic; failed persistence can be retried after DB status handling is added.
+    });
 
     const socket = socketRef.current;
     if (socket?.readyState === WebSocket.OPEN) {
@@ -550,10 +598,12 @@ export function AppShell() {
     window.localStorage.removeItem("chatsphere-email");
     window.localStorage.removeItem("chatsphere-profile-complete");
     window.localStorage.removeItem("chatsphere-profile");
+    window.localStorage.removeItem("chatsphere-user-id");
     setIsAuthed(false);
     setIsAdmin(false);
     setAdminToken("");
     setAdminUsers([]);
+    setCurrentUserId("");
     setAuthStep("signup");
     setVerificationCode("");
     setAuthMessage("");

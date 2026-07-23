@@ -11,7 +11,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	dataStore, err := store.New(cfg.DataPath)
+	dataStore, err := store.New(cfg.DataPath, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
