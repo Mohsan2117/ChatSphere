@@ -887,7 +887,7 @@ export function AppShell() {
                     </button>
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-8 text-center text-sm text-[#64748b]">No user found. Try another name or email.</div>
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-8 text-center text-sm text-[#64748b]">No registered user found.</div>
                 )}
               </div>
             ) : workspaceMode === "inbox" ? (
@@ -931,7 +931,7 @@ export function AppShell() {
                   <Search size={24} />
                 </div>
                 <h2 className="mt-5 text-base font-black">Find someone to message</h2>
-                <p className="mt-2 text-sm leading-6 text-[#64748b]">Search by name or email to open the first chat.</p>
+                <p className="mt-2 text-sm leading-6 text-[#64748b]">Registered users will appear here after database search is connected.</p>
               </div>
             )}
           </div>
