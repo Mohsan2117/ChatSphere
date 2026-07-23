@@ -46,7 +46,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"))
 	registerUploadRoutes(api.Group("/upload"))
-	registerAdminRoutes(api.Group("/admin"))
+	registerAdminRoutes(api.Group("/admin"), dataStore)
 
 	return router
 }
@@ -160,6 +160,7 @@ func publicUser(user store.User) gin.H {
 		"firstName": user.FirstName,
 		"lastName":  user.LastName,
 		"avatarUrl": user.AvatarURL,
+		"blocked":   user.Blocked,
 		"createdAt": user.CreatedAt,
 		"updatedAt": user.UpdatedAt,
 	}
@@ -192,9 +193,69 @@ func registerUploadRoutes(group *gin.RouterGroup) {
 	group.POST("", accepted("create signed upload"))
 }
 
-func registerAdminRoutes(group *gin.RouterGroup) {
-	group.GET("/reports", accepted("list moderation reports"))
-	group.POST("/reports/:id/resolve", accepted("resolve report"))
+func registerAdminRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	group.POST("/login", func(c *gin.Context) {
+		var body struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		if strings.TrimSpace(body.Email) != "ChatSphere" || body.Password != "1234123" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin credentials"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": "chatsphere-admin-session"})
+	})
+
+	protected := group.Group("")
+	protected.Use(requireAdmin())
+	protected.GET("/users", func(c *gin.Context) {
+		users := dataStore.AllUsers()
+		results := make([]gin.H, 0, len(users))
+		for _, user := range users {
+			results = append(results, publicUser(user))
+		}
+		c.JSON(http.StatusOK, gin.H{"users": results})
+	})
+	protected.DELETE("/users/:id", func(c *gin.Context) {
+		if !dataStore.DeleteUser(c.Param("id")) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	})
+	protected.POST("/users/:id/block", func(c *gin.Context) {
+		user, ok := dataStore.SetUserBlocked(c.Param("id"), true)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "blocked", "user": publicUser(user)})
+	})
+	protected.POST("/users/:id/unblock", func(c *gin.Context) {
+		user, ok := dataStore.SetUserBlocked(c.Param("id"), false)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "unblocked", "user": publicUser(user)})
+	})
+	protected.GET("/reports", accepted("list moderation reports"))
+	protected.POST("/reports/:id/resolve", accepted("resolve report"))
+}
+
+func requireAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetHeader("Authorization") != "Bearer chatsphere-admin-session" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "admin login required"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 func accepted(action string) gin.HandlerFunc {

@@ -39,6 +39,14 @@ type ChatMessage = {
 };
 type MessageStore = Record<string, ChatMessage[]>;
 type WorkspaceMode = "inbox" | "search" | "contacts" | "files";
+type AdminUser = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName?: string;
+  blocked?: boolean;
+  createdAt?: string;
+};
 
 export function AppShell() {
   const [isAuthed, setIsAuthed] = useState(false);
@@ -47,7 +55,11 @@ export function AppShell() {
   const [verificationCode, setVerificationCode] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [authError, setAuthError] = useState("");
+  const [adminError, setAdminError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminToken, setAdminToken] = useState("");
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [resendSeconds, setResendSeconds] = useState(0);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -118,6 +130,13 @@ export function AppShell() {
   }[workspaceMode];
 
   useEffect(() => {
+    const savedAdminToken = window.localStorage.getItem("chatsphere-admin-token") ?? "";
+    if (savedAdminToken) {
+      setAdminToken(savedAdminToken);
+      setIsAdmin(true);
+      return;
+    }
+
     const hasVerifiedEmail = window.localStorage.getItem("chatsphere-auth") === "true";
     const hasProfile = window.localStorage.getItem("chatsphere-profile-complete") === "true";
     const savedEmail = window.localStorage.getItem("chatsphere-email");
@@ -132,6 +151,11 @@ export function AppShell() {
     setSelectedChatId("");
     setChatSearch("");
   }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isAdmin || !adminToken) return;
+    loadAdminUsers(adminToken);
+  }, [adminToken, isAdmin]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("chatsphere-messages");
@@ -274,6 +298,10 @@ export function AppShell() {
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (email.trim() === "ChatSphere" && password === "1234123") {
+      await loginAdmin();
+      return;
+    }
     if (!email.includes("@")) {
       setAuthError("Enter a valid email");
       return;
@@ -315,6 +343,61 @@ export function AppShell() {
       setAuthError(error instanceof Error ? error.message : "Could not login");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function loginAdmin() {
+    setAuthError("");
+    setAdminError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Invalid admin credentials");
+      const token = data.token ?? "";
+      window.localStorage.setItem("chatsphere-admin-token", token);
+      setAdminToken(token);
+      setIsAdmin(true);
+      await loadAdminUsers(token);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not login as admin");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function loadAdminUsers(token = adminToken) {
+    if (!token) return;
+    setAdminError("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not load users");
+      setAdminUsers(Array.isArray(data.users) ? data.users : []);
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Could not load users");
+    }
+  }
+
+  async function updateAdminUser(id: string, action: "block" | "unblock" | "delete") {
+    setAdminError("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/admin/users/${id}${action === "delete" ? "" : `/${action}`}`, {
+        method: action === "delete" ? "DELETE" : "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Admin action failed");
+      await loadAdminUsers();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Admin action failed");
     }
   }
 
@@ -462,11 +545,15 @@ export function AppShell() {
   }
 
   function logout() {
+    window.localStorage.removeItem("chatsphere-admin-token");
     window.localStorage.removeItem("chatsphere-auth");
     window.localStorage.removeItem("chatsphere-email");
     window.localStorage.removeItem("chatsphere-profile-complete");
     window.localStorage.removeItem("chatsphere-profile");
     setIsAuthed(false);
+    setIsAdmin(false);
+    setAdminToken("");
+    setAdminUsers([]);
     setAuthStep("signup");
     setVerificationCode("");
     setAuthMessage("");
@@ -524,6 +611,69 @@ export function AppShell() {
     setIsChatSearchOpen(false);
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
+  }
+
+  if (isAdmin) {
+    return (
+      <main className="min-h-screen bg-[#eef1f5] text-[#18212f]">
+        <section className="mx-auto min-h-screen max-w-6xl px-5 py-8">
+          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[#dce1e8] pb-5">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere Admin</p>
+              <h1 className="mt-2 text-3xl font-black tracking-normal">User Control</h1>
+            </div>
+            <div className="flex gap-2">
+              <button className="rounded-xl border border-[#dce1e8] bg-white px-4 py-2 text-sm font-black text-[#334155]" onClick={() => loadAdminUsers()} type="button">Refresh</button>
+              <button className="rounded-xl bg-[#111827] px-4 py-2 text-sm font-black text-white" onClick={logout} type="button">Logout</button>
+            </div>
+          </header>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-3">
+            <div className="rounded-2xl border border-[#dce1e8] bg-white p-5">
+              <div className="text-sm font-bold text-[#64748b]">Total users</div>
+              <div className="mt-2 text-3xl font-black">{adminUsers.length}</div>
+            </div>
+            <div className="rounded-2xl border border-[#dce1e8] bg-white p-5">
+              <div className="text-sm font-bold text-[#64748b]">Blocked</div>
+              <div className="mt-2 text-3xl font-black">{adminUsers.filter((user) => user.blocked).length}</div>
+            </div>
+            <div className="rounded-2xl border border-[#dce1e8] bg-white p-5">
+              <div className="text-sm font-bold text-[#64748b]">Active</div>
+              <div className="mt-2 text-3xl font-black">{adminUsers.filter((user) => !user.blocked).length}</div>
+            </div>
+          </div>
+
+          {adminError ? <p className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{adminError}</p> : null}
+
+          <div className="mt-6 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white">
+            <div className="grid grid-cols-[1fr_120px_260px] border-b border-[#e5e9f0] bg-[#f8fafc] px-4 py-3 text-xs font-black uppercase tracking-[0.12em] text-[#64748b]">
+              <span>User</span>
+              <span>Status</span>
+              <span>Actions</span>
+            </div>
+            {adminUsers.length ? (
+              adminUsers.map((user) => (
+                <div className="grid grid-cols-[1fr_120px_260px] items-center gap-3 border-b border-[#edf1f5] px-4 py-4 last:border-b-0" key={user.id}>
+                  <div className="min-w-0">
+                    <div className="truncate font-black">{`${user.firstName} ${user.lastName ?? ""}`.trim() || "Unnamed user"}</div>
+                    <div className="mt-1 truncate text-sm text-[#64748b]">{user.email}</div>
+                  </div>
+                  <span className={`w-fit rounded-full px-3 py-1 text-xs font-black ${user.blocked ? "bg-red-50 text-red-700" : "bg-[#e7f8f2] text-[#008f70]"}`}>{user.blocked ? "Blocked" : "Active"}</span>
+                  <div className="flex gap-2">
+                    <button className="rounded-xl border border-[#dce1e8] px-3 py-2 text-sm font-black text-[#334155]" onClick={() => updateAdminUser(user.id, user.blocked ? "unblock" : "block")} type="button">
+                      {user.blocked ? "Unblock" : "Block"}
+                    </button>
+                    <button className="rounded-xl bg-[#b42318] px-3 py-2 text-sm font-black text-white" onClick={() => updateAdminUser(user.id, "delete")} type="button">Delete</button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="px-5 py-12 text-center text-sm font-bold text-[#64748b]">No registered users yet.</div>
+            )}
+          </div>
+        </section>
+      </main>
+    );
   }
 
   if (!isAuthed) {
