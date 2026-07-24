@@ -350,10 +350,15 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 	if s.db == nil {
 		return Message{}, errors.New("database is not configured")
 	}
+	sender, err := s.UserByEmail(senderEmail)
+	if err != nil {
+		return Message{}, err
+	}
 	message := Message{
 		ID:             randomID(),
-		ConversationID: conversationID(senderEmail, recipientID),
-		SenderEmail:    strings.ToLower(strings.TrimSpace(senderEmail)),
+		ConversationID: conversationID(sender.ID, recipientID),
+		SenderEmail:    sender.Email,
+		SenderID:       sender.ID,
 		RecipientID:    strings.TrimSpace(recipientID),
 		Body:           strings.TrimSpace(body),
 		AttachmentName: strings.TrimSpace(attachmentName),
@@ -361,7 +366,7 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 		AttachmentKind: strings.TrimSpace(attachmentKind),
 		CreatedAt:      time.Now().UTC(),
 	}
-	_, err := s.db.Exec(context.Background(), `
+	_, err = s.db.Exec(context.Background(), `
 		insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, created_at)
 		values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 	`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.CreatedAt)
@@ -372,13 +377,17 @@ func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
 	if s.db == nil {
 		return []Message{}, nil
 	}
+	user, err := s.UserByEmail(userEmail)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(context.Background(), `
 		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, m.created_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where conversation_id = $1
 		order by m.created_at asc
-	`, conversationID(userEmail, otherUserID))
+	`, conversationID(user.ID, otherUserID))
 	if err != nil {
 		return nil, err
 	}
