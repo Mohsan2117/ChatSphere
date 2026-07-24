@@ -22,19 +22,20 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan Event
+	hub    *Hub
+	conn   *websocket.Conn
+	send   chan Event
+	userID string
 }
 
-func Serve(w http.ResponseWriter, r *http.Request, hub *Hub) {
+func Serve(w http.ResponseWriter, r *http.Request, hub *Hub, userID string) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
 	}
 
-	client := &Client{hub: hub, conn: conn, send: make(chan Event, 256)}
+	client := &Client{hub: hub, conn: conn, send: make(chan Event, 256), userID: userID}
 	client.hub.register <- client
 
 	go client.writePump()
@@ -59,7 +60,8 @@ func (c *Client) readPump() {
 		if err := c.conn.ReadJSON(&event); err != nil {
 			break
 		}
-		c.hub.broadcast <- event
+		// Browser clients are receive-only. Chat messages are broadcast by the HTTP API
+		// after they are saved and authorized.
 	}
 }
 

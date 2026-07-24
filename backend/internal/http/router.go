@@ -1,12 +1,16 @@
 package http
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/mail"
+	"os"
 	"strings"
 	"time"
 
@@ -39,7 +43,12 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	router.GET("/", healthHandler)
 	router.GET("/health", healthHandler)
 	router.GET("/ws", func(c *gin.Context) {
-		realtime.Serve(c.Writer, c.Request, hub)
+		user, ok := authUserFromToken(c.Query("token"))
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "login required"})
+			return
+		}
+		realtime.Serve(c.Writer, c.Request, hub, user.ID)
 	})
 
 	api := router.Group("/api/v1")
@@ -85,12 +94,16 @@ func loginUser(dataStore *store.Store) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 			"user":   publicUser(user),
+			"token":  signUserToken(user),
 		})
 	}
 }
 
 func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 	group.GET("", func(c *gin.Context) {
+		if _, ok := requireUser(c); !ok {
+			return
+		}
 		query := c.Query("q")
 		users := dataStore.SearchUsers(query)
 		results := make([]gin.H, 0, len(users))
@@ -150,6 +163,7 @@ func completeOnboarding(dataStore *store.Store) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"status":         "completed",
 			"profile":        publicUser(user),
+			"token":          signUserToken(user),
 			"avatarUploaded": avatarUploaded,
 			"passwordSet":    true,
 		})
@@ -158,12 +172,16 @@ func completeOnboarding(dataStore *store.Store) gin.HandlerFunc {
 
 func updateProfile(dataStore *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
 		if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "profile request is too large"})
 			return
 		}
 
-		email := normalizeEmail(c.PostForm("email"))
+		email := authUser.Email
 		firstName := strings.TrimSpace(c.PostForm("firstName"))
 		lastName := strings.TrimSpace(c.PostForm("lastName"))
 
@@ -255,42 +273,43 @@ func registerGroupRoutes(group *gin.RouterGroup) {
 
 func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *realtime.Hub) {
 	group.GET("/inbox", func(c *gin.Context) {
-		email := normalizeEmail(c.Query("email"))
-		if _, err := mail.ParseAddress(email); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		authUser, ok := requireUser(c)
+		if !ok {
 			return
 		}
-		messages, err := dataStore.ListInboxMessages(email)
+		messages, err := dataStore.ListInboxMessages(authUser.Email)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load inbox"})
 			return
 		}
 		results := make([]gin.H, 0, len(messages))
 		for _, message := range messages {
-			results = append(results, publicMessage(message, email))
+			results = append(results, publicMessage(message, authUser.Email))
 		}
 		c.JSON(http.StatusOK, gin.H{"messages": results})
 	})
 	group.GET("/:recipientId", func(c *gin.Context) {
-		email := normalizeEmail(c.Query("email"))
-		if _, err := mail.ParseAddress(email); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		authUser, ok := requireUser(c)
+		if !ok {
 			return
 		}
-		messages, err := dataStore.ListMessages(email, c.Param("recipientId"))
+		messages, err := dataStore.ListMessages(authUser.Email, c.Param("recipientId"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load messages"})
 			return
 		}
 		results := make([]gin.H, 0, len(messages))
 		for _, message := range messages {
-			results = append(results, publicMessage(message, email))
+			results = append(results, publicMessage(message, authUser.Email))
 		}
 		c.JSON(http.StatusOK, gin.H{"messages": results})
 	})
 	group.POST("", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
 		var body struct {
-			SenderEmail string `json:"senderEmail"`
 			RecipientID string `json:"recipientId"`
 			Body        string `json:"body"`
 			Attachment  struct {
@@ -303,11 +322,6 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
-		email := normalizeEmail(body.SenderEmail)
-		if _, err := mail.ParseAddress(email); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "sender email is required"})
-			return
-		}
 		if strings.TrimSpace(body.RecipientID) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "recipient is required"})
 			return
@@ -316,22 +330,23 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			c.JSON(http.StatusBadRequest, gin.H{"error": "message is empty"})
 			return
 		}
-		message, err := dataStore.SaveMessage(email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind)
+		message, err := dataStore.SaveMessage(authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
 			return
 		}
-		if sender, err := dataStore.UserByEmail(email); err == nil {
+		if sender, err := dataStore.UserByEmail(authUser.Email); err == nil {
 			message.SenderID = sender.ID
 		}
 		if payload, err := json.Marshal(publicMessage(message, "")); err == nil {
 			hub.Broadcast(realtime.Event{
 				Type:           "chat.message",
 				ConversationID: message.ConversationID,
+				TargetUserIDs:  []string{message.SenderID, message.RecipientID},
 				Payload:        payload,
 			})
 		}
-		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, email)})
+		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
 	})
 	group.PATCH("/:id", accepted("edit message"))
 	group.DELETE("/:id", accepted("delete message"))
@@ -427,6 +442,55 @@ func requireAdmin() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+type authUser struct {
+	ID    string
+	Email string
+}
+
+func requireUser(c *gin.Context) (authUser, bool) {
+	header := c.GetHeader("Authorization")
+	token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+	user, ok := authUserFromToken(token)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "login required"})
+		c.Abort()
+		return authUser{}, false
+	}
+	return user, true
+}
+
+func signUserToken(user store.User) string {
+	payload := user.ID + "|" + user.Email
+	signature := signPayload(payload)
+	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + signature))
+}
+
+func authUserFromToken(token string) (authUser, bool) {
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(token))
+	if err != nil {
+		return authUser{}, false
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 3 {
+		return authUser{}, false
+	}
+	payload := parts[0] + "|" + parts[1]
+	if !hmac.Equal([]byte(parts[2]), []byte(signPayload(payload))) {
+		return authUser{}, false
+	}
+	return authUser{ID: parts[0], Email: normalizeEmail(parts[1])}, true
+}
+
+func signPayload(payload string) string {
+	secret := os.Getenv("AUTH_SECRET")
+	if secret == "" {
+		secret = "chatsphere-local-auth-secret"
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func accepted(action string) gin.HandlerFunc {

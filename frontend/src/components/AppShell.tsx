@@ -61,6 +61,7 @@ export function AppShell() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentUserId, setCurrentUserId] = useState("");
+  const [authToken, setAuthToken] = useState("");
   const [adminToken, setAdminToken] = useState("");
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [resendSeconds, setResendSeconds] = useState(0);
@@ -146,10 +147,12 @@ export function AppShell() {
     const hasProfile = window.localStorage.getItem("chatsphere-profile-complete") === "true";
     const savedEmail = window.localStorage.getItem("chatsphere-email");
     const savedUserId = window.localStorage.getItem("chatsphere-user-id");
+    const savedToken = window.localStorage.getItem("chatsphere-token") ?? "";
     const savedProfile = window.localStorage.getItem("chatsphere-profile");
 
     if (savedEmail) setEmail(savedEmail);
     if (savedUserId) setCurrentUserId(savedUserId);
+    if (savedToken) setAuthToken(savedToken);
     if (savedProfile) {
       try {
         const profile = JSON.parse(savedProfile) as { firstName?: string; lastName?: string; avatarPreview?: string };
@@ -160,7 +163,7 @@ export function AppShell() {
         window.localStorage.removeItem("chatsphere-profile");
       }
     }
-    setIsAuthed(hasVerifiedEmail && hasProfile);
+    setIsAuthed(hasVerifiedEmail && hasProfile && Boolean(savedToken));
     if (hasVerifiedEmail && !hasProfile) setAuthStep("profile");
   }, []);
 
@@ -176,10 +179,12 @@ export function AppShell() {
   }, [adminToken, isAdmin]);
 
   useEffect(() => {
-    if (!isAuthed || !email || !selectedChatId) return;
+    if (!isAuthed || !authToken || !selectedChatId) return;
 
     let cancelled = false;
-    fetch(`${apiUrl()}/api/v1/messages/${selectedChatId}?email=${encodeURIComponent(email)}`)
+    fetch(`${apiUrl()}/api/v1/messages/${selectedChatId}`, {
+      headers: authHeaders(authToken)
+    })
       .then((response) => (response.ok ? response.json() : { messages: [] }))
       .then((data) => {
         if (cancelled) return;
@@ -194,26 +199,28 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [email, isAuthed, selectedChatId]);
+  }, [authToken, isAuthed, selectedChatId]);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("chatsphere-messages");
+    if (!email) return;
+    const saved = window.localStorage.getItem(`chatsphere-messages:${email}`);
     if (!saved) return;
     try {
       setChatMessages(JSON.parse(saved) as MessageStore);
     } catch {
       setChatMessages({});
     }
-  }, []);
+  }, [email]);
 
   useEffect(() => {
-    window.localStorage.setItem("chatsphere-messages", JSON.stringify(chatMessages));
-  }, [chatMessages]);
+    if (!email) return;
+    window.localStorage.setItem(`chatsphere-messages:${email}`, JSON.stringify(chatMessages));
+  }, [chatMessages, email]);
 
   useEffect(() => {
-    if (!isAuthed || !email) return;
+    if (!isAuthed || !authToken || !email) return;
 
-    const socket = new WebSocket(wsUrl());
+    const socket = new WebSocket(wsUrl(authToken));
     socketRef.current = socket;
 
     socket.onmessage = (event) => {
@@ -257,13 +264,15 @@ export function AppShell() {
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [currentUserId, email, isAuthed]);
+  }, [authToken, currentUserId, email, isAuthed]);
 
   useEffect(() => {
-    if (!isAuthed) return;
+    if (!isAuthed || !authToken) return;
 
     let cancelled = false;
-    fetch(`${apiUrl()}/api/v1/users`)
+    fetch(`${apiUrl()}/api/v1/users`, {
+      headers: authHeaders(authToken)
+    })
       .then((response) => (response.ok ? response.json() : { users: [] }))
       .then((data) => {
         if (cancelled) return;
@@ -290,13 +299,15 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [email, isAuthed]);
+  }, [authToken, email, isAuthed]);
 
   useEffect(() => {
-    if (!isAuthed || !email || !currentUserId || directoryChats.length === 0) return;
+    if (!isAuthed || !authToken || !currentUserId || directoryChats.length === 0) return;
 
     let cancelled = false;
-    fetch(`${apiUrl()}/api/v1/messages/inbox?email=${encodeURIComponent(email)}`)
+    fetch(`${apiUrl()}/api/v1/messages/inbox`, {
+      headers: authHeaders(authToken)
+    })
       .then((response) => (response.ok ? response.json() : { messages: [] }))
       .then((data) => {
         if (cancelled) return;
@@ -314,7 +325,7 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [currentUserId, directoryChats.length, email, isAuthed]);
+  }, [authToken, currentUserId, directoryChats.length, email, isAuthed]);
 
   useEffect(() => {
     if (resendSeconds <= 0) return;
@@ -400,13 +411,16 @@ export function AppShell() {
       if (!response.ok) throw new Error(data.error ?? "Invalid email or password");
 
       const user = data.user ?? {};
+      const token = data.token ?? "";
       setCurrentUserId(user.id ?? "");
+      setAuthToken(token);
       setFirstName(user.firstName ?? "");
       setLastName(user.lastName ?? "");
       setAvatarPreview(user.avatarUrl && !String(user.avatarUrl).startsWith("uploaded:") ? user.avatarUrl : "");
       window.localStorage.setItem("chatsphere-auth", "true");
       window.localStorage.setItem("chatsphere-email", user.email ?? email);
       window.localStorage.setItem("chatsphere-user-id", user.id ?? "");
+      window.localStorage.setItem("chatsphere-token", token);
       window.localStorage.setItem("chatsphere-profile-complete", "true");
       window.localStorage.setItem(
         "chatsphere-profile",
@@ -656,8 +670,11 @@ export function AppShell() {
 
       window.localStorage.setItem("chatsphere-profile-complete", "true");
       const profile = data.profile ?? {};
+      const token = data.token ?? "";
       setCurrentUserId(profile.id ?? "");
+      setAuthToken(token);
       window.localStorage.setItem("chatsphere-user-id", profile.id ?? "");
+      window.localStorage.setItem("chatsphere-token", token);
       window.localStorage.setItem(
         "chatsphere-profile",
         JSON.stringify({
@@ -696,6 +713,7 @@ export function AppShell() {
 
       const response = await fetch(`${apiUrl()}/api/v1/profile`, {
         method: "PATCH",
+        headers: authHeaders(authToken),
         body: formData
       });
       const data = await response.json().catch(() => ({}));
@@ -742,7 +760,7 @@ export function AppShell() {
 
   async function sendChatMessage() {
     const body = messageDraft.trim();
-    if ((!body && !attachmentDraft) || !selectedChatId) return;
+    if ((!body && !attachmentDraft) || !selectedChatId || !authToken) return;
 
     const message: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -763,9 +781,8 @@ export function AppShell() {
 
     fetch(`${apiUrl()}/api/v1/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
       body: JSON.stringify({
-        senderEmail: email,
         recipientId: selectedChatId,
         body,
         attachment: attachmentDraft
@@ -799,9 +816,11 @@ export function AppShell() {
     window.localStorage.removeItem("chatsphere-profile-complete");
     window.localStorage.removeItem("chatsphere-profile");
     window.localStorage.removeItem("chatsphere-user-id");
+    window.localStorage.removeItem("chatsphere-token");
     setIsAuthed(false);
     setIsAdmin(false);
     setAdminToken("");
+    setAuthToken("");
     setAdminUsers([]);
     setCurrentUserId("");
     setAuthStep("signup");
@@ -1660,9 +1679,13 @@ function apiUrl() {
   return "https://chatsphere-production-a4fd.up.railway.app";
 }
 
-function wsUrl() {
+function authHeaders(token: string): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function wsUrl(token: string) {
   const base = apiUrl();
-  return `${base.replace(/^http/, "ws").replace(/\/$/, "")}/ws`;
+  return `${base.replace(/^http/, "ws").replace(/\/$/, "")}/ws?token=${encodeURIComponent(token)}`;
 }
 
 function AttachmentPreview({ attachment }: { attachment: NonNullable<ChatMessage["attachment"]> }) {

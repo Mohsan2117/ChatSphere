@@ -6,6 +6,7 @@ type Event struct {
 	Type           string          `json:"type"`
 	ConversationID string          `json:"conversationId,omitempty"`
 	UserID         string          `json:"userId,omitempty"`
+	TargetUserIDs  []string        `json:"targetUserIds,omitempty"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
 }
 
@@ -41,6 +42,9 @@ func (h *Hub) Run() {
 			}
 		case event := <-h.broadcast:
 			for client := range h.clients {
+				if len(event.TargetUserIDs) > 0 && !eventTargetsClient(event.TargetUserIDs, client.userID) {
+					continue
+				}
 				select {
 				case client.send <- event:
 				default:
@@ -50,4 +54,13 @@ func (h *Hub) Run() {
 			}
 		}
 	}
+}
+
+func eventTargetsClient(targets []string, userID string) bool {
+	for _, target := range targets {
+		if target == userID {
+			return true
+		}
+	}
+	return false
 }
