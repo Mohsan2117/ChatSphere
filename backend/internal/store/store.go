@@ -199,6 +199,49 @@ func (s *Store) UpdatePassword(email, password string) error {
 	return errors.New("user not found")
 }
 
+func (s *Store) UpdateProfile(email, firstName, lastName, avatarURL string) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	if firstName == "" {
+		return User{}, errors.New("first name is required")
+	}
+
+	if s.db != nil {
+		var user User
+		err := s.db.QueryRow(context.Background(), `
+			update app_users set
+				first_name = $2,
+				last_name = $3,
+				avatar_url = case when $4 = '' then avatar_url else $4 end,
+				updated_at = now()
+			where email = $1
+			returning id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		`, email, firstName, lastName, strings.TrimSpace(avatarURL)).
+			Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+		return user, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index := range s.data.Users {
+		if s.data.Users[index].Email == email {
+			s.data.Users[index].FirstName = firstName
+			s.data.Users[index].LastName = lastName
+			if strings.TrimSpace(avatarURL) != "" {
+				s.data.Users[index].AvatarURL = strings.TrimSpace(avatarURL)
+			}
+			s.data.Users[index].UpdatedAt = time.Now().UTC()
+			if err := s.saveLocked(); err != nil {
+				return User{}, err
+			}
+			return s.data.Users[index], nil
+		}
+	}
+	return User{}, errors.New("user not found")
+}
+
 func (s *Store) SearchUsers(query string) []User {
 	if s.db != nil {
 		users, _ := s.searchUsersDB(query, false)

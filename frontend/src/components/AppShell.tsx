@@ -69,6 +69,8 @@ export function AppShell() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState("");
   const [profileError, setProfileError] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+  const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
@@ -87,7 +89,7 @@ export function AppShell() {
   const searchResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return [];
-    return directoryChats.filter((chat) => chat.name.toLowerCase().includes(query));
+    return directoryChats.filter((chat) => `${chat.name} ${chat.preview}`.toLowerCase().includes(query));
   }, [chatSearch, directoryChats]);
   const selectedChat = useMemo(() => directoryChats.find((chat) => chat.id === selectedChatId), [directoryChats, selectedChatId]);
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
@@ -110,7 +112,7 @@ export function AppShell() {
   const contactResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return directoryChats;
-    return directoryChats.filter((chat) => chat.name.toLowerCase().includes(query));
+    return directoryChats.filter((chat) => `${chat.name} ${chat.preview}`.toLowerCase().includes(query));
   }, [chatSearch, directoryChats]);
   const userInitials = useMemo(() => initials(firstName, lastName), [firstName, lastName]);
   const attachedMessages = useMemo(() => {
@@ -142,9 +144,20 @@ export function AppShell() {
     const hasProfile = window.localStorage.getItem("chatsphere-profile-complete") === "true";
     const savedEmail = window.localStorage.getItem("chatsphere-email");
     const savedUserId = window.localStorage.getItem("chatsphere-user-id");
+    const savedProfile = window.localStorage.getItem("chatsphere-profile");
 
     if (savedEmail) setEmail(savedEmail);
     if (savedUserId) setCurrentUserId(savedUserId);
+    if (savedProfile) {
+      try {
+        const profile = JSON.parse(savedProfile) as { firstName?: string; lastName?: string; avatarPreview?: string };
+        setFirstName(profile.firstName ?? "");
+        setLastName(profile.lastName ?? "");
+        setAvatarPreview(profile.avatarPreview ?? "");
+      } catch {
+        window.localStorage.removeItem("chatsphere-profile");
+      }
+    }
     setIsAuthed(hasVerifiedEmail && hasProfile);
     if (hasVerifiedEmail && !hasProfile) setAuthStep("profile");
   }, []);
@@ -250,9 +263,18 @@ export function AppShell() {
         if (cancelled) return;
         const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
         setDirectoryChats(
-          users
-            .filter((user) => user.email !== email)
-            .map(userToChat)
+          users.map((user) => {
+            const chat = userToChat(user);
+            if (user.email === email) {
+              return {
+                ...chat,
+                name: `${chat.name} (You)`,
+                preview: "Saved messages",
+                online: true
+              };
+            }
+            return chat;
+          })
         );
       })
       .catch(() => {
@@ -619,6 +641,70 @@ export function AppShell() {
       setIsAuthed(true);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "Could not save profile");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function saveProfileUpdate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!firstName.trim()) {
+      setProfileError("First name is required");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setProfileError("");
+    setProfileMessage("");
+
+    try {
+      const formData = new FormData();
+      formData.set("email", email);
+      formData.set("firstName", firstName.trim());
+      formData.set("lastName", lastName.trim());
+      if (avatarFile) formData.set("avatar", avatarFile);
+
+      const response = await fetch(`${apiUrl()}/api/v1/profile`, {
+        method: "PATCH",
+        body: formData
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not update profile");
+
+      const profile = data.profile ?? {};
+      setFirstName(profile.firstName ?? firstName.trim());
+      setLastName(profile.lastName ?? lastName.trim());
+      setCurrentUserId(profile.id ?? currentUserId);
+      const nextAvatar = profile.avatarUrl && !String(profile.avatarUrl).startsWith("uploaded:") ? profile.avatarUrl : avatarPreview;
+      setAvatarPreview(nextAvatar);
+      setAvatarFile(null);
+      window.localStorage.setItem(
+        "chatsphere-profile",
+        JSON.stringify({
+          firstName: profile.firstName ?? firstName.trim(),
+          lastName: profile.lastName ?? lastName.trim(),
+          avatarPreview: nextAvatar
+        })
+      );
+      window.localStorage.setItem("chatsphere-user-id", profile.id ?? currentUserId);
+      setDirectoryChats((current) =>
+        current.map((chat) =>
+          chat.id === (profile.id ?? currentUserId)
+            ? {
+                ...chat,
+                name: `${`${profile.firstName ?? firstName} ${profile.lastName ?? lastName}`.trim()} (You)`,
+                avatar: initials(profile.firstName ?? firstName, profile.lastName ?? lastName),
+                avatarUrl: nextAvatar,
+                preview: "Saved messages",
+                online: true
+              }
+            : chat
+        )
+      );
+      setProfileMessage("Profile updated.");
+      setIsProfileEditorOpen(false);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "Could not update profile");
     } finally {
       setIsSubmitting(false);
     }
@@ -1199,14 +1285,18 @@ export function AppShell() {
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere</p>
                 <h1 className="mt-2 text-2xl font-black tracking-normal">{workspaceTitle}</h1>
               </div>
-              <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-[#e7f8f2] text-sm font-black text-[#008f70]" title="Your profile">
+              <button className="grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-[#e7f8f2] text-sm font-black text-[#008f70]" onClick={() => {
+                setIsProfileEditorOpen(true);
+                setProfileError("");
+                setProfileMessage("");
+              }} title="Edit your profile" type="button">
                 {avatarPreview ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img alt="Your profile" className="h-full w-full object-cover" src={avatarPreview} />
                 ) : (
                   userInitials
                 )}
-              </div>
+              </button>
             </div>
             <div className="mt-5 grid grid-cols-3 gap-2">
               {[
@@ -1280,7 +1370,7 @@ export function AppShell() {
                       }`}
                       type="button"
                     >
-                      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${chat.color} text-sm font-black text-white`}>{chat.avatar}</span>
+                      <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
                           <strong className="truncate text-sm">{chat.name}</strong>
@@ -1305,7 +1395,7 @@ export function AppShell() {
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                     >
-                      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${chat.color} text-sm font-black text-white`}>{chat.avatar}</span>
+                      <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
                           <strong className="truncate text-sm">{chat.name}</strong>
@@ -1333,7 +1423,7 @@ export function AppShell() {
                         }`}
                         type="button"
                       >
-                        <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${chat.color} text-sm font-black text-white`}>{chat.avatar}</span>
+                        <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center justify-between gap-2">
                             <strong className="truncate text-sm">{chat.name}</strong>
@@ -1374,7 +1464,7 @@ export function AppShell() {
                   <button aria-label="Back to chats" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={closeCurrentChat} type="button">
                     <ArrowLeft size={22} />
                   </button>
-                  <span className={`grid h-12 w-12 place-items-center rounded-2xl ${selectedChat.color} font-black text-white`}>{selectedChat.avatar}</span>
+                  <ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-2xl text-base" />
                   <div className="min-w-0">
                     <h2 className="truncate text-xl font-black">{selectedChat.name}</h2>
                     <p className={`text-sm font-semibold ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : "Offline"}</p>
@@ -1491,6 +1581,55 @@ export function AppShell() {
         </section>
 
       </section>
+      {isProfileEditorOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#0f172a]/45 px-4">
+          <form className="w-full max-w-md rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Profile</p>
+                <h2 className="mt-2 text-2xl font-black">Edit your profile</h2>
+              </div>
+              <button className="rounded-xl border border-[#dce1e8] px-3 py-2 text-sm font-black text-[#64748b]" onClick={() => setIsProfileEditorOpen(false)} type="button">
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 flex items-center gap-4 rounded-2xl border border-[#e5e9f0] bg-[#f8fafc] p-4">
+              <label className="grid h-20 w-20 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-xl font-black text-[#008f70]">
+                {avatarPreview ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img alt="Profile preview" className="h-full w-full object-cover" src={avatarPreview} />
+                ) : (
+                  userInitials
+                )}
+                <input accept="image/*" className="hidden" onChange={chooseAvatar} type="file" />
+              </label>
+              <div className="min-w-0">
+                <div className="text-sm font-black text-[#18212f]">Profile photo</div>
+                <p className="mt-1 text-sm leading-6 text-[#64748b]">Click the photo box to choose a new image.</p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-bold text-[#334155]">First name</span>
+                <input className="mt-2 h-11 w-full rounded-xl border border-[#dce1e8] bg-white px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setFirstName(event.target.value)} value={firstName} />
+              </label>
+              <label className="block">
+                <span className="text-sm font-bold text-[#334155]">Last name</span>
+                <input className="mt-2 h-11 w-full rounded-xl border border-[#dce1e8] bg-white px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setLastName(event.target.value)} value={lastName} />
+              </label>
+            </div>
+
+            {profileError ? <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{profileError}</p> : null}
+            {profileMessage ? <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{profileMessage}</p> : null}
+            <button className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isSubmitting} type="submit">
+              {isSubmitting ? "Saving..." : "Save profile"}
+              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+            </button>
+          </form>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -1523,6 +1662,19 @@ function AttachmentPreview({ attachment }: { attachment: NonNullable<ChatMessage
       <FileText size={20} />
       <span className="min-w-0 truncate">{attachment.name}</span>
     </a>
+  );
+}
+
+function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) {
+  return (
+    <span className={`grid shrink-0 place-items-center overflow-hidden ${chat.color} font-black text-white ${className}`}>
+      {chat.avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img alt={chat.name} className="h-full w-full object-cover" src={chat.avatarUrl} />
+      ) : (
+        chat.avatar
+      )}
+    </span>
   );
 }
 

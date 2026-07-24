@@ -1,6 +1,9 @@
 package http
 
 import (
+	"encoding/base64"
+	"fmt"
+	"io"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -101,7 +104,7 @@ func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 func registerProfileRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 	group.GET("", accepted("get profile"))
 	group.POST("/onboarding", completeOnboarding(dataStore))
-	group.PATCH("", accepted("update profile"))
+	group.PATCH("", updateProfile(dataStore))
 	group.PATCH("/privacy", accepted("update privacy"))
 	group.PATCH("/status", accepted("update status"))
 }
@@ -131,12 +134,10 @@ func completeOnboarding(dataStore *store.Store) gin.HandlerFunc {
 			return
 		}
 
-		avatarURL := ""
-		avatarUploaded := false
-		file, err := c.FormFile("avatar")
-		if err == nil && file.Size > 0 {
-			avatarUploaded = true
-			avatarURL = "uploaded:" + file.Filename
+		avatarURL, avatarUploaded, err := avatarDataURL(c, "avatar")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		user, err := dataStore.UpsertUser(email, firstName, lastName, password, avatarURL)
@@ -152,6 +153,75 @@ func completeOnboarding(dataStore *store.Store) gin.HandlerFunc {
 			"passwordSet":    true,
 		})
 	}
+}
+
+func updateProfile(dataStore *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := c.Request.ParseMultipartForm(8 << 20); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "profile request is too large"})
+			return
+		}
+
+		email := normalizeEmail(c.PostForm("email"))
+		firstName := strings.TrimSpace(c.PostForm("firstName"))
+		lastName := strings.TrimSpace(c.PostForm("lastName"))
+
+		if _, err := mail.ParseAddress(email); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+			return
+		}
+		if firstName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "first name is required"})
+			return
+		}
+
+		avatarURL, avatarUploaded, err := avatarDataURL(c, "avatar")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		user, err := dataStore.UpdateProfile(email, firstName, lastName, avatarURL)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "could not update profile"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":         "updated",
+			"profile":        publicUser(user),
+			"avatarUploaded": avatarUploaded,
+		})
+	}
+}
+
+func avatarDataURL(c *gin.Context, field string) (string, bool, error) {
+	file, err := c.FormFile(field)
+	if err != nil || file.Size <= 0 {
+		return "", false, nil
+	}
+	if file.Size > 2<<20 {
+		return "", false, fmt.Errorf("profile photo must be 2 MB or smaller")
+	}
+	if !strings.HasPrefix(file.Header.Get("Content-Type"), "image/") {
+		return "", false, fmt.Errorf("profile photo must be an image")
+	}
+
+	source, err := file.Open()
+	if err != nil {
+		return "", false, fmt.Errorf("could not read profile photo")
+	}
+	defer source.Close()
+
+	content, err := io.ReadAll(io.LimitReader(source, 2<<20))
+	if err != nil {
+		return "", false, fmt.Errorf("could not read profile photo")
+	}
+	mimeType := file.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "image/jpeg"
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(content), true, nil
 }
 
 func publicUser(user store.User) gin.H {

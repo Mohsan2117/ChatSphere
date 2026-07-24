@@ -7,6 +7,7 @@ export type ChatSeed = {
   time: string;
   unread: number;
   online: boolean;
+  avatarUrl?: string;
 };
 
 export const chats: ChatSeed[] = [];
@@ -29,7 +30,8 @@ export function userToChat(user: DirectoryUser): ChatSeed {
     preview: user.email,
     time: "",
     unread: 0,
-    online: false
+    online: false,
+    avatarUrl: user.avatarUrl
   };
 }
 
