@@ -318,7 +318,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		message, err := dataStore.SaveMessage(email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message", "detail": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
 			return
 		}
 		if sender, err := dataStore.UserByEmail(email); err == nil {
