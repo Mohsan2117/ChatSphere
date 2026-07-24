@@ -146,6 +146,59 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 	return User{}, errors.New("invalid email or password")
 }
 
+func (s *Store) UserExists(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if s.db != nil {
+		var exists bool
+		err := s.db.QueryRow(context.Background(), `select exists(select 1 from app_users where email = $1)`, email).Scan(&exists)
+		return err == nil && exists
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, user := range s.data.Users {
+		if user.Email == email {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) UpdatePassword(email, password string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	if s.db != nil {
+		result, err := s.db.Exec(context.Background(), `
+			update app_users set password_hash = $2, updated_at = now()
+			where email = $1
+		`, email, string(passwordHash))
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errors.New("user not found")
+		}
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for index := range s.data.Users {
+		if s.data.Users[index].Email == email {
+			s.data.Users[index].PasswordHash = string(passwordHash)
+			s.data.Users[index].UpdatedAt = time.Now().UTC()
+			return s.saveLocked()
+		}
+	}
+	return errors.New("user not found")
+}
+
 func (s *Store) SearchUsers(query string) []User {
 	if s.db != nil {
 		users, _ := s.searchUsersDB(query, false)

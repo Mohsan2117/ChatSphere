@@ -52,12 +52,13 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 }
 
 func registerAuthRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
-	newEmailAuthHandler(cfg).register(group)
+	emailAuth := newEmailAuthHandler(cfg)
+	emailAuth.register(group)
+	emailAuth.registerPasswordReset(group, dataStore)
 	group.POST("/register", accepted("register user"))
 	group.POST("/login", loginUser(dataStore))
 	group.POST("/refresh", accepted("refresh token"))
 	group.POST("/logout", accepted("logout user"))
-	group.POST("/forgot-password", accepted("start password reset"))
 }
 
 func loginUser(dataStore *store.Store) gin.HandlerFunc {
@@ -273,7 +274,7 @@ func registerAdminRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
-		if strings.TrimSpace(body.Email) != "ChatSphere" || body.Password != "1234123" {
+		if !strings.EqualFold(strings.TrimSpace(body.Email), "ChatSphere@gmail.com") || body.Password != "1234123" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin credentials"})
 			return
 		}

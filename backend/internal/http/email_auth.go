@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"chatsphere/backend/internal/config"
+	"chatsphere/backend/internal/store"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +45,12 @@ func newEmailAuthHandler(cfg config.Config) *emailAuthHandler {
 func (h *emailAuthHandler) register(group *gin.RouterGroup) {
 	group.POST("/email/request-code", h.requestCode)
 	group.POST("/email/verify-code", h.verifyCode)
+}
+
+func (h *emailAuthHandler) registerPasswordReset(group *gin.RouterGroup, dataStore *store.Store) {
+	group.POST("/forgot-password", h.requestPasswordReset(dataStore))
+	group.POST("/password-reset/verify", h.verifyPasswordResetCode)
+	group.POST("/password-reset/complete", h.completePasswordReset(dataStore))
 }
 
 func (h *emailAuthHandler) requestCode(c *gin.Context) {
@@ -110,6 +117,106 @@ func (h *emailAuthHandler) verifyCode(c *gin.Context) {
 			"email": email,
 		},
 	})
+}
+
+func (h *emailAuthHandler) requestPasswordReset(dataStore *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Email string `json:"email"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+
+		email := normalizeEmail(body.Email)
+		if _, err := mail.ParseAddress(email); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enter a valid email"})
+			return
+		}
+		if !dataStore.UserExists(email) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no account exists with this email"})
+			return
+		}
+
+		code, err := randomCode()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create code"})
+			return
+		}
+
+		h.store.mu.Lock()
+		h.store.codes[email] = emailCode{Code: code, ExpiresAt: time.Now().Add(10 * time.Minute)}
+		h.store.mu.Unlock()
+
+		if err := h.sendBrevoCode(email, code); err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "sent", "email": email})
+	}
+}
+
+func (h *emailAuthHandler) verifyPasswordResetCode(c *gin.Context) {
+	var body struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if !h.hasValidCode(normalizeEmail(body.Email), strings.TrimSpace(body.Code)) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired code"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "verified"})
+}
+
+func (h *emailAuthHandler) completePasswordReset(dataStore *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Email    string `json:"email"`
+			Code     string `json:"code"`
+			Password string `json:"password"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+
+		email := normalizeEmail(body.Email)
+		code := strings.TrimSpace(body.Code)
+		if len(body.Password) < 8 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "password must be at least 8 characters"})
+			return
+		}
+		if !h.hasValidCode(email, code) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired code"})
+			return
+		}
+
+		if err := dataStore.UpdatePassword(email, body.Password); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "account not found"})
+			return
+		}
+
+		h.store.mu.Lock()
+		delete(h.store.codes, email)
+		h.store.mu.Unlock()
+
+		c.JSON(http.StatusOK, gin.H{"status": "password-updated"})
+	}
+}
+
+func (h *emailAuthHandler) hasValidCode(email string, code string) bool {
+	h.store.mu.Lock()
+	stored, ok := h.store.codes[email]
+	h.store.mu.Unlock()
+	return ok && stored.Code == code && time.Now().Before(stored.ExpiresAt)
 }
 
 func (h *emailAuthHandler) sendBrevoCode(email string, code string) error {

@@ -23,7 +23,7 @@ import {
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 
-type AuthStep = "signup" | "login" | "code" | "profile";
+type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
   id: string;
   body: string;
@@ -322,7 +322,7 @@ export function AppShell() {
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (email.trim() === "ChatSphere" && password === "1234123") {
+    if (email.trim().toLowerCase() === "chatsphere@gmail.com" && password === "1234123") {
       await loginAdmin();
       return;
     }
@@ -449,6 +449,100 @@ export function AppShell() {
       setAuthError("");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Invalid code");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function requestPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await sendPasswordResetCode();
+  }
+
+  async function sendPasswordResetCode() {
+    if (!email.includes("@")) {
+      setAuthError("Enter a valid email");
+      return;
+    }
+
+    setAuthError("");
+    setAuthMessage("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not send reset code");
+      setVerificationCode("");
+      setAuthStep("reset-code");
+      setAuthMessage("Reset code sent. Check your Gmail inbox, spam, or promotions folder.");
+      setResendSeconds(60);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not send reset code");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function verifyPasswordResetCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (verificationCode.trim().length < 4) return;
+
+    setAuthError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/auth/password-reset/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code: verificationCode })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Invalid code");
+      setPassword("");
+      setConfirmPassword("");
+      setAuthMessage("Code verified. Set your new password now.");
+      setAuthStep("reset-password");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Invalid code");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function completePasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password.length < 8) {
+      setAuthError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setAuthError("Passwords do not match");
+      return;
+    }
+
+    setAuthError("");
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/auth/password-reset/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code: verificationCode, password })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not update password");
+      setPassword("");
+      setConfirmPassword("");
+      setVerificationCode("");
+      setAuthStep("login");
+      setAuthMessage("Password updated. Login with your new password.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not update password");
     } finally {
       setIsSubmitting(false);
     }
@@ -780,7 +874,19 @@ export function AppShell() {
 
             <div className="border-b border-white/10 pb-5">
               <h2 className="text-2xl font-bold">
-                {authStep === "signup" ? "Create account" : authStep === "login" ? "Login" : authStep === "code" ? "Enter email code" : "Profile picture"}
+                {authStep === "signup"
+                  ? "Create account"
+                  : authStep === "login"
+                    ? "Login"
+                  : authStep === "code"
+                    ? "Enter email code"
+                  : authStep === "forgot"
+                    ? "Forgot password"
+                  : authStep === "reset-code"
+                    ? "Enter reset code"
+                  : authStep === "reset-password"
+                    ? "Set new password"
+                    : "Profile picture"}
               </h2>
               <p className="mt-2 text-sm leading-6 text-[#aebac1]">
                 {authStep === "signup"
@@ -789,9 +895,16 @@ export function AppShell() {
                     ? "Already have an account? Use your email and password."
                   : authStep === "code"
                     ? `Enter the 6-digit code sent to ${email}.`
+                  : authStep === "forgot"
+                    ? "Enter your account email. We will send a reset code to Gmail."
+                  : authStep === "reset-code"
+                    ? `Enter the password reset code sent to ${email}.`
+                  : authStep === "reset-password"
+                    ? "Choose a new password for your ChatSphere account."
                     : "Add a profile photo before opening chats."}
               </p>
             </div>
+            {authMessage ? <p className="mt-4 rounded-md border border-[#00a884]/30 bg-[#00a884]/10 px-3 py-2 text-sm text-[#bdf5e2]">{authMessage}</p> : null}
 
             {authStep === "signup" ? (
               <form className="mt-5 space-y-5" onSubmit={requestCode}>
@@ -882,6 +995,97 @@ export function AppShell() {
                 </label>
                 <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   Login
+                  <ShieldCheck size={18} />
+                </button>
+                <button
+                  className="w-full text-center text-sm font-bold text-[#00a884] hover:text-[#46dfbd]"
+                  onClick={() => {
+                    setAuthStep("forgot");
+                    setAuthError("");
+                    setAuthMessage("");
+                    setVerificationCode("");
+                    setPassword("");
+                    setConfirmPassword("");
+                  }}
+                  type="button"
+                >
+                  Forgot password?
+                </button>
+                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+              </form>
+            ) : authStep === "forgot" ? (
+              <form className="mt-5 space-y-5" onSubmit={requestPasswordReset}>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
+                  <input
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="you@example.com"
+                    inputMode="email"
+                    type="email"
+                  />
+                </label>
+                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                  {isSubmitting ? "Sending code..." : "Send reset code"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
+                </button>
+                <button className="w-full text-center text-sm font-bold text-[#aebac1] hover:text-white" onClick={() => setAuthStep("login")} type="button">
+                  Back to login
+                </button>
+                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+              </form>
+            ) : authStep === "reset-code" ? (
+              <form className="mt-5 space-y-5" onSubmit={verifyPasswordResetCode}>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Reset code</span>
+                  <input
+                    value={verificationCode}
+                    onChange={(event) => setVerificationCode(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-center text-xl font-black tracking-[.35em] text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="000000"
+                  />
+                </label>
+                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                  Verify code
+                  <ShieldCheck size={18} />
+                </button>
+                <button
+                  className="w-full text-center text-sm font-bold text-[#00a884] disabled:cursor-not-allowed disabled:text-[#6f8188]"
+                  disabled={resendSeconds > 0 || isSubmitting}
+                  onClick={sendPasswordResetCode}
+                  type="button"
+                >
+                  {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend code"}
+                </button>
+                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+              </form>
+            ) : authStep === "reset-password" ? (
+              <form className="mt-5 space-y-5" onSubmit={completePasswordReset}>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">New password</span>
+                  <input
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Enter new password"
+                    type="password"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-[#d1d7db]">Confirm new password</span>
+                  <input
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    placeholder="Repeat new password"
+                    type="password"
+                  />
+                </label>
+                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                  Update password
                   <ShieldCheck size={18} />
                 </button>
                 {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
