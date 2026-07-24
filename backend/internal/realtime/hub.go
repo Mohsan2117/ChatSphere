@@ -25,6 +25,10 @@ func NewHub() *Hub {
 	}
 }
 
+func (h *Hub) Broadcast(event Event) {
+	h.broadcast <- event
+}
+
 func (h *Hub) Run() {
 	for {
 		select {

@@ -43,6 +43,7 @@ type Message struct {
 	ID             string    `json:"id"`
 	ConversationID string    `json:"conversationId"`
 	SenderEmail    string    `json:"senderEmail"`
+	SenderID       string    `json:"senderId,omitempty"`
 	RecipientID    string    `json:"recipientId"`
 	Body           string    `json:"body"`
 	AttachmentName string    `json:"attachmentName,omitempty"`
@@ -144,6 +145,23 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 		}
 	}
 	return User{}, errors.New("invalid email or password")
+}
+
+func (s *Store) UserByEmail(email string) (User, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if s.db != nil {
+		return s.userByEmailDB(email)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, user := range s.data.Users {
+		if user.Email == email {
+			return user, nil
+		}
+	}
+	return User{}, errors.New("user not found")
 }
 
 func (s *Store) UserExists(email string) bool {
@@ -355,10 +373,11 @@ func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
 		return []Message{}, nil
 	}
 	rows, err := s.db.Query(context.Background(), `
-		select id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, created_at
-		from messages
+		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, m.created_at
+		from messages m
+		left join app_users u on u.email = m.sender_email
 		where conversation_id = $1
-		order by created_at asc
+		order by m.created_at asc
 	`, conversationID(userEmail, otherUserID))
 	if err != nil {
 		return nil, err
@@ -368,7 +387,38 @@ func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.CreatedAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (s *Store) ListInboxMessages(userEmail string) ([]Message, error) {
+	if s.db == nil {
+		return []Message{}, nil
+	}
+	user, err := s.UserByEmail(userEmail)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(context.Background(), `
+		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, m.created_at
+		from messages m
+		left join app_users u on u.email = m.sender_email
+		where m.sender_email = $1 or m.recipient_id = $2
+		order by m.created_at asc
+	`, strings.ToLower(strings.TrimSpace(userEmail)), user.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := []Message{}
+	for rows.Next() {
+		var message Message
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.CreatedAt); err != nil {
 			return nil, err
 		}
 		messages = append(messages, message)
@@ -428,11 +478,7 @@ func (s *Store) upsertUserDB(email, firstName, lastName, password, avatarURL str
 }
 
 func (s *Store) authenticateDB(email, password string) (User, error) {
-	var user User
-	err := s.db.QueryRow(context.Background(), `
-		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
-		from app_users where email = $1
-	`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+	user, err := s.userByEmailDB(email)
 	if err != nil {
 		return User{}, errors.New("invalid email or password")
 	}
@@ -443,6 +489,15 @@ func (s *Store) authenticateDB(email, password string) (User, error) {
 		return User{}, errors.New("invalid email or password")
 	}
 	return user, nil
+}
+
+func (s *Store) userByEmailDB(email string) (User, error) {
+	var user User
+	err := s.db.QueryRow(context.Background(), `
+		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		from app_users where email = $1
+	`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+	return user, err
 }
 
 func (s *Store) searchUsersDB(query string, includeBlocked bool) ([]User, error) {

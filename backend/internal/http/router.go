@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,7 +48,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerProfileRoutes(api.Group("/profile"), dataStore)
 	registerContactRoutes(api.Group("/contacts"))
 	registerGroupRoutes(api.Group("/groups"))
-	registerMessageRoutes(api.Group("/messages"), dataStore)
+	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
 	registerUploadRoutes(api.Group("/upload"))
 	registerAdminRoutes(api.Group("/admin"), dataStore)
 
@@ -252,7 +253,24 @@ func registerGroupRoutes(group *gin.RouterGroup) {
 	group.DELETE("/:id/members/:userId", accepted("remove group member"))
 }
 
-func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *realtime.Hub) {
+	group.GET("/inbox", func(c *gin.Context) {
+		email := normalizeEmail(c.Query("email"))
+		if _, err := mail.ParseAddress(email); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+			return
+		}
+		messages, err := dataStore.ListInboxMessages(email)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load inbox"})
+			return
+		}
+		results := make([]gin.H, 0, len(messages))
+		for _, message := range messages {
+			results = append(results, publicMessage(message, email))
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": results})
+	})
 	group.GET("/:recipientId", func(c *gin.Context) {
 		email := normalizeEmail(c.Query("email"))
 		if _, err := mail.ParseAddress(email); err != nil {
@@ -303,6 +321,16 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
 			return
 		}
+		if sender, err := dataStore.UserByEmail(email); err == nil {
+			message.SenderID = sender.ID
+		}
+		if payload, err := json.Marshal(publicMessage(message, "")); err == nil {
+			hub.Broadcast(realtime.Event{
+				Type:           "chat.message",
+				ConversationID: message.ConversationID,
+				Payload:        payload,
+			})
+		}
 		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, email)})
 	})
 	group.PATCH("/:id", accepted("edit message"))
@@ -317,6 +345,8 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 		"time":        message.CreatedAt.Format("3:04 PM"),
 		"mine":        strings.EqualFold(message.SenderEmail, viewerEmail),
 		"senderEmail": message.SenderEmail,
+		"senderId":    message.SenderID,
+		"recipientId": message.RecipientID,
 		"createdAt":   message.CreatedAt,
 	}
 	if message.AttachmentName != "" {

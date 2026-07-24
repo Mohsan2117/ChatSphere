@@ -30,6 +30,8 @@ type ChatMessage = {
   time: string;
   mine: boolean;
   senderEmail?: string;
+  senderId?: string;
+  recipientId?: string;
   attachment?: {
     name: string;
     type: string;
@@ -221,18 +223,22 @@ export function AppShell() {
           conversationId?: string;
           payload?: ChatMessage;
         };
-        if (data.type !== "chat.message" || !data.conversationId || !data.payload) return;
-        if (!data.payload.id || !data.payload.body || !data.payload.time) return;
+        if (data.type !== "chat.message" || !data.payload) return;
+        if (!data.payload.id || !data.payload.time) return;
         if (data.payload.senderEmail === email) return;
+        if (currentUserId && data.payload.recipientId !== currentUserId) return;
 
         setChatMessages((current) => {
-          const conversationId = data.conversationId as string;
+          const conversationId = data.payload?.senderId || data.conversationId;
+          if (!conversationId) return current;
           const incomingMessage: ChatMessage = {
             id: data.payload?.id as string,
             body: data.payload?.body as string,
             time: data.payload?.time as string,
             mine: false,
             senderEmail: data.payload?.senderEmail,
+            senderId: data.payload?.senderId,
+            recipientId: data.payload?.recipientId,
             attachment: data.payload?.attachment
           };
           const existing = current[conversationId] ?? [];
@@ -251,7 +257,7 @@ export function AppShell() {
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [email, isAuthed]);
+  }, [currentUserId, email, isAuthed]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -285,6 +291,30 @@ export function AppShell() {
       cancelled = true;
     };
   }, [email, isAuthed]);
+
+  useEffect(() => {
+    if (!isAuthed || !email || !currentUserId || directoryChats.length === 0) return;
+
+    let cancelled = false;
+    fetch(`${apiUrl()}/api/v1/messages/inbox?email=${encodeURIComponent(email)}`)
+      .then((response) => (response.ok ? response.json() : { messages: [] }))
+      .then((data) => {
+        if (cancelled) return;
+        const messages: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
+        const grouped = messages.reduce<MessageStore>((next, message) => {
+          const chatId = message.senderEmail === email ? message.recipientId : message.senderId;
+          if (!chatId) return next;
+          next[chatId] = [...(next[chatId] ?? []), message];
+          return next;
+        }, {});
+        setChatMessages((current) => ({ ...current, ...grouped }));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserId, directoryChats.length, email, isAuthed]);
 
   useEffect(() => {
     if (resendSeconds <= 0) return;
@@ -750,16 +780,6 @@ export function AppShell() {
       // Realtime UI remains optimistic; failed persistence can be retried after DB status handling is added.
     });
 
-    const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({
-          type: "chat.message",
-          conversationId: selectedChatId,
-          payload: message
-        })
-      );
-    }
   }
 
   function sendOnEnter(event: KeyboardEvent<HTMLInputElement>) {
