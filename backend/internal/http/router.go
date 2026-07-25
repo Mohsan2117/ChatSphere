@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/mail"
 	"os"
@@ -60,7 +61,8 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerContactRoutes(api.Group("/contacts"), dataStore)
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
-	registerUploadRoutes(api.Group("/upload"))
+	registerUploadRoutes(api.Group("/upload"), dataStore)
+	registerFileRoutes(api.Group("/files"), dataStore)
 	registerAdminRoutes(api.Group("/admin"), cfg, dataStore)
 
 	return router
@@ -111,7 +113,12 @@ func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *rea
 			return
 		}
 		query := c.Query("q")
-		users := dataStore.SearchUsers(query)
+		users, err := dataStore.SearchUsersWithError(query)
+		if err != nil {
+			log.Printf("load users failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load users"})
+			return
+		}
 		results := make([]gin.H, 0, len(users))
 		for _, user := range users {
 			result := publicUser(user)
@@ -327,6 +334,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		messages, err := dataStore.ListInboxMessages(authUser.Email, queryInt(c, "limit", 200))
 		if err != nil {
+			log.Printf("load inbox failed user=%s: %v", authUser.Email, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load inbox"})
 			return
 		}
@@ -343,6 +351,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		messages, err := dataStore.ListMessages(authUser.Email, c.Param("recipientId"), queryInt(c, "limit", 50))
 		if err != nil {
+			log.Printf("load messages failed user=%s recipient=%s: %v", authUser.Email, c.Param("recipientId"), err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load messages"})
 			return
 		}
@@ -381,6 +390,11 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		message, err := dataStore.SaveMessage(authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
 		if err != nil {
+			log.Printf("save message failed sender=%s recipient=%s: %v", authUser.Email, body.RecipientID, err)
+			if strings.Contains(err.Error(), "blocked") {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
 			return
 		}
@@ -464,9 +478,10 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 	return result
 }
 
-func registerUploadRoutes(group *gin.RouterGroup) {
+func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 	group.POST("", func(c *gin.Context) {
-		if _, ok := requireUser(c); !ok {
+		authUser, ok := requireUser(c)
+		if !ok {
 			return
 		}
 		file, err := c.FormFile("file")
@@ -499,12 +514,40 @@ func registerUploadRoutes(group *gin.RouterGroup) {
 		} else if strings.HasPrefix(contentType, "video/") {
 			kind = "video"
 		}
+		attachment, err := dataStore.SaveAttachment(authUser.Email, file.Filename, contentType, kind, content)
+		if err != nil {
+			log.Printf("save attachment failed user=%s name=%s size=%d: %v", authUser.Email, file.Filename, file.Size, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save file"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"name": file.Filename,
 			"type": contentType,
 			"kind": kind,
-			"url":  "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(content),
+			"url":  "attachment:" + attachment.ID,
 		})
+	})
+}
+
+func registerFileRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	group.GET("/:id", func(c *gin.Context) {
+		token := c.Query("token")
+		if token == "" {
+			token = strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+		}
+		authUser, ok := authUserFromToken(token)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "login required"})
+			return
+		}
+		attachment, err := dataStore.AttachmentByID(authUser.Email, c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+			return
+		}
+		c.Header("Cache-Control", "private, max-age=300")
+		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, safeFilename(attachment.Name)))
+		c.Data(http.StatusOK, attachment.ContentType, attachment.Content)
 	})
 }
 
@@ -693,6 +736,17 @@ func queryInt(c *gin.Context, key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func safeFilename(name string) string {
+	name = strings.ReplaceAll(name, `"`, "")
+	name = strings.ReplaceAll(name, "\r", "")
+	name = strings.ReplaceAll(name, "\n", "")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "attachment"
+	}
+	return name
 }
 
 func signPayload(payload string) string {

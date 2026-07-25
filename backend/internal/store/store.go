@@ -84,6 +84,17 @@ type Report struct {
 	ResolvedAt   *time.Time `json:"resolvedAt,omitempty"`
 }
 
+type Attachment struct {
+	ID          string    `json:"id"`
+	OwnerID     string    `json:"ownerId"`
+	Name        string    `json:"name"`
+	ContentType string    `json:"contentType"`
+	Kind        string    `json:"kind"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	Content     []byte    `json:"-"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
 func New(path string, databaseURL string) (*Store, error) {
 	s := &Store{path: path}
 	if strings.TrimSpace(databaseURL) != "" {
@@ -359,13 +370,16 @@ func (s *Store) UpdateProfile(email, firstName, lastName, avatarURL string) (Use
 }
 
 func (s *Store) SearchUsers(query string) []User {
+	users, _ := s.SearchUsersWithError(query)
+	return users
+}
+
+func (s *Store) SearchUsersWithError(query string) ([]User, error) {
 	if s.db != nil {
-		users, _ := s.searchUsersDB(query, false, 50)
-		return users
+		return s.searchUsersDB(query, false, 50)
 	}
 	if s.my != nil {
-		users, _ := s.searchUsersMySQL(query, false, 50)
-		return users
+		return s.searchUsersMySQL(query, false, 50)
 	}
 
 	s.mu.Lock()
@@ -382,7 +396,7 @@ func (s *Store) SearchUsers(query string) []User {
 			users = append(users, user)
 		}
 	}
-	return users
+	return users, nil
 }
 
 func (s *Store) AllUsers() []User {
@@ -410,6 +424,7 @@ func (s *Store) DeleteUser(id string) bool {
 			return false
 		}
 		_, _ = s.db.Exec(context.Background(), `delete from messages where sender_email = $1 or recipient_id = $2`, email, id)
+		_, _ = s.db.Exec(context.Background(), `delete from attachments where owner_id = $1`, id)
 		result, err := s.db.Exec(context.Background(), `delete from app_users where id = $1`, id)
 		return err == nil && result.RowsAffected() > 0
 	}
@@ -419,6 +434,7 @@ func (s *Store) DeleteUser(id string) bool {
 			return false
 		}
 		_, _ = s.my.ExecContext(context.Background(), `delete from messages where sender_email = ? or recipient_id = ?`, email, id)
+		_, _ = s.my.ExecContext(context.Background(), `delete from attachments where owner_id = ?`, id)
 		result, err := s.my.ExecContext(context.Background(), `delete from app_users where id = ?`, id)
 		affected, _ := result.RowsAffected()
 		return err == nil && affected > 0
@@ -683,6 +699,90 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 	return message, err
 }
 
+func (s *Store) SaveAttachment(ownerEmail, name, contentType, kind string, content []byte) (Attachment, error) {
+	if s.db == nil && s.my == nil {
+		return Attachment{}, errors.New("database is not configured")
+	}
+	owner, err := s.UserByEmail(ownerEmail)
+	if err != nil {
+		return Attachment{}, err
+	}
+	attachment := Attachment{
+		ID:          randomID(),
+		OwnerID:     owner.ID,
+		Name:        strings.TrimSpace(name),
+		ContentType: strings.TrimSpace(contentType),
+		Kind:        strings.TrimSpace(kind),
+		SizeBytes:   int64(len(content)),
+		Content:     content,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if attachment.Name == "" {
+		attachment.Name = "attachment"
+	}
+	if attachment.ContentType == "" {
+		attachment.ContentType = "application/octet-stream"
+	}
+	if attachment.Kind == "" {
+		attachment.Kind = "file"
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			insert into attachments (id, owner_id, name, content_type, kind, size_bytes, content, created_at)
+			values ($1,$2,$3,$4,$5,$6,$7,$8)
+		`, attachment.ID, attachment.OwnerID, attachment.Name, attachment.ContentType, attachment.Kind, attachment.SizeBytes, attachment.Content, attachment.CreatedAt)
+		return attachment, err
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		insert into attachments (id, owner_id, name, content_type, kind, size_bytes, content, created_at)
+		values (?,?,?,?,?,?,?,?)
+	`, attachment.ID, attachment.OwnerID, attachment.Name, attachment.ContentType, attachment.Kind, attachment.SizeBytes, attachment.Content, attachment.CreatedAt)
+	return attachment, err
+}
+
+func (s *Store) AttachmentByID(requesterEmail, id string) (Attachment, error) {
+	if s.db == nil && s.my == nil {
+		return Attachment{}, errors.New("database is not configured")
+	}
+	requester, err := s.UserByEmail(requesterEmail)
+	if err != nil {
+		return Attachment{}, err
+	}
+	id = strings.TrimSpace(id)
+	reference := "attachment:" + id
+	var attachment Attachment
+	if s.db != nil {
+		err = s.db.QueryRow(context.Background(), `
+			select a.id, a.owner_id, a.name, a.content_type, a.kind, a.size_bytes, a.content, a.created_at
+			from attachments a
+			where a.id = $1
+			  and (
+				a.owner_id = $2
+				or exists (
+					select 1 from messages m
+					where m.attachment_url = $3
+					  and (m.sender_email = $4 or m.recipient_id = $2)
+				)
+			  )
+		`, id, requester.ID, reference, requester.Email).Scan(&attachment.ID, &attachment.OwnerID, &attachment.Name, &attachment.ContentType, &attachment.Kind, &attachment.SizeBytes, &attachment.Content, &attachment.CreatedAt)
+		return attachment, err
+	}
+	err = s.my.QueryRowContext(context.Background(), `
+		select a.id, a.owner_id, a.name, a.content_type, a.kind, a.size_bytes, a.content, a.created_at
+		from attachments a
+		where a.id = ?
+		  and (
+			a.owner_id = ?
+			or exists (
+				select 1 from messages m
+				where m.attachment_url = ?
+				  and (m.sender_email = ? or m.recipient_id = ?)
+			)
+		  )
+	`, id, requester.ID, reference, requester.Email, requester.ID).Scan(&attachment.ID, &attachment.OwnerID, &attachment.Name, &attachment.ContentType, &attachment.Kind, &attachment.SizeBytes, &attachment.Content, &attachment.CreatedAt)
+	return attachment, err
+}
+
 func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Message, error) {
 	if s.db == nil && s.my == nil {
 		return []Message{}, nil
@@ -890,6 +990,17 @@ func (s *Store) migrate(ctx context.Context) error {
 				created_at datetime not null default current_timestamp,
 				resolved_at datetime null
 			)`,
+			`
+			create table if not exists attachments (
+				id varchar(64) primary key,
+				owner_id varchar(64) not null,
+				name text not null,
+				content_type varchar(255) not null,
+				kind varchar(32) not null,
+				size_bytes bigint not null,
+				content longblob not null,
+				created_at datetime not null default current_timestamp
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -899,6 +1010,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_url mediumtext null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at)`)
+		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
 		return nil
 	}
 	_, err := s.db.Exec(ctx, `
@@ -943,6 +1055,17 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at timestamptz not null default now(),
 			resolved_at timestamptz null
 		);
+		create table if not exists attachments (
+			id text primary key,
+			owner_id text not null,
+			name text not null,
+			content_type text not null,
+			kind text not null,
+			size_bytes bigint not null,
+			content bytea not null,
+			created_at timestamptz not null default now()
+		);
+		create index if not exists idx_attachments_owner on attachments (owner_id);
 	`)
 	if err != nil {
 		return err

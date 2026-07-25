@@ -95,6 +95,7 @@ export function AppShell() {
   const [isEmojiOpen, setIsEmojiOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<MessageStore>({});
   const [directoryChats, setDirectoryChats] = useState<ChatSeed[]>([]);
+  const [selectedChatSnapshot, setSelectedChatSnapshot] = useState<ChatSeed | null>(null);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("inbox");
   const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
   const [chatMessageSearch, setChatMessageSearch] = useState("");
@@ -105,12 +106,37 @@ export function AppShell() {
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
 
+  const knownChats = useMemo(() => {
+    const byId = new Map(directoryChats.map((chat) => [chat.id, chat]));
+    Object.entries(chatMessages).forEach(([chatId, messages]) => {
+      if (byId.has(chatId)) return;
+      const lastMessage = messages.at(-1);
+      const fallbackName = lastMessage?.senderId === chatId && lastMessage.senderEmail
+        ? nameFromEmail(lastMessage.senderEmail)
+        : "Conversation";
+      byId.set(chatId, {
+        id: chatId,
+        name: fallbackName,
+        avatar: chatInitials(fallbackName),
+        color: "bg-[#0f766e]",
+        preview: lastMessage?.body || lastMessage?.attachment?.name || "Saved conversation",
+        time: lastMessage?.time ?? "",
+        unread: 0,
+        online: false
+      });
+    });
+    if (selectedChatSnapshot && !byId.has(selectedChatSnapshot.id)) {
+      byId.set(selectedChatSnapshot.id, selectedChatSnapshot);
+    }
+    return Array.from(byId.values());
+  }, [chatMessages, directoryChats, selectedChatSnapshot]);
+
   const searchResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return [];
     return directoryChats.filter((chat) => `${chat.name} ${chat.preview}`.toLowerCase().includes(query));
   }, [chatSearch, directoryChats]);
-  const selectedChat = useMemo(() => directoryChats.find((chat) => chat.id === selectedChatId), [directoryChats, selectedChatId]);
+  const selectedChat = useMemo(() => knownChats.find((chat) => chat.id === selectedChatId), [knownChats, selectedChatId]);
   const selectedChatBlocked = selectedChatId ? blockedChatIds.includes(selectedChatId) : false;
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
   const visibleSelectedMessages = useMemo(() => {
@@ -121,14 +147,14 @@ export function AppShell() {
     );
   }, [chatMessageSearch, selectedMessages]);
   const inboxChats = useMemo(() => {
-    return directoryChats
+    return knownChats
       .filter((chat) => (chatMessages[chat.id] ?? []).length > 0)
       .sort((first, second) => {
         const firstMessages = chatMessages[first.id] ?? [];
         const secondMessages = chatMessages[second.id] ?? [];
         return (secondMessages.at(-1)?.id ?? "").localeCompare(firstMessages.at(-1)?.id ?? "");
       });
-  }, [chatMessages, directoryChats]);
+  }, [chatMessages, knownChats]);
   const unreadByChat = useMemo(() => {
     return Object.fromEntries(
       Object.entries(chatMessages).map(([chatId, messages]) => [
@@ -148,11 +174,11 @@ export function AppShell() {
       messages
         .filter((message) => message.attachment)
         .map((message) => ({
-          chat: directoryChats.find((chat) => chat.id === chatId),
+          chat: knownChats.find((chat) => chat.id === chatId),
           message
         }))
     );
-  }, [chatMessages, directoryChats]);
+  }, [chatMessages, knownChats]);
   const workspaceTitle = {
     inbox: "Inbox",
     search: "Search",
@@ -195,6 +221,7 @@ export function AppShell() {
   useEffect(() => {
     if (!isAuthed) return;
     setSelectedChatId("");
+    setSelectedChatSnapshot(null);
     setChatSearch("");
   }, [isAuthed]);
 
@@ -320,9 +347,11 @@ export function AppShell() {
         .then((data) => {
           if (cancelled) return;
           const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
-          setDirectoryChats(
-            users.map((user) => {
+          setDirectoryChats((current) => {
+            if (users.length === 0 && current.length > 0) return current;
+            return users.map((user) => {
               const chat = userToChat(user);
+              const previous = current.find((currentChat) => currentChat.id === chat.id);
               if (user.email === email) {
                 return {
                   ...chat,
@@ -331,9 +360,12 @@ export function AppShell() {
                   online: true
                 };
               }
-              return chat;
-            })
-          );
+              return {
+                ...chat,
+                online: chat.online || Boolean(previous?.online)
+              };
+            });
+          });
         })
         .catch(() => {
           // Keep the last good contact list so tab switching never flashes empty on a slow request.
@@ -777,6 +809,7 @@ export function AppShell() {
         })
       );
       setSelectedChatId("");
+      setSelectedChatSnapshot(null);
       setChatSearch("");
       setIsAuthed(true);
     } catch (error) {
@@ -967,6 +1000,7 @@ export function AppShell() {
     setAvatarPreview("");
     setProfileError("");
     setSelectedChatId("");
+    setSelectedChatSnapshot(null);
     setChatSearch("");
     setIsChatSearchOpen(false);
     setChatMessageSearch("");
@@ -982,6 +1016,12 @@ export function AppShell() {
     if (mode === "search") {
       window.setTimeout(() => chatSearchRef.current?.focus(), 0);
     }
+  }
+
+  function selectChat(chat: ChatSeed) {
+    setSelectedChatId(chat.id);
+    setSelectedChatSnapshot(chat);
+    setIsChatMenuOpen(false);
   }
 
   function toggleChatSearch() {
@@ -1065,6 +1105,7 @@ export function AppShell() {
 
   function closeCurrentChat() {
     setSelectedChatId("");
+    setSelectedChatSnapshot(null);
     setIsChatSearchOpen(false);
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
@@ -1601,7 +1642,7 @@ export function AppShell() {
                     <button
                       className="cs-hover-lift flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3 text-left transition hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       key={message.id}
-                      onClick={() => chat && setSelectedChatId(chat.id)}
+                      onClick={() => chat && selectChat(chat)}
                       type="button"
                     >
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70]">
@@ -1629,7 +1670,7 @@ export function AppShell() {
                   contactResults.map((chat) => (
                     <button
                       key={chat.id}
-                      onClick={() => setSelectedChatId(chat.id)}
+                      onClick={() => selectChat(chat)}
                       className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
@@ -1655,7 +1696,7 @@ export function AppShell() {
                   searchResults.map((chat) => (
                     <button
                       key={chat.id}
-                      onClick={() => setSelectedChatId(chat.id)}
+                      onClick={() => selectChat(chat)}
                       className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
@@ -1683,7 +1724,7 @@ export function AppShell() {
                     return (
                       <button
                         key={chat.id}
-                        onClick={() => setSelectedChatId(chat.id)}
+                        onClick={() => selectChat(chat)}
                         className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                           selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                         }`}
@@ -1785,7 +1826,7 @@ export function AppShell() {
                     {visibleSelectedMessages.map((message) => (
                       <div key={message.id} className={`cs-message-in flex ${message.mine ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
-                          {message.attachment ? <AttachmentPreview attachment={message.attachment} /> : null}
+                          {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
                           {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
                           <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
                             {message.time}
@@ -1935,27 +1976,37 @@ function wsUrl(token: string) {
   return `${base.replace(/^http/, "ws").replace(/\/$/, "")}/ws?token=${encodeURIComponent(token)}`;
 }
 
-function AttachmentPreview({ attachment }: { attachment: NonNullable<ChatMessage["attachment"]> }) {
+function AttachmentPreview({ attachment, authToken }: { attachment: NonNullable<ChatMessage["attachment"]>; authToken: string }) {
   const [failed, setFailed] = useState(false);
-  const canPreview = Boolean(attachment.url && /^(https?:|data:|blob:)/i.test(attachment.url) && !failed);
+  const source = attachmentSource(attachment.url, authToken);
+  const canPreview = Boolean(source && /^(https?:|data:|blob:)/i.test(source) && !failed);
 
   if (attachment.kind === "image" && canPreview) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img alt={attachment.name} className="mb-3 max-h-64 rounded-md object-cover" onError={() => setFailed(true)} src={attachment.url} />
+      <img alt={attachment.name} className="mb-3 max-h-64 rounded-md object-cover" onError={() => setFailed(true)} src={source} />
     );
   }
 
   if (attachment.kind === "video" && canPreview) {
-    return <video className="mb-3 max-h-64 rounded-md" controls onError={() => setFailed(true)} src={attachment.url} />;
+    return <video className="mb-3 max-h-64 rounded-md" controls onError={() => setFailed(true)} src={source} />;
   }
 
   return (
-    <a className="mb-3 flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={attachment.url || undefined} download={attachment.name}>
+    <a className="mb-3 flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
       <FileText size={20} />
       <span className="min-w-0 truncate">{attachment.name}</span>
     </a>
   );
+}
+
+function attachmentSource(url: string, token: string) {
+  if (!url) return "";
+  if (url.startsWith("attachment:")) {
+    const id = url.slice("attachment:".length);
+    return `${apiUrl()}/api/v1/files/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
+  }
+  return url;
 }
 
 function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) {
@@ -1969,6 +2020,20 @@ function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) 
       )}
     </span>
   );
+}
+
+function nameFromEmail(email?: string) {
+  const localPart = (email ?? "").split("@")[0] ?? "";
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || "Conversation";
+}
+
+function chatInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return `${parts[0]?.[0] ?? "C"}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
 function initials(firstName: string, lastName: string) {
