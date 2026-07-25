@@ -51,16 +51,37 @@ type User struct {
 }
 
 type Message struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversationId"`
-	SenderEmail    string    `json:"senderEmail"`
-	SenderID       string    `json:"senderId,omitempty"`
-	RecipientID    string    `json:"recipientId"`
-	Body           string    `json:"body"`
-	AttachmentName string    `json:"attachmentName,omitempty"`
-	AttachmentType string    `json:"attachmentType,omitempty"`
-	AttachmentKind string    `json:"attachmentKind,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID             string     `json:"id"`
+	ConversationID string     `json:"conversationId"`
+	SenderEmail    string     `json:"senderEmail"`
+	SenderID       string     `json:"senderId,omitempty"`
+	RecipientID    string     `json:"recipientId"`
+	Body           string     `json:"body"`
+	AttachmentName string     `json:"attachmentName,omitempty"`
+	AttachmentType string     `json:"attachmentType,omitempty"`
+	AttachmentKind string     `json:"attachmentKind,omitempty"`
+	AttachmentURL  string     `json:"attachmentUrl,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	ReadAt         *time.Time `json:"readAt,omitempty"`
+}
+
+type UserBlock struct {
+	BlockerID string    `json:"blockerId"`
+	BlockedID string    `json:"blockedId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Report struct {
+	ID           string     `json:"id"`
+	ReporterID   string     `json:"reporterId"`
+	ReportedID   string     `json:"reportedId"`
+	MessageID    string     `json:"messageId,omitempty"`
+	Reason       string     `json:"reason"`
+	Status       string     `json:"status"`
+	ReporterName string     `json:"reporterName,omitempty"`
+	ReportedName string     `json:"reportedName,omitempty"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	ResolvedAt   *time.Time `json:"resolvedAt,omitempty"`
 }
 
 func New(path string, databaseURL string) (*Store, error) {
@@ -339,11 +360,11 @@ func (s *Store) UpdateProfile(email, firstName, lastName, avatarURL string) (Use
 
 func (s *Store) SearchUsers(query string) []User {
 	if s.db != nil {
-		users, _ := s.searchUsersDB(query, false)
+		users, _ := s.searchUsersDB(query, false, 50)
 		return users
 	}
 	if s.my != nil {
-		users, _ := s.searchUsersMySQL(query, false)
+		users, _ := s.searchUsersMySQL(query, false, 50)
 		return users
 	}
 
@@ -366,11 +387,11 @@ func (s *Store) SearchUsers(query string) []User {
 
 func (s *Store) AllUsers() []User {
 	if s.db != nil {
-		users, _ := s.searchUsersDB("", true)
+		users, _ := s.searchUsersDB("", true, 500)
 		return users
 	}
 	if s.my != nil {
-		users, _ := s.searchUsersMySQL("", true)
+		users, _ := s.searchUsersMySQL("", true, 500)
 		return users
 	}
 
@@ -452,13 +473,188 @@ func (s *Store) SetUserBlocked(id string, blocked bool) (User, bool) {
 	return User{}, false
 }
 
-func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind string) (Message, error) {
+func (s *Store) BlockUser(blockerEmail, blockedID string) error {
+	if s.db == nil && s.my == nil {
+		return errors.New("database is not configured")
+	}
+	blocker, err := s.UserByEmail(blockerEmail)
+	if err != nil {
+		return err
+	}
+	blockedID = strings.TrimSpace(blockedID)
+	if blockedID == "" || blockedID == blocker.ID {
+		return errors.New("invalid user")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			insert into user_blocks (blocker_id, blocked_id, created_at)
+			values ($1,$2,now())
+			on conflict (blocker_id, blocked_id) do nothing
+		`, blocker.ID, blockedID)
+		return err
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		insert ignore into user_blocks (blocker_id, blocked_id, created_at)
+		values (?,?,utc_timestamp())
+	`, blocker.ID, blockedID)
+	return err
+}
+
+func (s *Store) UnblockUser(blockerEmail, blockedID string) error {
+	if s.db == nil && s.my == nil {
+		return errors.New("database is not configured")
+	}
+	blocker, err := s.UserByEmail(blockerEmail)
+	if err != nil {
+		return err
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `delete from user_blocks where blocker_id = $1 and blocked_id = $2`, blocker.ID, strings.TrimSpace(blockedID))
+		return err
+	}
+	_, err = s.my.ExecContext(context.Background(), `delete from user_blocks where blocker_id = ? and blocked_id = ?`, blocker.ID, strings.TrimSpace(blockedID))
+	return err
+}
+
+func (s *Store) IsBlockedBetween(firstUserID, secondUserID string) bool {
+	if s.db == nil && s.my == nil {
+		return false
+	}
+	firstUserID = strings.TrimSpace(firstUserID)
+	secondUserID = strings.TrimSpace(secondUserID)
+	if firstUserID == "" || secondUserID == "" {
+		return false
+	}
+	var exists bool
+	if s.db != nil {
+		err := s.db.QueryRow(context.Background(), `
+			select exists(select 1 from user_blocks where (blocker_id = $1 and blocked_id = $2) or (blocker_id = $2 and blocked_id = $1))
+		`, firstUserID, secondUserID).Scan(&exists)
+		return err == nil && exists
+	}
+	err := s.my.QueryRowContext(context.Background(), `
+		select exists(select 1 from user_blocks where (blocker_id = ? and blocked_id = ?) or (blocker_id = ? and blocked_id = ?))
+	`, firstUserID, secondUserID, secondUserID, firstUserID).Scan(&exists)
+	return err == nil && exists
+}
+
+func (s *Store) CreateReport(reporterEmail, reportedID, messageID, reason string) (Report, error) {
+	if s.db == nil && s.my == nil {
+		return Report{}, errors.New("database is not configured")
+	}
+	reporter, err := s.UserByEmail(reporterEmail)
+	if err != nil {
+		return Report{}, err
+	}
+	report := Report{
+		ID:         randomID(),
+		ReporterID: reporter.ID,
+		ReportedID: strings.TrimSpace(reportedID),
+		MessageID:  strings.TrimSpace(messageID),
+		Reason:     strings.TrimSpace(reason),
+		Status:     "open",
+		CreatedAt:  time.Now().UTC(),
+	}
+	if report.ReportedID == "" || report.ReportedID == reporter.ID {
+		return Report{}, errors.New("invalid reported user")
+	}
+	if report.Reason == "" {
+		report.Reason = "No reason provided"
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			insert into reports (id, reporter_id, reported_id, message_id, reason, status, created_at)
+			values ($1,$2,$3,$4,$5,$6,$7)
+		`, report.ID, report.ReporterID, report.ReportedID, report.MessageID, report.Reason, report.Status, report.CreatedAt)
+		return report, err
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		insert into reports (id, reporter_id, reported_id, message_id, reason, status, created_at)
+		values (?,?,?,?,?,?,?)
+	`, report.ID, report.ReporterID, report.ReportedID, report.MessageID, report.Reason, report.Status, report.CreatedAt)
+	return report, err
+}
+
+func (s *Store) ListReports() ([]Report, error) {
+	if s.db == nil && s.my == nil {
+		return []Report{}, nil
+	}
+	query := `
+		select r.id, r.reporter_id, r.reported_id, coalesce(r.message_id, ''), r.reason, r.status,
+			coalesce(reporter.first_name || ' ' || reporter.last_name, ''), coalesce(reported.first_name || ' ' || reported.last_name, ''),
+			r.created_at, r.resolved_at
+		from reports r
+		left join app_users reporter on reporter.id = r.reporter_id
+		left join app_users reported on reported.id = r.reported_id
+		order by r.created_at desc
+	`
+	var rows messageRows
+	closeRows := func() {}
+	var err error
+	if s.db != nil {
+		pgRows, queryErr := s.db.Query(context.Background(), query)
+		rows, err = pgRows, queryErr
+		closeRows = pgRows.Close
+	} else {
+		mysqlQuery := strings.ReplaceAll(query, "reporter.first_name || ' ' || reporter.last_name", "concat(reporter.first_name, ' ', reporter.last_name)")
+		mysqlQuery = strings.ReplaceAll(mysqlQuery, "reported.first_name || ' ' || reported.last_name", "concat(reported.first_name, ' ', reported.last_name)")
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), mysqlQuery)
+		rows, err = sqlRows, queryErr
+		closeRows = func() { _ = sqlRows.Close() }
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer closeRows()
+
+	reports := []Report{}
+	for rows.Next() {
+		var report Report
+		if err := rows.Scan(&report.ID, &report.ReporterID, &report.ReportedID, &report.MessageID, &report.Reason, &report.Status, &report.ReporterName, &report.ReportedName, &report.CreatedAt, &report.ResolvedAt); err != nil {
+			return nil, err
+		}
+		report.ReporterName = strings.TrimSpace(report.ReporterName)
+		report.ReportedName = strings.TrimSpace(report.ReportedName)
+		reports = append(reports, report)
+	}
+	return reports, rows.Err()
+}
+
+func (s *Store) ResolveReport(id string) error {
+	if s.db == nil && s.my == nil {
+		return errors.New("database is not configured")
+	}
+	if s.db != nil {
+		result, err := s.db.Exec(context.Background(), `update reports set status = 'resolved', resolved_at = now() where id = $1`, strings.TrimSpace(id))
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errors.New("report not found")
+		}
+		return nil
+	}
+	result, err := s.my.ExecContext(context.Background(), `update reports set status = 'resolved', resolved_at = utc_timestamp() where id = ?`, strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return errors.New("report not found")
+	}
+	return nil
+}
+
+func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind, attachmentURL string) (Message, error) {
 	if s.db == nil && s.my == nil {
 		return Message{}, errors.New("database is not configured")
 	}
 	sender, err := s.UserByEmail(senderEmail)
 	if err != nil {
 		return Message{}, err
+	}
+	if s.IsBlockedBetween(sender.ID, strings.TrimSpace(recipientID)) {
+		return Message{}, errors.New("messaging is blocked between these users")
 	}
 	message := Message{
 		ID:             randomID(),
@@ -470,23 +666,24 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 		AttachmentName: strings.TrimSpace(attachmentName),
 		AttachmentType: strings.TrimSpace(attachmentType),
 		AttachmentKind: strings.TrimSpace(attachmentKind),
+		AttachmentURL:  strings.TrimSpace(attachmentURL),
 		CreatedAt:      time.Now().UTC(),
 	}
 	if s.db != nil {
 		_, err = s.db.Exec(context.Background(), `
-			insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, created_at)
-			values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.CreatedAt)
+			insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
 	} else {
 		_, err = s.my.ExecContext(context.Background(), `
-			insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, created_at)
-			values (?,?,?,?,?,?,?,?,?)
-		`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.CreatedAt)
+			insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
+			values (?,?,?,?,?,?,?,?,?,?)
+		`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
 	}
 	return message, err
 }
 
-func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
+func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Message, error) {
 	if s.db == nil && s.my == nil {
 		return []Message{}, nil
 	}
@@ -494,21 +691,25 @@ func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
 	query := `
-		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, m.created_at
+		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, coalesce(m.attachment_url, ''), m.created_at, m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where conversation_id = %s
-		order by m.created_at asc
+		order by m.created_at desc
+		limit %s
 	`
 	var rows messageRows
 	closeRows := func() {}
 	if s.db != nil {
-		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1"), conversationID(user.ID, otherUserID))
+		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2"), conversationID(user.ID, otherUserID), limit)
 		rows, err = pgRows, queryErr
 		closeRows = pgRows.Close
 	} else {
-		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?"), conversationID(user.ID, otherUserID))
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?"), conversationID(user.ID, otherUserID), limit)
 		rows, err = sqlRows, queryErr
 		closeRows = func() { _ = sqlRows.Close() }
 	}
@@ -520,15 +721,15 @@ func (s *Store) ListMessages(userEmail, otherUserID string) ([]Message, error) {
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt); err != nil {
 			return nil, err
 		}
-		messages = append(messages, message)
+		messages = append([]Message{message}, messages...)
 	}
 	return messages, rows.Err()
 }
 
-func (s *Store) ListInboxMessages(userEmail string) ([]Message, error) {
+func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error) {
 	if s.db == nil && s.my == nil {
 		return []Message{}, nil
 	}
@@ -536,21 +737,25 @@ func (s *Store) ListInboxMessages(userEmail string) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	if limit <= 0 || limit > 300 {
+		limit = 200
+	}
 	query := `
-		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, m.created_at
+		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, coalesce(m.attachment_url, ''), m.created_at, m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where m.sender_email = %s or m.recipient_id = %s
-		order by m.created_at asc
+		order by m.created_at desc
+		limit %s
 	`
 	var rows messageRows
 	closeRows := func() {}
 	if s.db != nil {
-		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID)
+		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID, limit)
 		rows, err = pgRows, queryErr
 		closeRows = pgRows.Close
 	} else {
-		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID)
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID, limit)
 		rows, err = sqlRows, queryErr
 		closeRows = func() { _ = sqlRows.Close() }
 	}
@@ -562,12 +767,80 @@ func (s *Store) ListInboxMessages(userEmail string) ([]Message, error) {
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt); err != nil {
 			return nil, err
 		}
-		messages = append(messages, message)
+		messages = append([]Message{message}, messages...)
 	}
 	return messages, rows.Err()
+}
+
+func (s *Store) MarkConversationRead(userEmail, otherUserID string) error {
+	if s.db == nil && s.my == nil {
+		return nil
+	}
+	user, err := s.UserByEmail(userEmail)
+	if err != nil {
+		return err
+	}
+	conversation := conversationID(user.ID, otherUserID)
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			update messages set read_at = coalesce(read_at, now())
+			where conversation_id = $1 and recipient_id = $2
+		`, conversation, user.ID)
+		return err
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		update messages set read_at = coalesce(read_at, utc_timestamp())
+		where conversation_id = ? and recipient_id = ?
+	`, conversation, user.ID)
+	return err
+}
+
+func (s *Store) UpdateMessage(userEmail, id, body string) (Message, error) {
+	if s.db == nil && s.my == nil {
+		return Message{}, errors.New("database is not configured")
+	}
+	email := strings.ToLower(strings.TrimSpace(userEmail))
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `update messages set body = $2 where id = $1 and sender_email = $3`, id, strings.TrimSpace(body), email)
+		if err != nil {
+			return Message{}, err
+		}
+		return s.messageByID(id)
+	}
+	_, err := s.my.ExecContext(context.Background(), `update messages set body = ? where id = ? and sender_email = ?`, strings.TrimSpace(body), id, email)
+	if err != nil {
+		return Message{}, err
+	}
+	return s.messageByID(id)
+}
+
+func (s *Store) DeleteMessage(userEmail, id string) error {
+	if s.db == nil && s.my == nil {
+		return errors.New("database is not configured")
+	}
+	email := strings.ToLower(strings.TrimSpace(userEmail))
+	if s.db != nil {
+		result, err := s.db.Exec(context.Background(), `delete from messages where id = $1 and sender_email = $2`, id, email)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errors.New("message not found")
+		}
+		return nil
+	}
+	result, err := s.my.ExecContext(context.Background(), `delete from messages where id = ? and sender_email = ?`, id, email)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return errors.New("message not found")
+	}
+	return nil
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -595,7 +868,27 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_name text not null,
 				attachment_type text not null,
 				attachment_kind varchar(32) not null,
+				attachment_url mediumtext not null,
+				read_at datetime null,
 				created_at datetime not null default current_timestamp
+			)`,
+			`
+			create table if not exists user_blocks (
+				blocker_id varchar(64) not null,
+				blocked_id varchar(64) not null,
+				created_at datetime not null default current_timestamp,
+				primary key (blocker_id, blocked_id)
+			)`,
+			`
+			create table if not exists reports (
+				id varchar(64) primary key,
+				reporter_id varchar(64) not null,
+				reported_id varchar(64) not null,
+				message_id varchar(64) not null default '',
+				reason text not null,
+				status varchar(32) not null default 'open',
+				created_at datetime not null default current_timestamp,
+				resolved_at datetime null
 			)`,
 		}
 		for _, statement := range statements {
@@ -603,6 +896,8 @@ func (s *Store) migrate(ctx context.Context) error {
 				return err
 			}
 		}
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_url mediumtext null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at)`)
 		return nil
 	}
@@ -627,10 +922,33 @@ func (s *Store) migrate(ctx context.Context) error {
 			attachment_name text not null default '',
 			attachment_type text not null default '',
 			attachment_kind text not null default '',
+			attachment_url text not null default '',
+			read_at timestamptz null,
 			created_at timestamptz not null default now()
 		);
 		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at);
+		create table if not exists user_blocks (
+			blocker_id text not null,
+			blocked_id text not null,
+			created_at timestamptz not null default now(),
+			primary key (blocker_id, blocked_id)
+		);
+		create table if not exists reports (
+			id text primary key,
+			reporter_id text not null,
+			reported_id text not null,
+			message_id text not null default '',
+			reason text not null,
+			status text not null default 'open',
+			created_at timestamptz not null default now(),
+			resolved_at timestamptz null
+		);
 	`)
+	if err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_url text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists read_at timestamptz null`)
 	return err
 }
 
@@ -725,15 +1043,19 @@ func (s *Store) userByEmailMySQL(email string) (User, error) {
 	return user, err
 }
 
-func (s *Store) searchUsersMySQL(query string, includeBlocked bool) ([]User, error) {
+func (s *Store) searchUsersMySQL(query string, includeBlocked bool, limit int) ([]User, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
 	rows, err := s.my.QueryContext(context.Background(), `
 		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
 		from app_users
 		where (? = '' or lower(concat(first_name, ' ', last_name)) like concat('%', ?, '%') or lower(email) like concat('%', ?, '%'))
 		  and (? = true or blocked = false)
 		order by created_at desc
-	`, query, query, query, includeBlocked)
+		limit ?
+	`, query, query, query, includeBlocked, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -750,15 +1072,19 @@ func (s *Store) searchUsersMySQL(query string, includeBlocked bool) ([]User, err
 	return users, rows.Err()
 }
 
-func (s *Store) searchUsersDB(query string, includeBlocked bool) ([]User, error) {
+func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]User, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
 	rows, err := s.db.Query(context.Background(), `
 		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
 		from app_users
 		where ($1 = '' or lower(first_name || ' ' || last_name) like '%' || $1 || '%' or lower(email) like '%' || $1 || '%')
 		  and ($2 = true or blocked = false)
 		order by created_at desc
-	`, query, includeBlocked)
+		limit $3
+	`, query, includeBlocked, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -773,6 +1099,22 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool) ([]User, error)
 		users = append(users, user)
 	}
 	return users, rows.Err()
+}
+
+func (s *Store) messageByID(id string) (Message, error) {
+	query := `
+		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, coalesce(m.attachment_url, ''), m.created_at, m.read_at
+		from messages m
+		left join app_users u on u.email = m.sender_email
+		where m.id = %s
+	`
+	var message Message
+	if s.db != nil {
+		err := s.db.QueryRow(context.Background(), fmt.Sprintf(query, "$1"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
+		return message, err
+	}
+	err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
+	return message, err
 }
 
 func conversationID(email string, otherUserID string) string {

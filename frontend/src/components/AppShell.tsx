@@ -32,6 +32,7 @@ type ChatMessage = {
   senderEmail?: string;
   senderId?: string;
   recipientId?: string;
+  readAt?: string | null;
   attachment?: {
     name: string;
     type: string;
@@ -39,6 +40,7 @@ type ChatMessage = {
     kind: "image" | "video" | "file";
   };
 };
+type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type MessageStore = Record<string, ChatMessage[]>;
 type WorkspaceMode = "inbox" | "search" | "contacts" | "files";
 type AdminUser = {
@@ -47,6 +49,17 @@ type AdminUser = {
   firstName: string;
   lastName?: string;
   blocked?: boolean;
+  createdAt?: string;
+};
+type AdminReport = {
+  id: string;
+  reporterId: string;
+  reportedId: string;
+  messageId?: string;
+  reason: string;
+  status: string;
+  reporterName?: string;
+  reportedName?: string;
   createdAt?: string;
 };
 
@@ -64,6 +77,7 @@ export function AppShell() {
   const [authToken, setAuthToken] = useState("");
   const [adminToken, setAdminToken] = useState("");
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminReports, setAdminReports] = useState<AdminReport[]>([]);
   const [resendSeconds, setResendSeconds] = useState(0);
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -77,7 +91,7 @@ export function AppShell() {
   const [selectedChatId, setSelectedChatId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
-  const [attachmentDraft, setAttachmentDraft] = useState<ChatMessage["attachment"] | null>(null);
+  const [attachmentDraft, setAttachmentDraft] = useState<AttachmentDraft | null>(null);
   const [isEmojiOpen, setIsEmojiOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<MessageStore>({});
   const [directoryChats, setDirectoryChats] = useState<ChatSeed[]>([]);
@@ -85,6 +99,8 @@ export function AppShell() {
   const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
   const [chatMessageSearch, setChatMessageSearch] = useState("");
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
+  const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
+  const [chatNotice, setChatNotice] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
@@ -95,6 +111,7 @@ export function AppShell() {
     return directoryChats.filter((chat) => `${chat.name} ${chat.preview}`.toLowerCase().includes(query));
   }, [chatSearch, directoryChats]);
   const selectedChat = useMemo(() => directoryChats.find((chat) => chat.id === selectedChatId), [directoryChats, selectedChatId]);
+  const selectedChatBlocked = selectedChatId ? blockedChatIds.includes(selectedChatId) : false;
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
   const visibleSelectedMessages = useMemo(() => {
     const query = chatMessageSearch.trim().toLowerCase();
@@ -112,6 +129,14 @@ export function AppShell() {
         return (secondMessages.at(-1)?.id ?? "").localeCompare(firstMessages.at(-1)?.id ?? "");
       });
   }, [chatMessages, directoryChats]);
+  const unreadByChat = useMemo(() => {
+    return Object.fromEntries(
+      Object.entries(chatMessages).map(([chatId, messages]) => [
+        chatId,
+        messages.filter((message) => !message.mine && !message.readAt).length
+      ])
+    ) as Record<string, number>;
+  }, [chatMessages]);
   const contactResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return directoryChats;
@@ -176,6 +201,7 @@ export function AppShell() {
   useEffect(() => {
     if (!isAdmin || !adminToken) return;
     loadAdminUsers(adminToken);
+    loadAdminReports(adminToken);
   }, [adminToken, isAdmin]);
 
   useEffect(() => {
@@ -328,6 +354,20 @@ export function AppShell() {
   }, [authToken, currentUserId, directoryChats.length, email, isAuthed]);
 
   useEffect(() => {
+    if (!selectedChatId || !authToken) return;
+    setChatNotice("");
+    fetch(`${apiUrl()}/api/v1/messages/${selectedChatId}/read`, {
+      method: "POST",
+      headers: authHeaders(authToken)
+    }).catch(() => {});
+    const readAt = new Date().toISOString();
+    setChatMessages((current) => ({
+      ...current,
+      [selectedChatId]: (current[selectedChatId] ?? []).map((message) => (message.mine ? message : { ...message, readAt }))
+    }));
+  }, [authToken, selectedChatId]);
+
+  useEffect(() => {
     if (resendSeconds <= 0) return;
 
     const timer = window.setInterval(() => {
@@ -385,7 +425,7 @@ export function AppShell() {
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (email.trim().toLowerCase() === "chatsphere@gmail.com" && password === "1234123") {
+    if (email.trim().toLowerCase() === adminEmail().toLowerCase()) {
       await loginAdmin();
       return;
     }
@@ -478,6 +518,21 @@ export function AppShell() {
     }
   }
 
+  async function loadAdminReports(token = adminToken) {
+    if (!token) return;
+    setAdminError("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/admin/reports`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not load reports");
+      setAdminReports(Array.isArray(data.reports) ? data.reports : []);
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Could not load reports");
+    }
+  }
+
   async function updateAdminUser(id: string, action: "block" | "unblock" | "delete") {
     setAdminError("");
     try {
@@ -490,6 +545,21 @@ export function AppShell() {
       await loadAdminUsers();
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : "Admin action failed");
+    }
+  }
+
+  async function resolveAdminReport(id: string) {
+    setAdminError("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/admin/reports/${id}/resolve`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not resolve report");
+      await loadAdminReports();
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : "Could not resolve report");
     }
   }
 
@@ -631,7 +701,8 @@ export function AppShell() {
       name: file.name,
       type: file.type || "application/octet-stream",
       url: URL.createObjectURL(file),
-      kind
+      kind,
+      file
     });
   }
 
@@ -758,9 +829,45 @@ export function AppShell() {
     }
   }
 
+  async function uploadAttachment(draft: AttachmentDraft) {
+    if (!draft.file) return draft;
+    const formData = new FormData();
+    formData.set("file", draft.file);
+    const response = await fetch(`${apiUrl()}/api/v1/upload`, {
+      method: "POST",
+      headers: authHeaders(authToken),
+      body: formData
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? "Could not upload file");
+    return {
+      name: data.name ?? draft.name,
+      type: data.type ?? draft.type,
+      kind: data.kind ?? draft.kind,
+      url: data.url ?? draft.url
+    } as NonNullable<ChatMessage["attachment"]>;
+  }
+
   async function sendChatMessage() {
     const body = messageDraft.trim();
     if ((!body && !attachmentDraft) || !selectedChatId || !authToken) return;
+    if (selectedChatBlocked) {
+      setChatNotice("You blocked this user. Unblock them before sending messages.");
+      return;
+    }
+    const draft = attachmentDraft;
+    setMessageDraft("");
+    setAttachmentDraft(null);
+    setIsEmojiOpen(false);
+
+    let uploadedAttachment: NonNullable<ChatMessage["attachment"]> | undefined;
+    try {
+      uploadedAttachment = draft ? await uploadAttachment(draft) : undefined;
+    } catch (error) {
+      setAttachmentDraft(draft);
+      setAuthError(error instanceof Error ? error.message : "Could not upload file");
+      return;
+    }
 
     const message: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -768,34 +875,36 @@ export function AppShell() {
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       mine: true,
       senderEmail: email,
-      attachment: attachmentDraft ?? undefined
+      recipientId: selectedChatId,
+      attachment: uploadedAttachment
     };
 
     setChatMessages((current) => ({
       ...current,
       [selectedChatId]: [...(current[selectedChatId] ?? []), message]
     }));
-    setMessageDraft("");
-    setAttachmentDraft(null);
-    setIsEmojiOpen(false);
-
-    fetch(`${apiUrl()}/api/v1/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
-      body: JSON.stringify({
-        recipientId: selectedChatId,
-        body,
-        attachment: attachmentDraft
-          ? {
-              name: attachmentDraft.name,
-              type: attachmentDraft.type,
-              kind: attachmentDraft.kind
-            }
-          : undefined
-      })
-    }).catch(() => {
-      // Realtime UI remains optimistic; failed persistence can be retried after DB status handling is added.
-    });
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
+        body: JSON.stringify({
+          recipientId: selectedChatId,
+          body,
+          attachment: uploadedAttachment
+            ? {
+                name: uploadedAttachment.name,
+                type: uploadedAttachment.type,
+                kind: uploadedAttachment.kind,
+                url: uploadedAttachment.url
+              }
+            : undefined
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Message could not be saved");
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
+    }
 
   }
 
@@ -875,6 +984,63 @@ export function AppShell() {
     setIsChatMenuOpen(false);
   }
 
+  async function blockCurrentChat() {
+    if (!selectedChatId || !authToken) return;
+    setChatNotice("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/contacts/${selectedChatId}/block`, {
+        method: "POST",
+        headers: authHeaders(authToken)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not block user");
+      setBlockedChatIds((current) => Array.from(new Set([...current, selectedChatId])));
+      setChatNotice("User blocked. They cannot message you and you cannot message them.");
+      setIsChatMenuOpen(false);
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not block user");
+    }
+  }
+
+  async function unblockCurrentChat() {
+    if (!selectedChatId || !authToken) return;
+    setChatNotice("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/contacts/${selectedChatId}/block`, {
+        method: "DELETE",
+        headers: authHeaders(authToken)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not unblock user");
+      setBlockedChatIds((current) => current.filter((id) => id !== selectedChatId));
+      setChatNotice("User unblocked.");
+      setIsChatMenuOpen(false);
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not unblock user");
+    }
+  }
+
+  async function reportCurrentChat() {
+    if (!selectedChatId || !authToken) return;
+    const reason = window.prompt("Why are you reporting this user?");
+    if (reason === null) return;
+    setChatNotice("");
+    try {
+      const lastIncoming = [...(chatMessages[selectedChatId] ?? [])].reverse().find((message) => !message.mine);
+      const response = await fetch(`${apiUrl()}/api/v1/contacts/${selectedChatId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
+        body: JSON.stringify({ reason: reason.trim() || "No reason provided", messageId: lastIncoming?.id ?? "" })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not report user");
+      setChatNotice("Report sent to admin.");
+      setIsChatMenuOpen(false);
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not report user");
+    }
+  }
+
   function closeCurrentChat() {
     setSelectedChatId("");
     setIsChatSearchOpen(false);
@@ -892,7 +1058,10 @@ export function AppShell() {
               <h1 className="mt-2 text-3xl font-black tracking-normal">User Control</h1>
             </div>
             <div className="flex gap-2">
-              <button className="rounded-xl border border-[#dce1e8] bg-white px-4 py-2 text-sm font-black text-[#334155]" onClick={() => loadAdminUsers()} type="button">Refresh</button>
+              <button className="rounded-xl border border-[#dce1e8] bg-white px-4 py-2 text-sm font-black text-[#334155]" onClick={() => {
+                loadAdminUsers();
+                loadAdminReports();
+              }} type="button">Refresh</button>
               <button className="rounded-xl bg-[#111827] px-4 py-2 text-sm font-black text-white" onClick={logout} type="button">Logout</button>
             </div>
           </header>
@@ -940,6 +1109,37 @@ export function AppShell() {
               <div className="px-5 py-12 text-center text-sm font-bold text-[#64748b]">No registered users yet.</div>
             )}
           </div>
+
+          <div className="mt-6 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white">
+            <div className="flex items-center justify-between border-b border-[#e5e9f0] bg-[#f8fafc] px-4 py-3">
+              <h2 className="text-sm font-black uppercase tracking-[0.12em] text-[#64748b]">Moderation reports</h2>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-[#64748b]">{adminReports.filter((report) => report.status !== "resolved").length} open</span>
+            </div>
+            {adminReports.length ? (
+              adminReports.map((report) => (
+                <div className="grid gap-3 border-b border-[#edf1f5] px-4 py-4 last:border-b-0 lg:grid-cols-[1fr_140px]" key={report.id}>
+                  <div className="min-w-0">
+                    <div className="text-sm font-black text-[#18212f]">
+                      {report.reporterName || report.reporterId} reported {report.reportedName || report.reportedId}
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-[#64748b]">{report.reason}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-[#94a3b8]">
+                      {report.messageId ? <span>Message: {report.messageId}</span> : null}
+                      <span>{report.createdAt ? new Date(report.createdAt).toLocaleString() : "Unknown date"}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 lg:justify-end">
+                    <span className={`rounded-full px-3 py-1 text-xs font-black ${report.status === "resolved" ? "bg-[#e7f8f2] text-[#008f70]" : "bg-amber-50 text-amber-700"}`}>{report.status}</span>
+                    {report.status !== "resolved" ? (
+                      <button className="rounded-xl border border-[#dce1e8] px-3 py-2 text-sm font-black text-[#334155]" onClick={() => resolveAdminReport(report.id)} type="button">Resolve</button>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="px-5 py-12 text-center text-sm font-bold text-[#64748b]">No reports yet.</div>
+            )}
+          </div>
         </section>
       </main>
     );
@@ -949,7 +1149,7 @@ export function AppShell() {
     return (
       <main className="min-h-screen bg-[#07130f] text-white">
         <section className="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
-          <div className="max-w-2xl">
+          <div className="cs-fade-up-delay max-w-2xl">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#00a884] text-[#07130f] shadow-[0_18px_50px_rgba(0,168,132,.25)]">
               <MessageCircle size={31} />
             </div>
@@ -971,7 +1171,7 @@ export function AppShell() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-[#101b17] p-6 shadow-[0_30px_90px_rgba(0,0,0,.38)]">
+          <div className="cs-auth-card rounded-2xl border border-white/10 bg-[#101b17] p-6 shadow-[0_30px_90px_rgba(0,0,0,.38)]">
             {(authStep === "signup" || authStep === "login") ? (
               <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/10 bg-[#07130f] p-1">
                 <button
@@ -1088,7 +1288,7 @@ export function AppShell() {
                     type="password"
                   />
                 </label>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   {isSubmitting ? "Creating account..." : "Signup"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
                 </button>
@@ -1118,7 +1318,7 @@ export function AppShell() {
                     type="password"
                   />
                 </label>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   Login
                   <ShieldCheck size={18} />
                 </button>
@@ -1151,7 +1351,7 @@ export function AppShell() {
                     type="email"
                   />
                 </label>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   {isSubmitting ? "Sending code..." : "Send reset code"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
                 </button>
@@ -1173,7 +1373,7 @@ export function AppShell() {
                     placeholder="000000"
                   />
                 </label>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   Verify code
                   <ShieldCheck size={18} />
                 </button>
@@ -1209,7 +1409,7 @@ export function AppShell() {
                     type="password"
                   />
                 </label>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   Update password
                   <ShieldCheck size={18} />
                 </button>
@@ -1243,7 +1443,7 @@ export function AppShell() {
                     <div className="mt-1 text-sm leading-5 text-[#aebac1]">Upload a photo so contacts can recognize you.</div>
                   </div>
                 </div>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
                   {isSubmitting ? "Saving profile..." : "Continue to chats"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                 </button>
@@ -1274,13 +1474,17 @@ export function AppShell() {
                     Resend
                   </button>
                 </div>
-                <button className="flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
+                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
                   {isSubmitting ? "Checking code..." : "Verify and continue"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                 </button>
                 {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             )}
+            <div className="mt-6 flex justify-center gap-4 border-t border-white/10 pt-4 text-xs font-bold text-[#8696a0]">
+              <a className="hover:text-white" href="/privacy">Privacy</a>
+              <a className="hover:text-white" href="/terms">Terms</a>
+            </div>
           </div>
         </section>
       </main>
@@ -1302,7 +1506,7 @@ export function AppShell() {
               return (
               <button
                 aria-label={label}
-                className={`grid h-11 w-11 place-items-center rounded-xl ${workspaceMode === mode ? "bg-white text-[#111827]" : "text-[#94a3b8] hover:bg-white/10 hover:text-white"}`}
+                className={`cs-press grid h-11 w-11 place-items-center rounded-xl ${workspaceMode === mode ? "bg-white text-[#111827]" : "text-[#94a3b8] hover:bg-white/10 hover:text-white"}`}
                 key={mode}
                 onClick={() => openWorkspace(mode)}
                 title={label}
@@ -1312,7 +1516,7 @@ export function AppShell() {
               </button>
             );})}
           </nav>
-          <button aria-label="Logout" className="mt-auto grid h-11 w-11 place-items-center rounded-xl text-[#94a3b8] hover:bg-white/10 hover:text-white" onClick={logout}>
+          <button aria-label="Logout" className="cs-press mt-auto grid h-11 w-11 place-items-center rounded-xl text-[#94a3b8] hover:bg-white/10 hover:text-white" onClick={logout}>
             <LogOut size={20} />
           </button>
         </aside>
@@ -1373,7 +1577,7 @@ export function AppShell() {
                 {attachedMessages.length ? (
                   attachedMessages.map(({ chat, message }) => (
                     <button
-                      className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3 text-left transition hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
+                      className="cs-hover-lift flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3 text-left transition hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       key={message.id}
                       onClick={() => chat && setSelectedChatId(chat.id)}
                       type="button"
@@ -1404,7 +1608,7 @@ export function AppShell() {
                     <button
                       key={chat.id}
                       onClick={() => setSelectedChatId(chat.id)}
-                      className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                      className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                       type="button"
@@ -1430,7 +1634,7 @@ export function AppShell() {
                     <button
                       key={chat.id}
                       onClick={() => setSelectedChatId(chat.id)}
-                      className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                      className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                     >
@@ -1453,11 +1657,12 @@ export function AppShell() {
                 {inboxChats.length ? (
                   inboxChats.map((chat) => {
                     const lastMessage = chatMessages[chat.id]?.at(-1);
+                    const unread = unreadByChat[chat.id] ?? 0;
                     return (
                       <button
                         key={chat.id}
                         onClick={() => setSelectedChatId(chat.id)}
-                        className={`flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                        className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                           selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                         }`}
                         type="button"
@@ -1468,7 +1673,10 @@ export function AppShell() {
                             <strong className="truncate text-sm">{chat.name}</strong>
                             <span className="text-xs font-bold text-[#94a3b8]">{lastMessage?.time}</span>
                           </span>
-                          <span className="mt-1 block truncate text-sm text-[#64748b]">{lastMessage?.body || lastMessage?.attachment?.name || "Attachment"}</span>
+                          <span className="mt-1 flex items-center justify-between gap-2 text-sm text-[#64748b]">
+                            <span className="truncate">{lastMessage?.body || lastMessage?.attachment?.name || "Attachment"}</span>
+                            {unread ? <span className="grid h-5 min-w-5 place-items-center rounded-full bg-[#00a884] px-1.5 text-[11px] font-black text-white">{unread}</span> : null}
+                          </span>
                         </span>
                       </button>
                     );
@@ -1500,7 +1708,7 @@ export function AppShell() {
             <>
               <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
                 <div className={`min-w-0 items-center gap-3 sm:gap-4 ${isChatSearchOpen ? "hidden sm:flex" : "flex"}`}>
-                  <button aria-label="Back to chats" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={closeCurrentChat} type="button">
+                  <button aria-label="Back to chats" className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={closeCurrentChat} type="button">
                     <ArrowLeft size={22} />
                   </button>
                   <ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-2xl text-base" />
@@ -1522,19 +1730,25 @@ export function AppShell() {
                       />
                     </label>
                   ) : null}
-                  <button aria-label="Search this chat" className="grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={toggleChatSearch} type="button">
+                  <button aria-label="Search this chat" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={toggleChatSearch} type="button">
                     <Search size={23} />
                   </button>
-                  <button aria-label="Chat options" className="grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={() => setIsChatMenuOpen((open) => !open)} type="button">
+                  <button aria-label="Chat options" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={() => setIsChatMenuOpen((open) => !open)} type="button">
                     <MoreVertical size={23} />
                   </button>
                   {isChatMenuOpen ? (
-                    <div className="absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white py-2 text-sm font-bold text-[#334155] shadow-[0_18px_45px_rgba(15,23,42,.14)]">
+                    <div className="cs-scale-in absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white py-2 text-sm font-bold text-[#334155] shadow-[0_18px_45px_rgba(15,23,42,.14)]">
                       <div className="border-b border-[#edf1f5] px-4 py-3">
                         <div className="truncate text-[#18212f]">{selectedChat.name}</div>
                         <div className={`mt-1 text-xs ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : "Offline"}</div>
                       </div>
                       <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={toggleChatSearch} type="button">Search messages</button>
+                      <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={reportCurrentChat} type="button">Report user</button>
+                      {selectedChatBlocked ? (
+                        <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={unblockCurrentChat} type="button">Unblock user</button>
+                      ) : (
+                        <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={blockCurrentChat} type="button">Block user</button>
+                      )}
                       <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={clearCurrentChat} type="button">Clear chat</button>
                       <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={closeCurrentChat} type="button">Close chat</button>
                     </div>
@@ -1547,13 +1761,18 @@ export function AppShell() {
                 {visibleSelectedMessages.length ? (
                   <div className="space-y-4">
                     {visibleSelectedMessages.map((message) => (
-                      <div key={message.id} className={`flex ${message.mine ? "justify-end" : "justify-start"}`}>
+                      <div key={message.id} className={`cs-message-in flex ${message.mine ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
                           {message.attachment ? <AttachmentPreview attachment={message.attachment} /> : null}
                           {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
                           <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
                             {message.time}
-                            {message.mine ? <CheckCheck size={15} className="text-[#00a884]" /> : null}
+                            {message.mine ? (
+                              <>
+                                <span>{message.readAt ? "Seen" : "Sent"}</span>
+                                <CheckCheck size={15} className={message.readAt ? "text-[#00a884]" : "text-[#94a3b8]"} />
+                              </>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -1569,8 +1788,9 @@ export function AppShell() {
               </div>
 
               <footer className="relative border-t border-[#e5e9f0] bg-white px-5 py-4">
+                {chatNotice ? <div className="mb-3 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm font-semibold text-[#64748b]">{chatNotice}</div> : null}
                 {isEmojiOpen ? (
-                  <div className="absolute bottom-[92px] left-5 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl">
+                  <div className="cs-scale-in absolute bottom-[92px] left-5 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl">
                     <EmojiPicker height={390} onEmojiClick={addEmoji} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
                   </div>
                 ) : null}
@@ -1583,10 +1803,10 @@ export function AppShell() {
                   </div>
                 ) : null}
                 <div className="flex w-full items-center gap-3">
-                  <button aria-label="Emoji" className={`grid h-11 w-11 place-items-center rounded-xl border border-[#dce1e8] ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "bg-white text-[#64748b]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
+                  <button aria-label="Emoji" className={`cs-press grid h-11 w-11 place-items-center rounded-xl border border-[#dce1e8] ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "bg-white text-[#64748b]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
                     <Smile size={23} />
                   </button>
-                  <label aria-label="Attach file" className="grid h-11 w-11 cursor-pointer place-items-center rounded-xl border border-[#dce1e8] bg-white text-[#64748b] hover:text-[#18212f]">
+                  <label aria-label="Attach file" className="cs-press grid h-11 w-11 cursor-pointer place-items-center rounded-xl border border-[#dce1e8] bg-white text-[#64748b] hover:text-[#18212f]">
                     <Paperclip size={23} />
                     <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />
                   </label>
@@ -1595,10 +1815,11 @@ export function AppShell() {
                       className="h-12 min-w-0 flex-1 border-0 bg-transparent px-4 text-sm outline-none placeholder:text-[#94a3b8]"
                       onChange={(event) => setMessageDraft(event.target.value)}
                       onKeyDown={sendOnEnter}
-                      placeholder="Write a message"
+                      placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
                       value={messageDraft}
+                      disabled={selectedChatBlocked}
                     />
-                    <button aria-label="Send" className="flex h-12 items-center gap-2 bg-[#00a884] px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!messageDraft.trim() && !attachmentDraft} onClick={sendChatMessage}>
+                    <button aria-label="Send" className="cs-press flex h-12 items-center gap-2 bg-[#00a884] px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={selectedChatBlocked || (!messageDraft.trim() && !attachmentDraft)} onClick={sendChatMessage}>
                       <span>Send</span>
                       <Send size={18} />
                     </button>
@@ -1608,7 +1829,7 @@ export function AppShell() {
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center px-6">
-              <div className="max-w-lg text-center">
+            <div className="cs-fade-up max-w-lg text-center">
                 <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-white text-[#00a884] shadow-sm">
                   <MessageCircle size={36} />
                 </div>
@@ -1622,7 +1843,7 @@ export function AppShell() {
       </section>
       {isProfileEditorOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#0f172a]/45 px-4">
-          <form className="w-full max-w-md rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
+          <form className="cs-scale-in w-full max-w-md rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Profile</p>
@@ -1662,7 +1883,7 @@ export function AppShell() {
 
             {profileError ? <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{profileError}</p> : null}
             {profileMessage ? <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{profileMessage}</p> : null}
-            <button className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isSubmitting} type="submit">
+            <button className="cs-press mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isSubmitting} type="submit">
               {isSubmitting ? "Saving..." : "Save profile"}
               {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
             </button>
@@ -1677,6 +1898,10 @@ function apiUrl() {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
   if (typeof window !== "undefined" && window.location.hostname === "localhost") return "http://localhost:8080";
   return "https://chatsphere-production-a4fd.up.railway.app";
+}
+
+function adminEmail() {
+  return process.env.NEXT_PUBLIC_ADMIN_EMAIL || "ChatSphere@gmail.com";
 }
 
 function authHeaders(token: string): Record<string, string> {

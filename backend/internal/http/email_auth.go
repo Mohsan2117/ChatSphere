@@ -23,6 +23,7 @@ import (
 type emailCodeStore struct {
 	mu    sync.Mutex
 	codes map[string]emailCode
+	rates map[string][]time.Time
 }
 
 type emailCode struct {
@@ -38,7 +39,7 @@ type emailAuthHandler struct {
 func newEmailAuthHandler(cfg config.Config) *emailAuthHandler {
 	return &emailAuthHandler{
 		cfg:   cfg,
-		store: &emailCodeStore{codes: make(map[string]emailCode)},
+		store: &emailCodeStore{codes: make(map[string]emailCode), rates: make(map[string][]time.Time)},
 	}
 }
 
@@ -65,6 +66,10 @@ func (h *emailAuthHandler) requestCode(c *gin.Context) {
 	email := normalizeEmail(body.Email)
 	if _, err := mail.ParseAddress(email); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "enter a valid email"})
+		return
+	}
+	if !h.allowCodeRequest(email) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many code requests. Try again in a few minutes"})
 		return
 	}
 
@@ -138,6 +143,10 @@ func (h *emailAuthHandler) requestPasswordReset(dataStore *store.Store) gin.Hand
 			c.JSON(http.StatusNotFound, gin.H{"error": "no account exists with this email"})
 			return
 		}
+		if !h.allowCodeRequest(email) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many code requests. Try again in a few minutes"})
+			return
+		}
 
 		code, err := randomCode()
 		if err != nil {
@@ -156,6 +165,25 @@ func (h *emailAuthHandler) requestPasswordReset(dataStore *store.Store) gin.Hand
 
 		c.JSON(http.StatusOK, gin.H{"status": "sent", "email": email})
 	}
+}
+
+func (h *emailAuthHandler) allowCodeRequest(email string) bool {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	now := time.Now()
+	windowStart := now.Add(-15 * time.Minute)
+	recent := h.store.rates[email][:0]
+	for _, sentAt := range h.store.rates[email] {
+		if sentAt.After(windowStart) {
+			recent = append(recent, sentAt)
+		}
+	}
+	if len(recent) >= 5 {
+		h.store.rates[email] = recent
+		return false
+	}
+	h.store.rates[email] = append(recent, now)
+	return true
 }
 
 func (h *emailAuthHandler) verifyPasswordResetCode(c *gin.Context) {

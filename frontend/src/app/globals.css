@@ -31,3 +31,99 @@ input:focus-visible {
   outline: 3px solid rgba(15, 118, 110, 0.28);
   outline-offset: 2px;
 }
+
+@keyframes cs-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cs-soft-glow {
+  from {
+    box-shadow: 0 18px 50px rgba(0, 168, 132, 0);
+  }
+  to {
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(0, 168, 132, 0.08);
+  }
+}
+
+@keyframes cs-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes cs-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.cs-fade-up {
+  animation: cs-fade-up 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.cs-fade-up-delay {
+  animation: cs-fade-up 520ms cubic-bezier(0.16, 1, 0.3, 1) 90ms both;
+}
+
+.cs-scale-in {
+  animation: cs-scale-in 190ms ease-out both;
+}
+
+.cs-message-in {
+  animation: cs-message-in 140ms ease-out both;
+}
+
+.cs-auth-card {
+  animation:
+    cs-fade-up 520ms cubic-bezier(0.16, 1, 0.3, 1) both,
+    cs-soft-glow 700ms ease-out both;
+}
+
+.cs-hover-lift {
+  transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.cs-hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+.cs-press {
+  transition: transform 120ms ease, background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+}
+
+.cs-press:active {
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .cs-hover-lift:hover,
+  .cs-press:active {
+    transform: none;
+  }
+}

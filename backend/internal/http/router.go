@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"chatsphere/backend/internal/config"
@@ -53,13 +55,13 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 
 	api := router.Group("/api/v1")
 	registerAuthRoutes(api.Group("/auth"), cfg, dataStore)
-	registerUserRoutes(api.Group("/users"), dataStore)
+	registerUserRoutes(api.Group("/users"), dataStore, hub)
 	registerProfileRoutes(api.Group("/profile"), dataStore)
-	registerContactRoutes(api.Group("/contacts"))
+	registerContactRoutes(api.Group("/contacts"), dataStore)
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
 	registerUploadRoutes(api.Group("/upload"))
-	registerAdminRoutes(api.Group("/admin"), dataStore)
+	registerAdminRoutes(api.Group("/admin"), cfg, dataStore)
 
 	return router
 }
@@ -71,7 +73,11 @@ func registerAuthRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *st
 	group.POST("/register", accepted("register user"))
 	group.POST("/login", loginUser(dataStore))
 	group.POST("/refresh", accepted("refresh token"))
-	group.POST("/logout", accepted("logout user"))
+	group.POST("/logout", func(c *gin.Context) {
+		token := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+		revokeToken(token)
+		c.JSON(http.StatusOK, gin.H{"status": "logged-out"})
+	})
 }
 
 func loginUser(dataStore *store.Store) gin.HandlerFunc {
@@ -99,7 +105,7 @@ func loginUser(dataStore *store.Store) gin.HandlerFunc {
 	}
 }
 
-func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *realtime.Hub) {
 	group.GET("", func(c *gin.Context) {
 		if _, ok := requireUser(c); !ok {
 			return
@@ -108,7 +114,9 @@ func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 		users := dataStore.SearchUsers(query)
 		results := make([]gin.H, 0, len(users))
 		for _, user := range users {
-			results = append(results, publicUser(user))
+			result := publicUser(user)
+			result["online"] = hub.IsOnline(user.ID)
+			results = append(results, result)
 		}
 		c.JSON(http.StatusOK, gin.H{"users": results})
 	})
@@ -256,11 +264,51 @@ func publicUser(user store.User) gin.H {
 	}
 }
 
-func registerContactRoutes(group *gin.RouterGroup) {
+func registerContactRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 	group.GET("", accepted("list contacts"))
 	group.POST("/requests", accepted("send contact request"))
-	group.POST("/:id/block", accepted("block contact"))
-	group.DELETE("/:id/block", accepted("unblock contact"))
+	group.POST("/:id/block", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.BlockUser(authUser.Email, c.Param("id")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "blocked"})
+	})
+	group.DELETE("/:id/block", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.UnblockUser(authUser.Email, c.Param("id")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "unblocked"})
+	})
+	group.POST("/:id/report", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Reason    string `json:"reason"`
+			MessageID string `json:"messageId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		report, err := dataStore.CreateReport(authUser.Email, c.Param("id"), body.MessageID, body.Reason)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "reported", "report": report})
+	})
 }
 
 func registerGroupRoutes(group *gin.RouterGroup) {
@@ -277,7 +325,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		if !ok {
 			return
 		}
-		messages, err := dataStore.ListInboxMessages(authUser.Email)
+		messages, err := dataStore.ListInboxMessages(authUser.Email, queryInt(c, "limit", 200))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load inbox"})
 			return
@@ -293,7 +341,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		if !ok {
 			return
 		}
-		messages, err := dataStore.ListMessages(authUser.Email, c.Param("recipientId"))
+		messages, err := dataStore.ListMessages(authUser.Email, c.Param("recipientId"), queryInt(c, "limit", 50))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load messages"})
 			return
@@ -316,6 +364,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 				Name string `json:"name"`
 				Type string `json:"type"`
 				Kind string `json:"kind"`
+				URL  string `json:"url"`
 			} `json:"attachment"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
@@ -330,7 +379,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			c.JSON(http.StatusBadRequest, gin.H{"error": "message is empty"})
 			return
 		}
-		message, err := dataStore.SaveMessage(authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind)
+		message, err := dataStore.SaveMessage(authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
 			return
@@ -348,9 +397,48 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
 	})
-	group.PATCH("/:id", accepted("edit message"))
-	group.DELETE("/:id", accepted("delete message"))
-	group.POST("/:id/reactions", accepted("react to message"))
+	group.POST("/:recipientId/read", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.MarkConversationRead(authUser.Email, c.Param("recipientId")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not mark messages read"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "read"})
+	})
+	group.PATCH("/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Body string `json:"body"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Body) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "message body is required"})
+			return
+		}
+		message, err := dataStore.UpdateMessage(authUser.Email, c.Param("id"), body.Body)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
+	})
+	group.DELETE("/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.DeleteMessage(authUser.Email, c.Param("id")); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	})
+	group.POST("/reactions/:id", accepted("react to message"))
 }
 
 func publicMessage(message store.Message, viewerEmail string) gin.H {
@@ -363,23 +451,64 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 		"senderId":    message.SenderID,
 		"recipientId": message.RecipientID,
 		"createdAt":   message.CreatedAt,
+		"readAt":      message.ReadAt,
 	}
 	if message.AttachmentName != "" {
 		result["attachment"] = gin.H{
 			"name": message.AttachmentName,
 			"type": message.AttachmentType,
 			"kind": message.AttachmentKind,
-			"url":  "",
+			"url":  message.AttachmentURL,
 		}
 	}
 	return result
 }
 
 func registerUploadRoutes(group *gin.RouterGroup) {
-	group.POST("", accepted("create signed upload"))
+	group.POST("", func(c *gin.Context) {
+		if _, ok := requireUser(c); !ok {
+			return
+		}
+		file, err := c.FormFile("file")
+		if err != nil || file.Size <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+			return
+		}
+		if file.Size > 5<<20 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be 5 MB or smaller"})
+			return
+		}
+		source, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read file"})
+			return
+		}
+		defer source.Close()
+		content, err := io.ReadAll(io.LimitReader(source, 5<<20))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read file"})
+			return
+		}
+		contentType := file.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		kind := "file"
+		if strings.HasPrefix(contentType, "image/") {
+			kind = "image"
+		} else if strings.HasPrefix(contentType, "video/") {
+			kind = "video"
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"name": file.Filename,
+			"type": contentType,
+			"kind": kind,
+			"url":  "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(content),
+		})
+	})
 }
 
-func registerAdminRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+func registerAdminRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
 	group.POST("/login", func(c *gin.Context) {
 		var body struct {
 			Email    string `json:"email"`
@@ -389,11 +518,11 @@ func registerAdminRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
-		if !strings.EqualFold(strings.TrimSpace(body.Email), "ChatSphere@gmail.com") || body.Password != "1234123" {
+		if !strings.EqualFold(strings.TrimSpace(body.Email), cfg.AdminEmail) || body.Password != cfg.AdminPassword {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin credentials"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": "chatsphere-admin-session"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "token": signAdminToken(cfg.AdminEmail)})
 	})
 
 	protected := group.Group("")
@@ -429,13 +558,27 @@ func registerAdminRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "unblocked", "user": publicUser(user)})
 	})
-	protected.GET("/reports", accepted("list moderation reports"))
-	protected.POST("/reports/:id/resolve", accepted("resolve report"))
+	protected.GET("/reports", func(c *gin.Context) {
+		reports, err := dataStore.ListReports()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load reports"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"reports": reports})
+	})
+	protected.POST("/reports/:id/resolve", func(c *gin.Context) {
+		if err := dataStore.ResolveReport(c.Param("id")); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "report not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "resolved"})
+	})
 }
 
 func requireAdmin() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if c.GetHeader("Authorization") != "Bearer chatsphere-admin-session" {
+		token := strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+		if !validAdminToken(token) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "admin login required"})
 			c.Abort()
 			return
@@ -448,6 +591,11 @@ type authUser struct {
 	ID    string
 	Email string
 }
+
+var revokedTokens = struct {
+	sync.Mutex
+	values map[string]time.Time
+}{values: map[string]time.Time{}}
 
 func requireUser(c *gin.Context) (authUser, bool) {
 	header := c.GetHeader("Authorization")
@@ -462,7 +610,7 @@ func requireUser(c *gin.Context) (authUser, bool) {
 }
 
 func signUserToken(user store.User) string {
-	payload := user.ID + "|" + user.Email
+	payload := user.ID + "|" + user.Email + "|" + strconv.FormatInt(time.Now().Add(tokenTTL()).Unix(), 10)
 	signature := signPayload(payload)
 	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + signature))
 }
@@ -473,14 +621,78 @@ func authUserFromToken(token string) (authUser, bool) {
 		return authUser{}, false
 	}
 	parts := strings.Split(string(decoded), "|")
-	if len(parts) != 3 {
+	if len(parts) != 4 {
 		return authUser{}, false
 	}
-	payload := parts[0] + "|" + parts[1]
-	if !hmac.Equal([]byte(parts[2]), []byte(signPayload(payload))) {
+	payload := parts[0] + "|" + parts[1] + "|" + parts[2]
+	if !hmac.Equal([]byte(parts[3]), []byte(signPayload(payload))) {
+		return authUser{}, false
+	}
+	expiresAt, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || time.Now().Unix() > expiresAt || tokenRevoked(token) {
 		return authUser{}, false
 	}
 	return authUser{ID: parts[0], Email: normalizeEmail(parts[1])}, true
+}
+
+func signAdminToken(email string) string {
+	payload := "admin|" + strings.ToLower(strings.TrimSpace(email)) + "|" + strconv.FormatInt(time.Now().Add(tokenTTL()).Unix(), 10)
+	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + signPayload(payload)))
+}
+
+func validAdminToken(token string) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(token))
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 4 || parts[0] != "admin" {
+		return false
+	}
+	payload := parts[0] + "|" + parts[1] + "|" + parts[2]
+	if !hmac.Equal([]byte(parts[3]), []byte(signPayload(payload))) {
+		return false
+	}
+	expiresAt, err := strconv.ParseInt(parts[2], 10, 64)
+	return err == nil && time.Now().Unix() <= expiresAt
+}
+
+func tokenTTL() time.Duration {
+	hours, err := strconv.Atoi(os.Getenv("AUTH_TOKEN_TTL_HOURS"))
+	if err != nil || hours <= 0 {
+		hours = 168
+	}
+	return time.Duration(hours) * time.Hour
+}
+
+func tokenRevoked(token string) bool {
+	revokedTokens.Lock()
+	defer revokedTokens.Unlock()
+	expiresAt, ok := revokedTokens.values[token]
+	if ok && time.Now().Before(expiresAt) {
+		return true
+	}
+	if ok {
+		delete(revokedTokens.values, token)
+	}
+	return false
+}
+
+func revokeToken(token string) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	revokedTokens.Lock()
+	revokedTokens.values[token] = time.Now().Add(tokenTTL())
+	revokedTokens.Unlock()
+}
+
+func queryInt(c *gin.Context, key string, fallback int) int {
+	value, err := strconv.Atoi(c.Query(key))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func signPayload(payload string) string {
