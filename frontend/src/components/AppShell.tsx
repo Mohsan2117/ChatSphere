@@ -102,6 +102,7 @@ export function AppShell() {
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
   const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
   const [chatNotice, setChatNotice] = useState("");
+  const [socketAttempt, setSocketAttempt] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
@@ -256,23 +257,14 @@ export function AppShell() {
 
   useEffect(() => {
     if (!email) return;
-    const saved = window.localStorage.getItem(`chatsphere-messages:${email}`);
-    if (!saved) return;
-    try {
-      setChatMessages(JSON.parse(saved) as MessageStore);
-    } catch {
-      setChatMessages({});
-    }
+    window.localStorage.removeItem(`chatsphere-messages:${email}`);
   }, [email]);
-
-  useEffect(() => {
-    if (!email) return;
-    window.localStorage.setItem(`chatsphere-messages:${email}`, JSON.stringify(chatMessages));
-  }, [chatMessages, email]);
 
   useEffect(() => {
     if (!isAuthed || !authToken || !email) return;
 
+    let closedByCleanup = false;
+    let reconnectTimer: number | undefined;
     const socket = new WebSocket(wsUrl(authToken));
     socketRef.current = socket;
 
@@ -329,11 +321,22 @@ export function AppShell() {
       }
     };
 
+    socket.onerror = () => {
+      socket.close();
+    };
+
+    socket.onclose = () => {
+      if (closedByCleanup) return;
+      reconnectTimer = window.setTimeout(() => setSocketAttempt((attempt) => attempt + 1), 2500);
+    };
+
     return () => {
+      closedByCleanup = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
       socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [authToken, currentUserId, email, isAuthed]);
+  }, [authToken, currentUserId, email, isAuthed, socketAttempt]);
 
   useEffect(() => {
     if (!isAuthed || !authToken) return;
@@ -506,6 +509,10 @@ export function AppShell() {
 
       const user = data.user ?? {};
       const token = data.token ?? "";
+      setChatMessages({});
+      setDirectoryChats([]);
+      setSelectedChatId("");
+      setSelectedChatSnapshot(null);
       setCurrentUserId(user.id ?? "");
       setAuthToken(token);
       setFirstName(user.firstName ?? "");
@@ -796,6 +803,8 @@ export function AppShell() {
       window.localStorage.setItem("chatsphere-profile-complete", "true");
       const profile = data.profile ?? {};
       const token = data.token ?? "";
+      setChatMessages({});
+      setDirectoryChats([]);
       setCurrentUserId(profile.id ?? "");
       setAuthToken(token);
       window.localStorage.setItem("chatsphere-user-id", profile.id ?? "");
@@ -910,6 +919,7 @@ export function AppShell() {
       setChatNotice("You blocked this user. Unblock them before sending messages.");
       return;
     }
+    const chatId = selectedChatId;
     const draft = attachmentDraft;
     setMessageDraft("");
     setAttachmentDraft(null);
@@ -930,20 +940,20 @@ export function AppShell() {
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       mine: true,
       senderEmail: email,
-      recipientId: selectedChatId,
+      recipientId: chatId,
       attachment: uploadedAttachment
     };
 
     setChatMessages((current) => ({
       ...current,
-      [selectedChatId]: [...(current[selectedChatId] ?? []), message]
+      [chatId]: [...(current[chatId] ?? []), message]
     }));
     try {
       const response = await fetch(`${apiUrl()}/api/v1/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
         body: JSON.stringify({
-          recipientId: selectedChatId,
+          recipientId: chatId,
           body,
           attachment: uploadedAttachment
             ? {
@@ -957,10 +967,23 @@ export function AppShell() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Message could not be saved");
+      if (data.message?.id) {
+        setChatMessages((current) => ({
+          ...current,
+          [chatId]: (current[chatId] ?? []).map((currentMessage) =>
+            currentMessage.id === message.id ? { ...data.message, mine: true } : currentMessage
+          )
+        }));
+      }
     } catch (error) {
+      setChatMessages((current) => ({
+        ...current,
+        [chatId]: (current[chatId] ?? []).filter((currentMessage) => currentMessage.id !== message.id)
+      }));
+      setMessageDraft(body);
+      if (draft) setAttachmentDraft(draft);
       setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
     }
-
   }
 
   function sendOnEnter(event: KeyboardEvent<HTMLInputElement>) {
@@ -1001,6 +1024,8 @@ export function AppShell() {
     setProfileError("");
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
+    setChatMessages({});
+    setDirectoryChats([]);
     setChatSearch("");
     setIsChatSearchOpen(false);
     setChatMessageSearch("");

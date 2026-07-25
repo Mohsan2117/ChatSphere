@@ -240,6 +240,26 @@ func (s *Store) UserByEmail(email string) (User, error) {
 	return User{}, errors.New("user not found")
 }
 
+func (s *Store) UserByID(id string) (User, error) {
+	id = strings.TrimSpace(id)
+	if s.db != nil {
+		return s.userByIDDB(id)
+	}
+	if s.my != nil {
+		return s.userByIDMySQL(id)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, user := range s.data.Users {
+		if user.ID == id {
+			return user, nil
+		}
+	}
+	return User{}, errors.New("user not found")
+}
+
 func (s *Store) UserExists(email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if s.db != nil {
@@ -329,7 +349,7 @@ func (s *Store) UpdateProfile(email, firstName, lastName, avatarURL string) (Use
 				avatar_url = case when $4 = '' then avatar_url else $4 end,
 				updated_at = now()
 			where email = $1
-			returning id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+			returning id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, now()), coalesce(updated_at, now())
 		`, email, firstName, lastName, strings.TrimSpace(avatarURL)).
 			Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
 		return user, err
@@ -459,7 +479,7 @@ func (s *Store) SetUserBlocked(id string, blocked bool) (User, bool) {
 		err := s.db.QueryRow(context.Background(), `
 			update app_users set blocked = $2, updated_at = now()
 			where id = $1
-			returning id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+			returning id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, now()), coalesce(updated_at, now())
 		`, id, blocked).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
 		return user, err == nil
 	}
@@ -469,7 +489,7 @@ func (s *Store) SetUserBlocked(id string, blocked bool) (User, bool) {
 		}
 		var user User
 		err := s.my.QueryRowContext(context.Background(), `
-			select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+			select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, utc_timestamp()), coalesce(updated_at, utc_timestamp())
 			from app_users where id = ?
 		`, id).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
 		return user, err == nil
@@ -669,15 +689,19 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 	if err != nil {
 		return Message{}, err
 	}
-	if s.IsBlockedBetween(sender.ID, strings.TrimSpace(recipientID)) {
+	recipient, err := s.UserByID(recipientID)
+	if err != nil {
+		return Message{}, errors.New("recipient not found")
+	}
+	if s.IsBlockedBetween(sender.ID, recipient.ID) {
 		return Message{}, errors.New("messaging is blocked between these users")
 	}
 	message := Message{
 		ID:             randomID(),
-		ConversationID: conversationID(sender.ID, recipientID),
+		ConversationID: conversationID(sender.ID, recipient.ID),
 		SenderEmail:    sender.Email,
 		SenderID:       sender.ID,
-		RecipientID:    strings.TrimSpace(recipientID),
+		RecipientID:    recipient.ID,
 		Body:           strings.TrimSpace(body),
 		AttachmentName: strings.TrimSpace(attachmentName),
 		AttachmentType: strings.TrimSpace(attachmentType),
@@ -791,25 +815,31 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	if err != nil {
 		return nil, err
 	}
+	other, err := s.UserByID(otherUserID)
+	if err != nil {
+		return []Message{}, nil
+	}
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	query := `
-		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, coalesce(m.attachment_url, ''), m.created_at, m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
-		where conversation_id = %s
+		where coalesce(m.conversation_id, '') = %s
+		   or (lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
+		   or (lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
 		order by m.created_at desc
 		limit %s
 	`
 	var rows messageRows
 	closeRows := func() {}
 	if s.db != nil {
-		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2"), conversationID(user.ID, otherUserID), limit)
+		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3", "$4", "$5", "$6"), conversationID(user.ID, other.ID), user.Email, other.ID, other.Email, user.ID, limit)
 		rows, err = pgRows, queryErr
 		closeRows = pgRows.Close
 	} else {
-		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?"), conversationID(user.ID, otherUserID), limit)
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?", "?", "?", "?"), conversationID(user.ID, other.ID), user.Email, other.ID, other.Email, user.ID, limit)
 		rows, err = sqlRows, queryErr
 		closeRows = func() { _ = sqlRows.Close() }
 	}
@@ -841,10 +871,10 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 		limit = 200
 	}
 	query := `
-		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, coalesce(m.attachment_url, ''), m.created_at, m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
-		where m.sender_email = %s or m.recipient_id = %s
+		where lower(coalesce(m.sender_email, '')) = %s or coalesce(m.recipient_id, '') = %s
 		order by m.created_at desc
 		limit %s
 	`
@@ -1008,6 +1038,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			}
 		}
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column last_name varchar(255) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column first_name varchar(255) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column password_hash varchar(255) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column avatar_url mediumtext null`)
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column blocked boolean not null default false`)
@@ -1022,7 +1053,30 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_kind varchar(32) null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_url mediumtext null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column created_at datetime not null default current_timestamp`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column size_bytes bigint not null default 0`)
+		_, _ = s.my.ExecContext(ctx, `
+			update app_users set
+				first_name = coalesce(first_name, ''),
+				last_name = coalesce(last_name, ''),
+				password_hash = coalesce(password_hash, ''),
+				avatar_url = coalesce(avatar_url, ''),
+				blocked = coalesce(blocked, false),
+				created_at = coalesce(created_at, utc_timestamp()),
+				updated_at = coalesce(updated_at, utc_timestamp())
+		`)
+		_, _ = s.my.ExecContext(ctx, `
+			update messages set
+				conversation_id = coalesce(conversation_id, ''),
+				sender_email = coalesce(sender_email, ''),
+				recipient_id = coalesce(recipient_id, ''),
+				body = coalesce(body, ''),
+				attachment_name = coalesce(attachment_name, ''),
+				attachment_type = coalesce(attachment_type, ''),
+				attachment_kind = coalesce(attachment_kind, ''),
+				attachment_url = coalesce(attachment_url, ''),
+				created_at = coalesce(created_at, utc_timestamp())
+		`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
 		return nil
@@ -1093,6 +1147,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_type text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_kind text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists created_at timestamptz not null default now()`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists first_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists last_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists password_hash text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists avatar_url text not null default ''`)
@@ -1100,6 +1156,28 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists created_at timestamptz not null default now()`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists updated_at timestamptz not null default now()`)
 	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists size_bytes bigint not null default 0`)
+	_, _ = s.db.Exec(ctx, `
+		update app_users set
+			first_name = coalesce(first_name, ''),
+			last_name = coalesce(last_name, ''),
+			password_hash = coalesce(password_hash, ''),
+			avatar_url = coalesce(avatar_url, ''),
+			blocked = coalesce(blocked, false),
+			created_at = coalesce(created_at, now()),
+			updated_at = coalesce(updated_at, now())
+	`)
+	_, _ = s.db.Exec(ctx, `
+		update messages set
+			conversation_id = coalesce(conversation_id, ''),
+			sender_email = coalesce(sender_email, ''),
+			recipient_id = coalesce(recipient_id, ''),
+			body = coalesce(body, ''),
+			attachment_name = coalesce(attachment_name, ''),
+			attachment_type = coalesce(attachment_type, ''),
+			attachment_kind = coalesce(attachment_kind, ''),
+			attachment_url = coalesce(attachment_url, ''),
+			created_at = coalesce(created_at, now())
+	`)
 	return err
 }
 
@@ -1119,7 +1197,7 @@ func (s *Store) upsertUserDB(email, firstName, lastName, password, avatarURL str
 			password_hash = excluded.password_hash,
 			avatar_url = case when excluded.avatar_url = '' then app_users.avatar_url else excluded.avatar_url end,
 			updated_at = now()
-		returning id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		returning id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, now()), coalesce(updated_at, now())
 	`, randomID(), email, strings.TrimSpace(firstName), strings.TrimSpace(lastName), string(passwordHash), avatarURL).
 		Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
@@ -1142,9 +1220,18 @@ func (s *Store) authenticateDB(email, password string) (User, error) {
 func (s *Store) userByEmailDB(email string) (User, error) {
 	var user User
 	err := s.db.QueryRow(context.Background(), `
-		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, now()), coalesce(updated_at, now())
 		from app_users where email = $1
 	`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+	return user, err
+}
+
+func (s *Store) userByIDDB(id string) (User, error) {
+	var user User
+	err := s.db.QueryRow(context.Background(), `
+		select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, now()), coalesce(updated_at, now())
+		from app_users where id = $1
+	`, strings.TrimSpace(id)).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
 }
 
@@ -1188,9 +1275,18 @@ func (s *Store) authenticateMySQL(email, password string) (User, error) {
 func (s *Store) userByEmailMySQL(email string) (User, error) {
 	var user User
 	err := s.my.QueryRowContext(context.Background(), `
-		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, utc_timestamp()), coalesce(updated_at, utc_timestamp())
 		from app_users where email = ?
 	`, strings.ToLower(strings.TrimSpace(email))).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
+	return user, err
+}
+
+func (s *Store) userByIDMySQL(id string) (User, error) {
+	var user User
+	err := s.my.QueryRowContext(context.Background(), `
+		select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, utc_timestamp()), coalesce(updated_at, utc_timestamp())
+		from app_users where id = ?
+	`, strings.TrimSpace(id)).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.PasswordHash, &user.AvatarURL, &user.Blocked, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
 }
 
@@ -1200,7 +1296,7 @@ func (s *Store) searchUsersMySQL(query string, includeBlocked bool, limit int) (
 		limit = 50
 	}
 	rows, err := s.my.QueryContext(context.Background(), `
-		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, utc_timestamp()), coalesce(updated_at, utc_timestamp())
 		from app_users
 		where (? = '' or lower(concat(first_name, ' ', last_name)) like concat('%', ?, '%') or lower(email) like concat('%', ?, '%'))
 		  and (? = true or blocked = false)
@@ -1229,7 +1325,7 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 		limit = 50
 	}
 	rows, err := s.db.Query(context.Background(), `
-		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
+		select id, email, coalesce(first_name, ''), coalesce(last_name, ''), coalesce(password_hash, ''), coalesce(avatar_url, ''), coalesce(blocked, false), coalesce(created_at, now()), coalesce(updated_at, now())
 		from app_users
 		where (length($1::text) = 0 or lower(coalesce(first_name, '') || ' ' || coalesce(last_name, '')) like '%' || $1::text || '%' or lower(email) like '%' || $1::text || '%')
 		  and ($2::boolean = true or blocked = false)
@@ -1254,7 +1350,7 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 
 func (s *Store) messageByID(id string) (Message, error) {
 	query := `
-		select m.id, m.conversation_id, m.sender_email, coalesce(u.id, ''), m.recipient_id, m.body, m.attachment_name, m.attachment_type, m.attachment_kind, coalesce(m.attachment_url, ''), m.created_at, m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where m.id = %s

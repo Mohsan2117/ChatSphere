@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/mail"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -505,6 +507,11 @@ func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			return
 		}
 		contentType := file.Header.Get("Content-Type")
+		if contentType == "" || contentType == "application/octet-stream" {
+			if inferred := mime.TypeByExtension(strings.ToLower(filepath.Ext(file.Filename))); inferred != "" {
+				contentType = inferred
+			}
+		}
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
