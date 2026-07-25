@@ -1007,8 +1007,22 @@ func (s *Store) migrate(ctx context.Context) error {
 				return err
 			}
 		}
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column last_name varchar(255) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column password_hash varchar(255) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column avatar_url mediumtext null`)
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column blocked boolean not null default false`)
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column created_at datetime not null default current_timestamp`)
+		_, _ = s.my.ExecContext(ctx, `alter table app_users add column updated_at datetime not null default current_timestamp`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column conversation_id varchar(255) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column sender_email varchar(255) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column recipient_id varchar(64) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column body text null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_name text null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_type text null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_kind varchar(32) null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_url mediumtext null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table attachments add column size_bytes bigint not null default 0`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
 		return nil
@@ -1072,6 +1086,20 @@ func (s *Store) migrate(ctx context.Context) error {
 	}
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_url text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists read_at timestamptz null`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists conversation_id text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists sender_email text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists recipient_id text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists body text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_name text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_type text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_kind text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists last_name text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists password_hash text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists avatar_url text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists blocked boolean not null default false`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists created_at timestamptz not null default now()`)
+	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists updated_at timestamptz not null default now()`)
+	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists size_bytes bigint not null default 0`)
 	return err
 }
 
@@ -1203,8 +1231,8 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 	rows, err := s.db.Query(context.Background(), `
 		select id, email, first_name, last_name, password_hash, avatar_url, blocked, created_at, updated_at
 		from app_users
-		where ($1 = '' or lower(first_name || ' ' || last_name) like '%' || $1 || '%' or lower(email) like '%' || $1 || '%')
-		  and ($2 = true or blocked = false)
+		where (length($1::text) = 0 or lower(coalesce(first_name, '') || ' ' || coalesce(last_name, '')) like '%' || $1::text || '%' or lower(email) like '%' || $1::text || '%')
+		  and ($2::boolean = true or blocked = false)
 		order by created_at desc
 		limit $3
 	`, query, includeBlocked, limit)
