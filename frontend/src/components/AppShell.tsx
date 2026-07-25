@@ -249,13 +249,29 @@ export function AppShell() {
     const socket = new WebSocket(wsUrl(authToken));
     socketRef.current = socket;
 
+    socket.onopen = () => {
+      setDirectoryChats((current) =>
+        current.map((chat) => (chat.id === currentUserId ? { ...chat, online: true } : chat))
+      );
+    };
+
     socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as {
           type?: string;
           conversationId?: string;
-          payload?: ChatMessage;
+          userId?: string;
+          payload?: ChatMessage & { userId?: string; online?: boolean };
         };
+        if (data.type === "presence.updated") {
+          const userId = data.payload?.userId || data.userId;
+          const online = Boolean(data.payload?.online);
+          if (!userId) return;
+          setDirectoryChats((current) =>
+            current.map((chat) => (chat.id === userId ? { ...chat, online: chat.id === currentUserId ? true : online } : chat))
+          );
+          return;
+        }
         if (data.type !== "chat.message" || !data.payload) return;
         if (!data.payload.id || !data.payload.time) return;
         if (data.payload.senderEmail === email) return;
@@ -296,39 +312,45 @@ export function AppShell() {
     if (!isAuthed || !authToken) return;
 
     let cancelled = false;
-    fetch(`${apiUrl()}/api/v1/users`, {
-      headers: authHeaders(authToken)
-    })
-      .then((response) => (response.ok ? response.json() : { users: [] }))
-      .then((data) => {
-        if (cancelled) return;
-        const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
-        setDirectoryChats(
-          users.map((user) => {
-            const chat = userToChat(user);
-            if (user.email === email) {
-              return {
-                ...chat,
-                name: `${chat.name} (You)`,
-                preview: "Saved messages",
-                online: true
-              };
-            }
-            return chat;
-          })
-        );
+    const loadUsers = () => {
+      fetch(`${apiUrl()}/api/v1/users`, {
+        headers: authHeaders(authToken)
       })
-      .catch(() => {
-        if (!cancelled) setDirectoryChats([]);
-      });
+        .then((response) => (response.ok ? response.json() : { users: [] }))
+        .then((data) => {
+          if (cancelled) return;
+          const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
+          setDirectoryChats(
+            users.map((user) => {
+              const chat = userToChat(user);
+              if (user.email === email) {
+                return {
+                  ...chat,
+                  name: `${chat.name} (You)`,
+                  preview: "Saved messages",
+                  online: true
+                };
+              }
+              return chat;
+            })
+          );
+        })
+        .catch(() => {
+          // Keep the last good contact list so tab switching never flashes empty on a slow request.
+        });
+    };
+
+    loadUsers();
+    const refresh = window.setInterval(loadUsers, 15000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(refresh);
     };
   }, [authToken, email, isAuthed]);
 
   useEffect(() => {
-    if (!isAuthed || !authToken || !currentUserId || directoryChats.length === 0) return;
+    if (!isAuthed || !authToken || !currentUserId) return;
 
     let cancelled = false;
     fetch(`${apiUrl()}/api/v1/messages/inbox`, {
@@ -351,7 +373,7 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [authToken, currentUserId, directoryChats.length, email, isAuthed]);
+  }, [authToken, currentUserId, email, isAuthed]);
 
   useEffect(() => {
     if (!selectedChatId || !authToken) return;
@@ -1914,19 +1936,22 @@ function wsUrl(token: string) {
 }
 
 function AttachmentPreview({ attachment }: { attachment: NonNullable<ChatMessage["attachment"]> }) {
-  if (attachment.kind === "image") {
+  const [failed, setFailed] = useState(false);
+  const canPreview = Boolean(attachment.url && /^(https?:|data:|blob:)/i.test(attachment.url) && !failed);
+
+  if (attachment.kind === "image" && canPreview) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img alt={attachment.name} className="mb-3 max-h-64 rounded-md object-cover" src={attachment.url} />
+      <img alt={attachment.name} className="mb-3 max-h-64 rounded-md object-cover" onError={() => setFailed(true)} src={attachment.url} />
     );
   }
 
-  if (attachment.kind === "video") {
-    return <video className="mb-3 max-h-64 rounded-md" controls src={attachment.url} />;
+  if (attachment.kind === "video" && canPreview) {
+    return <video className="mb-3 max-h-64 rounded-md" controls onError={() => setFailed(true)} src={attachment.url} />;
   }
 
   return (
-    <a className="mb-3 flex items-center gap-3 rounded-md border border-white/10 bg-black/10 px-3 py-3 text-sm text-white" href={attachment.url} download={attachment.name}>
+    <a className="mb-3 flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={attachment.url || undefined} download={attachment.name}>
       <FileText size={20} />
       <span className="min-w-0 truncate">{attachment.name}</span>
     </a>

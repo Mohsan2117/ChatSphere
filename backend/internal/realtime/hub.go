@@ -61,32 +61,66 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			h.mu.Lock()
 			h.online[client.userID]++
+			onlineCount := h.online[client.userID]
 			h.mu.Unlock()
+			if onlineCount == 1 {
+				h.dispatch(Event{
+					Type:   "presence.updated",
+					UserID: client.userID,
+					Payload: mustJSON(map[string]any{
+						"userId": client.userID,
+						"online": true,
+					}),
+				})
+			}
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
 				h.mu.Lock()
 				h.online[client.userID]--
-				if h.online[client.userID] <= 0 {
+				onlineCount := h.online[client.userID]
+				if onlineCount <= 0 {
 					delete(h.online, client.userID)
 				}
 				h.mu.Unlock()
+				if onlineCount <= 0 {
+					h.dispatch(Event{
+						Type:   "presence.updated",
+						UserID: client.userID,
+						Payload: mustJSON(map[string]any{
+							"userId": client.userID,
+							"online": false,
+						}),
+					})
+				}
 			}
 		case event := <-h.broadcast:
-			for client := range h.clients {
-				if len(event.TargetUserIDs) > 0 && !eventTargetsClient(event.TargetUserIDs, client.userID) {
-					continue
-				}
-				select {
-				case client.send <- event:
-				default:
-					delete(h.clients, client)
-					close(client.send)
-				}
-			}
+			h.dispatch(event)
 		}
 	}
+}
+
+func (h *Hub) dispatch(event Event) {
+	for client := range h.clients {
+		if len(event.TargetUserIDs) > 0 && !eventTargetsClient(event.TargetUserIDs, client.userID) {
+			continue
+		}
+		select {
+		case client.send <- event:
+		default:
+			delete(h.clients, client)
+			close(client.send)
+		}
+	}
+}
+
+func mustJSON(value any) json.RawMessage {
+	content, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return content
 }
 
 func eventTargetsClient(targets []string, userID string) bool {
