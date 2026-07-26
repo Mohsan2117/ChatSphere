@@ -32,6 +32,7 @@ type ChatMessage = {
   senderEmail?: string;
   senderId?: string;
   recipientId?: string;
+  createdAt?: string;
   readAt?: string | null;
   attachment?: {
     name: string;
@@ -239,14 +240,21 @@ export function AppShell() {
     fetch(`${apiUrl()}/api/v1/messages/${selectedChatId}`, {
       headers: authHeaders(authToken)
     })
-      .then((response) => (response.ok ? response.json() : { messages: [] }))
+      .then((response) => {
+        if (!response.ok) throw new Error("Conversation could not be loaded");
+        return response.json();
+      })
       .then((data) => {
         if (cancelled) return;
         const messages = Array.isArray(data.messages) ? data.messages : [];
-        setChatMessages((current) => ({
-          ...current,
-          [selectedChatId]: messages
-        }));
+        setChatMessages((current) => {
+          const existing = current[selectedChatId] ?? [];
+          if (messages.length === 0 && existing.length > 0) return current;
+          return {
+            ...current,
+            [selectedChatId]: mergeMessages(existing, messages)
+          };
+        });
       })
       .catch(() => {});
 
@@ -401,7 +409,13 @@ export function AppShell() {
           next[chatId] = [...(next[chatId] ?? []), message];
           return next;
         }, {});
-        setChatMessages((current) => ({ ...current, ...grouped }));
+        setChatMessages((current) => {
+          const next = { ...current };
+          Object.entries(grouped).forEach(([chatId, messages]) => {
+            next[chatId] = mergeMessages(current[chatId] ?? [], messages);
+          });
+          return next;
+        });
       })
       .catch(() => {});
 
@@ -895,8 +909,9 @@ export function AppShell() {
 
   async function uploadAttachment(draft: AttachmentDraft) {
     if (!draft.file) return draft;
+    const file = await prepareUploadFile(draft.file);
     const formData = new FormData();
-    formData.set("file", draft.file);
+    formData.set("file", file);
     const response = await fetch(`${apiUrl()}/api/v1/upload`, {
       method: "POST",
       headers: authHeaders(authToken),
@@ -905,8 +920,8 @@ export function AppShell() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error ?? "Could not upload file");
     return {
-      name: data.name ?? draft.name,
-      type: data.type ?? draft.type,
+      name: data.name ?? file.name ?? draft.name,
+      type: data.type ?? file.type ?? draft.type,
       kind: data.kind ?? draft.kind,
       url: data.url ?? draft.url
     } as NonNullable<ChatMessage["attachment"]>;
@@ -1999,6 +2014,74 @@ function authHeaders(token: string): Record<string, string> {
 function wsUrl(token: string) {
   const base = apiUrl();
   return `${base.replace(/^http/, "ws").replace(/\/$/, "")}/ws?token=${encodeURIComponent(token)}`;
+}
+
+function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]) {
+  const byId = new Map<string, ChatMessage>();
+  [...existing, ...incoming].forEach((message) => {
+    if (!message.id) return;
+    byId.set(message.id, message);
+  });
+  return Array.from(byId.values()).sort((first, second) => {
+    const firstTime = Date.parse(first.createdAt ?? "");
+    const secondTime = Date.parse(second.createdAt ?? "");
+    if (Number.isFinite(firstTime) && Number.isFinite(secondTime)) return firstTime - secondTime;
+    return first.id.localeCompare(second.id);
+  });
+}
+
+async function prepareUploadFile(file: File) {
+  const canCompress =
+    typeof window !== "undefined" &&
+    typeof document !== "undefined" &&
+    file.type.startsWith("image/") &&
+    file.type !== "image/gif" &&
+    file.size > 1.5 * 1024 * 1024;
+  if (!canCompress) return file;
+
+  try {
+    return await compressImageFile(file);
+  } catch {
+    return file;
+  }
+}
+
+async function compressImageFile(file: File) {
+  const source = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(source);
+    const maxSide = 1600;
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], compressedImageName(file.name), { type: "image/jpeg", lastModified: Date.now() });
+  } finally {
+    URL.revokeObjectURL(source);
+  }
+}
+
+function loadImage(source: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not prepare image"));
+    image.src = source;
+  });
+}
+
+function compressedImageName(name: string) {
+  const base = name.replace(/\.[^.]+$/, "") || "image";
+  return `${base}-compressed.jpg`;
 }
 
 function AttachmentPreview({ attachment, authToken }: { attachment: NonNullable<ChatMessage["attachment"]>; authToken: string }) {

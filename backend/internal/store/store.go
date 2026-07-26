@@ -711,14 +711,14 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 	}
 	if s.db != nil {
 		_, err = s.db.Exec(context.Background(), `
-			insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
-			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+			insert into messages (id, conversation_id, sender_email, sender_id, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		`, message.ID, message.ConversationID, message.SenderEmail, message.SenderID, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
 	} else {
 		_, err = s.my.ExecContext(context.Background(), `
-			insert into messages (id, conversation_id, sender_email, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
-			values (?,?,?,?,?,?,?,?,?,?)
-		`, message.ID, message.ConversationID, message.SenderEmail, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+			insert into messages (id, conversation_id, sender_email, sender_id, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
+			values (?,?,?,?,?,?,?,?,?,?,?)
+		`, message.ID, message.ConversationID, message.SenderEmail, message.SenderID, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
 	}
 	return message, err
 }
@@ -815,31 +815,35 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	if err != nil {
 		return nil, err
 	}
-	other, err := s.UserByID(otherUserID)
-	if err != nil {
-		return []Message{}, nil
+	other, otherErr := s.UserByID(otherUserID)
+	otherID := strings.TrimSpace(otherUserID)
+	otherEmail := ""
+	if otherErr == nil {
+		otherID = other.ID
+		otherEmail = other.Email
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where coalesce(m.conversation_id, '') = %s
 		   or (lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
-		   or (lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
+		   or (%s <> '' and lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
+		   or (coalesce(m.sender_id, '') = %s and coalesce(m.recipient_id, '') = %s)
 		order by m.created_at desc
 		limit %s
 	`
 	var rows messageRows
 	closeRows := func() {}
 	if s.db != nil {
-		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3", "$4", "$5", "$6"), conversationID(user.ID, other.ID), user.Email, other.ID, other.Email, user.ID, limit)
+		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"), conversationID(user.ID, otherID), user.Email, otherID, otherEmail, otherEmail, user.ID, otherID, user.ID, limit)
 		rows, err = pgRows, queryErr
 		closeRows = pgRows.Close
 	} else {
-		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?", "?", "?", "?"), conversationID(user.ID, other.ID), user.Email, other.ID, other.Email, user.ID, limit)
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?", "?", "?", "?", "?", "?", "?"), conversationID(user.ID, otherID), user.Email, otherID, otherEmail, otherEmail, user.ID, otherID, user.ID, limit)
 		rows, err = sqlRows, queryErr
 		closeRows = func() { _ = sqlRows.Close() }
 	}
@@ -871,7 +875,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 		limit = 200
 	}
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where lower(coalesce(m.sender_email, '')) = %s or coalesce(m.recipient_id, '') = %s
@@ -993,6 +997,7 @@ func (s *Store) migrate(ctx context.Context) error {
 				id varchar(64) primary key,
 				conversation_id varchar(255) not null,
 				sender_email varchar(255) not null,
+				sender_id varchar(64) not null default '',
 				recipient_id varchar(64) not null,
 				body text not null,
 				attachment_name text not null,
@@ -1046,6 +1051,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column updated_at datetime not null default current_timestamp`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column conversation_id varchar(255) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column sender_email varchar(255) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column sender_id varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column recipient_id varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column body text null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_name text null`)
@@ -1069,6 +1075,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			update messages set
 				conversation_id = coalesce(conversation_id, ''),
 				sender_email = coalesce(sender_email, ''),
+				sender_id = coalesce(sender_id, ''),
 				recipient_id = coalesce(recipient_id, ''),
 				body = coalesce(body, ''),
 				attachment_name = coalesce(attachment_name, ''),
@@ -1076,6 +1083,12 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_kind = coalesce(attachment_kind, ''),
 				attachment_url = coalesce(attachment_url, ''),
 				created_at = coalesce(created_at, utc_timestamp())
+		`)
+		_, _ = s.my.ExecContext(ctx, `
+			update messages m
+			join app_users u on lower(u.email) = lower(m.sender_email)
+			set m.sender_id = u.id
+			where coalesce(m.sender_id, '') = ''
 		`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
@@ -1097,6 +1110,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			id text primary key,
 			conversation_id text not null,
 			sender_email text not null,
+			sender_id text not null default '',
 			recipient_id text not null,
 			body text not null default '',
 			attachment_name text not null default '',
@@ -1142,6 +1156,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists read_at timestamptz null`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists conversation_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists sender_email text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists sender_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists recipient_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists body text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_name text not null default ''`)
@@ -1170,6 +1185,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		update messages set
 			conversation_id = coalesce(conversation_id, ''),
 			sender_email = coalesce(sender_email, ''),
+			sender_id = coalesce(sender_id, ''),
 			recipient_id = coalesce(recipient_id, ''),
 			body = coalesce(body, ''),
 			attachment_name = coalesce(attachment_name, ''),
@@ -1177,6 +1193,13 @@ func (s *Store) migrate(ctx context.Context) error {
 			attachment_kind = coalesce(attachment_kind, ''),
 			attachment_url = coalesce(attachment_url, ''),
 			created_at = coalesce(created_at, now())
+	`)
+	_, _ = s.db.Exec(ctx, `
+		update messages m
+		set sender_id = u.id
+		from app_users u
+		where lower(u.email) = lower(m.sender_email)
+		  and coalesce(m.sender_id, '') = ''
 	`)
 	return err
 }
@@ -1350,7 +1373,7 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 
 func (s *Store) messageByID(id string) (Message, error) {
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where m.id = %s

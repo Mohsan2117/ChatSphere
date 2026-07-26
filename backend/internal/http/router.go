@@ -481,6 +481,7 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 }
 
 func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	const maxUploadBytes int64 = 10 << 20
 	group.POST("", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -491,8 +492,8 @@ func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 			return
 		}
-		if file.Size > 5<<20 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be 5 MB or smaller"})
+		if file.Size > maxUploadBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be 10 MB or smaller"})
 			return
 		}
 		source, err := file.Open()
@@ -501,9 +502,13 @@ func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			return
 		}
 		defer source.Close()
-		content, err := io.ReadAll(io.LimitReader(source, 5<<20))
+		content, err := io.ReadAll(io.LimitReader(source, maxUploadBytes+1))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read file"})
+			return
+		}
+		if int64(len(content)) > maxUploadBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be 10 MB or smaller"})
 			return
 		}
 		contentType := file.Header.Get("Content-Type")
@@ -524,6 +529,10 @@ func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 		attachment, err := dataStore.SaveAttachment(authUser.Email, file.Filename, contentType, kind, content)
 		if err != nil {
 			log.Printf("save attachment failed user=%s name=%s size=%d: %v", authUser.Email, file.Filename, file.Size, err)
+			if strings.Contains(strings.ToLower(err.Error()), "user not found") {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "login expired. Please sign in again"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save file"})
 			return
 		}
