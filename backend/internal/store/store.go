@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -110,7 +111,12 @@ func New(path string, databaseURL string) (*Store, error) {
 			}
 			return s, nil
 		}
-		pool, err := pgxpool.New(context.Background(), databaseURL)
+		poolConfig, err := pgxpool.ParseConfig(databaseURL)
+		if err != nil {
+			return nil, err
+		}
+		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+		pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 		if err != nil {
 			return nil, err
 		}
