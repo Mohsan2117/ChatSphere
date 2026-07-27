@@ -1595,9 +1595,9 @@ export function AppShell() {
   }
 
   return (
-    <main className="min-h-screen bg-[#eef1f5] text-[#18212f]">
-      <section className="grid min-h-screen lg:grid-cols-[86px_350px_minmax(0,1fr)] xl:grid-cols-[92px_390px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-[#dce1e8] bg-[#111827] px-3 py-5 text-white lg:block">
+    <main className="h-screen overflow-hidden bg-[#eef1f5] text-[#18212f]">
+      <section className="grid h-screen min-h-0 lg:grid-cols-[86px_350px_minmax(0,1fr)] xl:grid-cols-[92px_390px_minmax(0,1fr)]">
+        <aside className="hidden h-screen border-r border-[#dce1e8] bg-[#111827] px-3 py-5 text-white lg:block">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#00a884] text-lg font-black text-[#06130f]">C</div>
           <nav className="mt-8 space-y-3">
             {[
@@ -1624,7 +1624,7 @@ export function AppShell() {
           </button>
         </aside>
 
-        <aside className={`min-h-screen border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+        <aside className={`h-screen min-h-0 overflow-y-auto border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
           <header className="border-b border-[#e5e9f0] px-5 py-5">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1806,7 +1806,7 @@ export function AppShell() {
           </div>
         </aside>
 
-        <section className={`min-h-screen flex-col bg-[#f7f9fb] ${selectedChat ? "flex" : "hidden lg:flex"}`}>
+        <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat ? "flex" : "hidden lg:flex"}`}>
           {selectedChat ? (
             <>
               <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
@@ -1859,7 +1859,7 @@ export function AppShell() {
                 </div>
               </header>
 
-              <div className="flex-1 overflow-y-auto px-6 py-8">
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
                 <div className="mx-auto mb-8 w-fit rounded-full border border-[#dce1e8] bg-white px-4 py-2 text-xs font-bold text-[#64748b]">Conversation started</div>
                 {visibleSelectedMessages.length ? (
                   <div className="space-y-4">
@@ -1890,10 +1890,10 @@ export function AppShell() {
                 )}
               </div>
 
-              <footer className="relative border-t border-[#e5e9f0] bg-white px-5 py-4">
+              <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[436px] xl:left-[482px]">
                 {chatNotice ? <div className="mb-3 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm font-semibold text-[#64748b]">{chatNotice}</div> : null}
                 {isEmojiOpen ? (
-                  <div className="cs-scale-in absolute bottom-[92px] left-5 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl">
+                  <div className="cs-scale-in absolute bottom-[78px] left-3 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl sm:left-5">
                     <EmojiPicker height={390} onEmojiClick={addEmoji} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
                   </div>
                 ) : null}
@@ -1905,28 +1905,26 @@ export function AppShell() {
                     <button className="ml-3 text-[#64748b] hover:text-[#18212f]" onClick={() => setAttachmentDraft(null)} type="button">Remove</button>
                   </div>
                 ) : null}
-                <div className="flex w-full items-center gap-3">
-                  <button aria-label="Emoji" className={`cs-press grid h-11 w-11 place-items-center rounded-xl border border-[#dce1e8] ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "bg-white text-[#64748b]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
-                    <Smile size={23} />
+                <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
+                  <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
+                    <Smile size={22} />
                   </button>
-                  <label aria-label="Attach file" className="cs-press grid h-11 w-11 cursor-pointer place-items-center rounded-xl border border-[#dce1e8] bg-white text-[#64748b] hover:text-[#18212f]">
-                    <Paperclip size={23} />
+                  <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
+                    <Paperclip size={22} />
                     <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />
                   </label>
-                  <div className="flex min-w-0 flex-1 overflow-hidden rounded-xl border border-[#dce1e8] bg-[#f8fafc] focus-within:border-[#00a884] focus-within:bg-white">
-                    <input
-                      className="h-12 min-w-0 flex-1 border-0 bg-transparent px-4 text-sm outline-none placeholder:text-[#94a3b8]"
-                      onChange={(event) => setMessageDraft(event.target.value)}
-                      onKeyDown={sendOnEnter}
-                      placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
-                      value={messageDraft}
-                      disabled={selectedChatBlocked}
-                    />
-                    <button aria-label="Send" className="cs-press flex h-12 items-center gap-2 bg-[#00a884] px-5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={selectedChatBlocked || (!messageDraft.trim() && !attachmentDraft)} onClick={sendChatMessage}>
-                      <span>Send</span>
-                      <Send size={18} />
-                    </button>
-                  </div>
+                  <input
+                    className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
+                    onChange={(event) => setMessageDraft(event.target.value)}
+                    onKeyDown={sendOnEnter}
+                    placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
+                    value={messageDraft}
+                    disabled={selectedChatBlocked}
+                  />
+                  <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={selectedChatBlocked || (!messageDraft.trim() && !attachmentDraft)} onClick={sendChatMessage}>
+                    <span className="hidden sm:inline">Send</span>
+                    <Send size={18} />
+                  </button>
                 </div>
               </footer>
             </>
