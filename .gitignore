@@ -15,3 +15,4 @@ backend/data/
 
 .vercel
 .env*
+import.env
