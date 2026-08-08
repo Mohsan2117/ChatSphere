@@ -184,10 +184,10 @@ export function AppShell() {
     );
   }, [chatMessages, knownChats]);
   const workspaceTitle = {
-    inbox: "Inbox",
+    inbox: "Chats",
     search: "Search",
-    contacts: "Contacts",
-    files: "Files",
+    contacts: "Users",
+    files: "Documents",
     ai: "AI Assistant"
   }[workspaceMode];
 
@@ -1599,35 +1599,61 @@ export function AppShell() {
 
   return (
     <main className="h-screen overflow-hidden bg-[#eef1f5] text-[#18212f]">
-      <section className="grid h-screen min-h-0 lg:grid-cols-[86px_350px_minmax(0,1fr)] xl:grid-cols-[92px_390px_minmax(0,1fr)]">
-        <aside className="hidden h-screen border-r border-[#dce1e8] bg-[#111827] px-3 py-5 text-white lg:block">
-          <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#00a884] text-lg font-black text-[#06130f]">C</div>
-          <nav className="mt-8 space-y-3">
+      <section
+        className={`grid h-screen min-h-0 ${
+          workspaceMode === "ai"
+            ? "lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]"
+            : "lg:grid-cols-[250px_350px_minmax(0,1fr)] xl:grid-cols-[270px_390px_minmax(0,1fr)]"
+        }`}
+      >
+        <aside className="hidden h-screen flex-col border-r border-white/5 bg-[#0b1120] px-4 py-6 text-white lg:flex">
+          <div className="flex items-center gap-3 px-2">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_6px_18px_rgba(124,58,237,.4)]">
+              <MessageCircle size={20} />
+            </span>
+            <span className="text-lg font-black tracking-tight">ChatSphere</span>
+          </div>
+          <nav className="mt-8 space-y-1.5">
             {[
-              { label: "Inbox", mode: "inbox" as const, icon: MessageCircle },
+              { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
               { label: "Search", mode: "search" as const, icon: Search },
-              { label: "Contacts", mode: "contacts" as const, icon: Users },
-              { label: "Files", mode: "files" as const, icon: FileText },
+              { label: "Users", mode: "contacts" as const, icon: Users },
+              { label: "Documents", mode: "files" as const, icon: FileText },
               { label: "AI Assistant", mode: "ai" as const, icon: Bot }
             ].map(({ icon: Icon, label, mode }) => {
+              const isActive = workspaceMode === mode;
               return (
-              <button
-                aria-label={label}
-                className={`cs-press grid h-11 w-11 place-items-center rounded-xl ${workspaceMode === mode ? "bg-white text-[#111827]" : "text-[#94a3b8] hover:bg-white/10 hover:text-white"}`}
-                key={mode}
-                onClick={() => openWorkspace(mode)}
-                title={label}
-                type="button"
-              >
-                <Icon size={20} />
-              </button>
-            );})}
+                <button
+                  aria-label={label}
+                  className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    isActive && mode === "ai"
+                      ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
+                      : isActive
+                        ? "bg-white/10 text-white"
+                        : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
+                  }`}
+                  key={mode}
+                  onClick={() => openWorkspace(mode)}
+                  type="button"
+                >
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
           </nav>
-          <button aria-label="Logout" className="cs-press mt-auto grid h-11 w-11 place-items-center rounded-xl text-[#94a3b8] hover:bg-white/10 hover:text-white" onClick={logout}>
-            <LogOut size={20} />
+          <button
+            aria-label="Logout"
+            className="cs-press mt-auto flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/5 hover:text-white"
+            onClick={logout}
+            type="button"
+          >
+            <LogOut size={18} />
+            <span>Logout</span>
           </button>
         </aside>
 
+        {workspaceMode !== "ai" ? (
         <aside className={`h-screen min-h-0 overflow-y-auto border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
           <header className="border-b border-[#e5e9f0] px-5 py-5">
             <div className="flex items-center justify-between gap-3">
@@ -1809,10 +1835,11 @@ export function AppShell() {
             )}
           </div>
         </aside>
+        ) : null}
 
         <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
           {workspaceMode === "ai" ? (
-            <AIChat apiUrl={apiUrl()} authToken={authToken} onClose={() => setWorkspaceMode("inbox")} />
+            <AIChat apiUrl={apiUrl()} authToken={authToken} />
           ) : selectedChat ? (
             <>
               <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
@@ -1896,7 +1923,7 @@ export function AppShell() {
                 )}
               </div>
 
-              <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[436px] xl:left-[482px]">
+              <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[600px] xl:left-[660px]">
                 {chatNotice ? <div className="mb-3 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm font-semibold text-[#64748b]">{chatNotice}</div> : null}
                 {isEmojiOpen ? (
                   <div className="cs-scale-in absolute bottom-[78px] left-3 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl sm:left-5">
