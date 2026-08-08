@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +23,16 @@ type Config struct {
 	AdminPassword    string
 	AuthTokenHours   string
 	DataPath         string
+
+	GeminiAPIKey                   string
+	GeminiModel                    string
+	GeminiDailyLimit               int
+	GeminiIPRateLimit              int
+	GeminiRequestCooldownSeconds   int
+	GeminiMaxMessageLength         int
+	GeminiMaxOutputTokens          int
+	GeminiTimeoutSeconds           int
+	TrustedProxies                 string
 }
 
 func Load() Config {
@@ -44,7 +55,25 @@ func Load() Config {
 		AdminPassword:    env("ADMIN_PASSWORD", "1234123"),
 		AuthTokenHours:   env("AUTH_TOKEN_TTL_HOURS", "168"),
 		DataPath:         env("DATA_PATH", "data/chatsphere.json"),
+
+		GeminiAPIKey:                   os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:                    env("GEMINI_MODEL", "gemini-2.0-flash"),
+		GeminiDailyLimit:               envInt("GEMINI_DAILY_LIMIT", 20),
+		GeminiIPRateLimit:              envInt("GEMINI_IP_RATE_LIMIT", 5),
+		GeminiRequestCooldownSeconds:   envInt("GEMINI_REQUEST_COOLDOWN_SECONDS", 2),
+		GeminiMaxMessageLength:         envInt("GEMINI_MAX_MESSAGE_LENGTH", 2000),
+		GeminiMaxOutputTokens:          envInt("GEMINI_MAX_OUTPUT_TOKENS", 500),
+		GeminiTimeoutSeconds:           envInt("GEMINI_TIMEOUT_SECONDS", 30),
+		TrustedProxies:                 os.Getenv("TRUSTED_PROXIES"),
 	}
+}
+
+func envInt(key string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func loadDotEnv(path string) {

@@ -36,7 +36,8 @@ type messageRows interface {
 }
 
 type dataFile struct {
-	Users []User `json:"users"`
+	Users   []User                   `json:"users"`
+	AIUsage map[string]map[string]int `json:"aiUsage,omitempty"`
 }
 
 type User struct {
@@ -1042,6 +1043,13 @@ func (s *Store) migrate(ctx context.Context) error {
 				content longblob not null,
 				created_at datetime not null default current_timestamp
 			)`,
+			`
+			create table if not exists ai_usage (
+				user_id varchar(64) not null,
+				usage_date varchar(10) not null,
+				request_count bigint not null default 0,
+				primary key (user_id, usage_date)
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -1154,6 +1162,12 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at timestamptz not null default now()
 		);
 		create index if not exists idx_attachments_owner on attachments (owner_id);
+		create table if not exists ai_usage (
+			user_id text not null,
+			usage_date text not null,
+			request_count bigint not null default 0,
+			primary key (user_id, usage_date)
+		);
 	`)
 	if err != nil {
 		return err
@@ -1391,6 +1405,143 @@ func (s *Store) messageByID(id string) (Message, error) {
 	}
 	err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
 	return message, err
+}
+
+// AICountToday returns the number of AI requests the user has already made
+// today (UTC). It is used by the AI endpoint to enforce the daily limit.
+func (s *Store) AICountToday(userID string) (int, error) {
+	userID = strings.TrimSpace(userID)
+	today := time.Now().UTC().Format("2006-01-02")
+	if s.db != nil {
+		var count int
+		err := s.db.QueryRow(context.Background(), `
+			select coalesce(request_count, 0)
+			from ai_usage
+			where user_id = $1 and usage_date = $2
+		`, userID, today).Scan(&count)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return 0, nil
+			}
+			return 0, err
+		}
+		return count, nil
+	}
+	if s.my != nil {
+		var count int
+		err := s.my.QueryRowContext(context.Background(), `
+			select coalesce(request_count, 0)
+			from ai_usage
+			where user_id = ? and usage_date = ?
+		`, userID, today).Scan(&count)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return 0, nil
+			}
+			return 0, err
+		}
+		return count, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.AIUsage == nil {
+		return 0, nil
+	}
+	return s.data.AIUsage[userID][today], nil
+}
+
+// ReserveAIUsage atomically increments the user's daily AI request count and
+// returns true only if the new count does not exceed the daily limit. This is
+// the single gate that protects the Gemini quota: no request reaches Gemini
+// unless ReserveAIUsage returned true.
+func (s *Store) ReserveAIUsage(userID string, dailyLimit int) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	if dailyLimit <= 0 {
+		return false, nil
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	if s.db != nil {
+		var count int
+		err := s.db.QueryRow(context.Background(), `
+			insert into ai_usage (user_id, usage_date, request_count)
+			values ($1, $2, 1)
+			on conflict (user_id, usage_date) do update set
+				request_count = case when ai_usage.request_count < $3 then ai_usage.request_count + 1 else ai_usage.request_count end
+			returning request_count
+		`, userID, today, dailyLimit).Scan(&count)
+		if err != nil {
+			return false, err
+		}
+		return count <= dailyLimit, nil
+	}
+	if s.my != nil {
+		// MySQL does not support RETURNING; use a conditional update then read.
+		_, _ = s.my.ExecContext(context.Background(), `
+			insert into ai_usage (user_id, usage_date, request_count)
+			values (?, ?, 1)
+			on duplicate key update
+				request_count = case when request_count < ? then request_count + 1 else request_count end
+		`, userID, today, dailyLimit)
+		var count int
+		readErr := s.my.QueryRowContext(context.Background(), `
+			select request_count from ai_usage where user_id = ? and usage_date = ?
+		`, userID, today).Scan(&count)
+		if readErr != nil {
+			return false, readErr
+		}
+		return count <= dailyLimit, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.AIUsage == nil {
+		s.data.AIUsage = make(map[string]map[string]int)
+	}
+	if s.data.AIUsage[userID] == nil {
+		s.data.AIUsage[userID] = make(map[string]int)
+	}
+	count := s.data.AIUsage[userID][today]
+	if count >= dailyLimit {
+		return false, nil
+	}
+	s.data.AIUsage[userID][today] = count + 1
+	if err := s.saveLocked(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// DecrementAIUsage refunds one daily AI request. It is called only when a
+// reserved request fails before Gemini was actually invoked, so the user is
+// not charged for a request that never reached the API.
+func (s *Store) DecrementAIUsage(userID string) {
+	userID = strings.TrimSpace(userID)
+	today := time.Now().UTC().Format("2006-01-02")
+	if s.db != nil {
+		_, _ = s.db.Exec(context.Background(), `
+			update ai_usage set request_count = greatest(request_count - 1, 0)
+			where user_id = $1 and usage_date = $2
+		`, userID, today)
+		return
+	}
+	if s.my != nil {
+		_, _ = s.my.ExecContext(context.Background(), `
+			update ai_usage set request_count = greatest(request_count - 1, 0)
+			where user_id = ? and usage_date = ?
+		`, userID, today)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.data.AIUsage == nil || s.data.AIUsage[userID] == nil {
+		return
+	}
+	if s.data.AIUsage[userID][today] > 0 {
+		s.data.AIUsage[userID][today]--
+		_ = s.saveLocked()
+	}
 }
 
 func conversationID(email string, otherUserID string) string {

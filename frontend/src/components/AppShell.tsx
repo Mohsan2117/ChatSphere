@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Bot,
   CheckCheck,
   FileText,
   Image,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
+import { AIChat } from "@/components/AIChat";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
@@ -43,7 +45,7 @@ type ChatMessage = {
 };
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type MessageStore = Record<string, ChatMessage[]>;
-type WorkspaceMode = "inbox" | "search" | "contacts" | "files";
+type WorkspaceMode = "inbox" | "search" | "contacts" | "files" | "ai";
 type AdminUser = {
   id: string;
   email: string;
@@ -185,7 +187,8 @@ export function AppShell() {
     inbox: "Inbox",
     search: "Search",
     contacts: "Contacts",
-    files: "Files"
+    files: "Files",
+    ai: "AI Assistant"
   }[workspaceMode];
 
   useEffect(() => {
@@ -1604,7 +1607,8 @@ export function AppShell() {
               { label: "Inbox", mode: "inbox" as const, icon: MessageCircle },
               { label: "Search", mode: "search" as const, icon: Search },
               { label: "Contacts", mode: "contacts" as const, icon: Users },
-              { label: "Files", mode: "files" as const, icon: FileText }
+              { label: "Files", mode: "files" as const, icon: FileText },
+              { label: "AI Assistant", mode: "ai" as const, icon: Bot }
             ].map(({ icon: Icon, label, mode }) => {
               return (
               <button
@@ -1806,8 +1810,10 @@ export function AppShell() {
           </div>
         </aside>
 
-        <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat ? "flex" : "hidden lg:flex"}`}>
-          {selectedChat ? (
+        <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
+          {workspaceMode === "ai" ? (
+            <AIChat apiUrl={apiUrl()} authToken={authToken} onClose={() => setWorkspaceMode("inbox")} />
+          ) : selectedChat ? (
             <>
               <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
                 <div className={`min-w-0 items-center gap-3 sm:gap-4 ${isChatSearchOpen ? "hidden sm:flex" : "flex"}`}>

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"chatsphere/backend/internal/config"
+	"chatsphere/backend/internal/gemini"
 	"chatsphere/backend/internal/realtime"
 	"chatsphere/backend/internal/store"
 
@@ -33,6 +34,18 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	}
 
 	router := gin.New()
+
+	// Trusted proxy configuration for safe client IP extraction. Gin's
+	// ClientIP() only honors X-Forwarded-For when the peer is in this list.
+	// By default we trust no proxy, so X-Forwarded-For is never trusted and
+	// ClientIP() falls back to the immediate peer (RemoteAddr). Operators
+	// behind Render should set TRUSTED_PROXIES to the Render proxy IPs.
+	if strings.TrimSpace(cfg.TrustedProxies) != "" {
+		_ = router.SetTrustedProxies(strings.Split(cfg.TrustedProxies, ","))
+	} else {
+		_ = router.SetTrustedProxies(nil)
+	}
+
 	router.Use(gin.Logger(), gin.Recovery())
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{cfg.FrontendOrigin},
@@ -66,6 +79,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerUploadRoutes(api.Group("/upload"), dataStore)
 	registerFileRoutes(api.Group("/files"), dataStore)
 	registerAdminRoutes(api.Group("/admin"), cfg, dataStore)
+	registerAIRoutes(api.Group("/ai"), cfg, dataStore)
 
 	return router
 }
@@ -565,6 +579,29 @@ func registerFileRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 		c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, safeFilename(attachment.Name)))
 		c.Data(http.StatusOK, attachment.ContentType, attachment.Content)
 	})
+}
+
+// registerAIRoutes wires the Gemini-powered AI assistant endpoint. The Gemini
+// client is created here so the API key only ever lives on the backend.
+func registerAIRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
+	if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
+		// No key configured: register a stub that returns 503 so the endpoint
+		// exists but never attempts to contact Gemini.
+		group.POST("/chat", func(c *gin.Context) {
+			if _, ok := requireUser(c); !ok {
+				return
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI assistant is not configured"})
+		})
+		return
+	}
+	caller := gemini.New(
+		cfg.GeminiAPIKey,
+		cfg.GeminiModel,
+		cfg.GeminiMaxOutputTokens,
+		time.Duration(cfg.GeminiTimeoutSeconds)*time.Second,
+	)
+	newAIHandler(cfg, dataStore, caller).register(group)
 }
 
 func registerAdminRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
