@@ -158,15 +158,17 @@ func (s *Store) UpsertUser(email, firstName, lastName, password, avatarURL strin
 		return s.upsertUserMySQL(email, firstName, lastName, password, avatarURL)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	email = strings.ToLower(strings.TrimSpace(email))
 	now := time.Now().UTC()
+	// Generate the bcrypt hash before acquiring the lock so that the
+	// expensive computation does not block concurrent login attempts.
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return User{}, err
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for index := range s.data.Users {
 		if s.data.Users[index].Email == email {
@@ -209,22 +211,31 @@ func (s *Store) Authenticate(email, password string) (User, error) {
 		return s.authenticateMySQL(email, password)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	email = strings.ToLower(strings.TrimSpace(email))
-	for _, user := range s.data.Users {
-		if user.Email == email {
-			if user.Blocked {
-				return User{}, errors.New("account blocked")
-			}
-			if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
-				return User{}, errors.New("invalid email or password")
-			}
-			return user, nil
+
+	// Copy the user record under the lock, then release the lock before the
+	// expensive bcrypt comparison. This prevents concurrent login attempts
+	// from being serialized behind a single bcrypt computation.
+	s.mu.Lock()
+	var match *User
+	for index := range s.data.Users {
+		if s.data.Users[index].Email == email {
+			match = &s.data.Users[index]
+			break
 		}
 	}
-	return User{}, errors.New("invalid email or password")
+	s.mu.Unlock()
+
+	if match == nil {
+		return User{}, errors.New("invalid email or password")
+	}
+	if match.Blocked {
+		return User{}, errors.New("account blocked")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(match.PasswordHash), []byte(password)) != nil {
+		return User{}, errors.New("invalid email or password")
+	}
+	return *match, nil
 }
 
 func (s *Store) UserByEmail(email string) (User, error) {
@@ -240,6 +251,7 @@ func (s *Store) UserByEmail(email string) (User, error) {
 	defer s.mu.Unlock()
 
 	for _, user := range s.data.Users {
+
 		if user.Email == email {
 			return user, nil
 		}
