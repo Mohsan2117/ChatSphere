@@ -1424,10 +1424,10 @@ export function AppShell() {
                     type="password"
                   />
                 </label>
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
-                  Login
-                  <ShieldCheck size={18} />
-                </button>
+                <button disabled={isSubmitting} className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                  {isSubmitting ? "Logging in..." : "Login"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
+                </button
                 <button
                   className="w-full text-center text-sm font-bold text-[#00a884] hover:text-[#46dfbd]"
                   onClick={() => {
