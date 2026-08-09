@@ -196,7 +196,7 @@ export function AIChat({ apiUrl, authToken }: AIChatProps) {
         {error ? <div className="mx-auto mb-3 max-w-3xl rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700">{error}</div> : null}
         <form className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-3xl border border-[#e2e6ed] bg-white p-2 shadow-[0_8px_30px_rgba(15,23,42,.08)] focus-within:border-[#8b5cf6]/40" onSubmit={sendMessage}>
           <input
-            className="h-10 min-w-0 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
+            className="h-10 min-w-0 flex-1 bg-transparent px-1 text-sm outline-none focus-visible:!outline-none placeholder:text-[#94a3b8] sm:px-2"
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask the AI assistant..."

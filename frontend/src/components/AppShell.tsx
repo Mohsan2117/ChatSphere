@@ -1690,7 +1690,7 @@ export function AppShell() {
               <Search size={19} />
               <input
                 ref={chatSearchRef}
-                className="w-full bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
+                className="w-full bg-transparent text-sm outline-none focus-visible:!outline-none placeholder:text-[#94a3b8]"
                 onChange={(event) => setChatSearch(event.target.value)}
                 placeholder="Search by name"
                 value={chatSearch}
