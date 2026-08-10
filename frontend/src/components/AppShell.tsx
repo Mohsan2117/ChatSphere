@@ -109,6 +109,7 @@ export function AppShell() {
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
+  const previousSelectedChatIdRef = useRef(selectedChatId);
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
   const [isInboxLoading, setIsInboxLoading] = useState(true);
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
@@ -249,6 +250,15 @@ export function AppShell() {
     setSelectedChatSnapshot(null);
     setChatSearch("");
   }, [isAuthed]);
+
+  useEffect(() => {
+    const previous = previousSelectedChatIdRef.current;
+    previousSelectedChatIdRef.current = selectedChatId;
+    if (previous === selectedChatId) return;
+    setMessageDraft("");
+    setAttachmentDraft(null);
+    setIsEmojiOpen(false);
+  }, [selectedChatId]);
 
   useEffect(() => {
     if (!isAdmin || !adminToken) return;
