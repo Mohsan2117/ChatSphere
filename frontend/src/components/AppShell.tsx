@@ -2071,7 +2071,7 @@ export function AppShell() {
 
       {isProfileEditorOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#0f172a]/45 px-4">
-          <form className="cs-scale-in w-full max-w-md rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
+          <form className="cs-scale-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Profile</p>
@@ -2114,6 +2114,15 @@ export function AppShell() {
             <button className="cs-press mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isSubmitting} type="submit">
               {isSubmitting ? "Saving..." : "Save profile"}
               {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+            </button>
+            <button
+              aria-label="Log out"
+              className="cs-press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 text-sm font-black text-[#b42318] transition hover:bg-red-100"
+              onClick={logout}
+              type="button"
+            >
+              <LogOut size={18} />
+              Log out
             </button>
           </form>
         </div>
