@@ -44,6 +44,11 @@ type ChatMessage = {
   };
 };
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
+type ChatDraft = {
+  text: string;
+  attachment: AttachmentDraft | null;
+};
+type ChatDraftStore = Record<string, ChatDraft>;
 type MessageStore = Record<string, ChatMessage[]>;
 type WorkspaceMode = "inbox" | "search" | "contacts" | "files" | "ai";
 type AdminUser = {
@@ -93,8 +98,7 @@ export function AppShell() {
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState("");
   const [chatSearch, setChatSearch] = useState("");
-  const [messageDraft, setMessageDraft] = useState("");
-  const [attachmentDraft, setAttachmentDraft] = useState<AttachmentDraft | null>(null);
+  const [drafts, setDrafts] = useState<ChatDraftStore>({});
   const [isEmojiOpen, setIsEmojiOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<MessageStore>({});
   const [directoryChats, setDirectoryChats] = useState<ChatSeed[]>([]);
@@ -109,7 +113,6 @@ export function AppShell() {
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
-  const previousSelectedChatIdRef = useRef(selectedChatId);
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
   const [isInboxLoading, setIsInboxLoading] = useState(true);
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
@@ -149,6 +152,8 @@ export function AppShell() {
   }, [chatSearch, directoryChats]);
   const selectedChat = useMemo(() => knownChats.find((chat) => chat.id === selectedChatId), [knownChats, selectedChatId]);
   const selectedChatBlocked = selectedChatId ? blockedChatIds.includes(selectedChatId) : false;
+  const currentMessageDraft = selectedChatId ? (drafts[selectedChatId]?.text ?? "") : "";
+  const currentAttachmentDraft = selectedChatId ? (drafts[selectedChatId]?.attachment ?? null) : null;
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
   const visibleSelectedMessages = useMemo(() => {
     const query = chatMessageSearch.trim().toLowerCase();
@@ -252,11 +257,6 @@ export function AppShell() {
   }, [isAuthed]);
 
   useEffect(() => {
-    const previous = previousSelectedChatIdRef.current;
-    previousSelectedChatIdRef.current = selectedChatId;
-    if (previous === selectedChatId) return;
-    setMessageDraft("");
-    setAttachmentDraft(null);
     setIsEmojiOpen(false);
   }, [selectedChatId]);
 
@@ -591,6 +591,7 @@ export function AppShell() {
       const user = data.user ?? {};
       const token = data.token ?? "";
       setChatMessages({});
+      setDrafts({});
       setDirectoryChats([]);
       setSelectedChatId("");
       setSelectedChatSnapshot(null);
@@ -843,12 +844,52 @@ export function AppShell() {
     if (!file) return;
 
     const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";
-    setAttachmentDraft({
+    const attachment: AttachmentDraft = {
       name: file.name,
       type: file.type || "application/octet-stream",
       url: URL.createObjectURL(file),
       kind,
       file
+    };
+    if (selectedChatId) setDraftAttachment(selectedChatId, attachment);
+  }
+
+  function setDraftText(chatId: string, text: string) {
+    setDrafts((current) => {
+      const existing = current[chatId];
+      if (!text && !existing?.attachment) {
+        const next = { ...current };
+        delete next[chatId];
+        return next;
+      }
+      return {
+        ...current,
+        [chatId]: { text, attachment: existing?.attachment ?? null }
+      };
+    });
+  }
+
+  function setDraftAttachment(chatId: string, attachment: AttachmentDraft | null) {
+    setDrafts((current) => {
+      const existing = current[chatId];
+      if (!attachment && !existing?.text) {
+        const next = { ...current };
+        delete next[chatId];
+        return next;
+      }
+      return {
+        ...current,
+        [chatId]: { text: existing?.text ?? "", attachment }
+      };
+    });
+  }
+
+  function removeDraft(chatId: string) {
+    setDrafts((current) => {
+      if (!(chatId in current)) return current;
+      const next = { ...current };
+      delete next[chatId];
+      return next;
     });
   }
 
@@ -890,6 +931,7 @@ export function AppShell() {
       const profile = data.profile ?? {};
       const token = data.token ?? "";
       setChatMessages({});
+      setDrafts({});
       setDirectoryChats([]);
       setCurrentUserId(profile.id ?? "");
       setAuthToken(token);
@@ -1004,23 +1046,24 @@ export function AppShell() {
   }
 
   async function sendChatMessage() {
-    const body = messageDraft.trim();
-    if ((!body && !attachmentDraft) || !selectedChatId || !authToken) return;
+    const body = currentMessageDraft.trim();
+    if ((!body && !currentAttachmentDraft) || !selectedChatId || !authToken) return;
     if (selectedChatBlocked) {
       setChatNotice("You blocked this user. Unblock them before sending messages.");
       return;
     }
     const chatId = selectedChatId;
-    const draft = attachmentDraft;
-    setMessageDraft("");
-    setAttachmentDraft(null);
+    const draftText = currentMessageDraft;
+    const draftAttachment = currentAttachmentDraft;
+    removeDraft(chatId);
     setIsEmojiOpen(false);
 
     let uploadedAttachment: NonNullable<ChatMessage["attachment"]> | undefined;
     try {
-      uploadedAttachment = draft ? await uploadAttachment(draft) : undefined;
+      uploadedAttachment = draftAttachment ? await uploadAttachment(draftAttachment) : undefined;
     } catch (error) {
-      setAttachmentDraft(draft);
+      setDraftText(chatId, draftText);
+      if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
       setAuthError(error instanceof Error ? error.message : "Could not upload file");
       return;
     }
@@ -1071,8 +1114,8 @@ export function AppShell() {
         ...current,
         [chatId]: (current[chatId] ?? []).filter((currentMessage) => currentMessage.id !== message.id)
       }));
-      setMessageDraft(body);
-      if (draft) setAttachmentDraft(draft);
+      setDraftText(chatId, draftText);
+      if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
       setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
     }
   }
@@ -1084,7 +1127,14 @@ export function AppShell() {
   }
 
   function addEmoji(emoji: EmojiClickData) {
-    setMessageDraft((draft) => `${draft}${emoji.emoji}`);
+    if (!selectedChatId) return;
+    setDrafts((current) => {
+      const existing = current[selectedChatId];
+      return {
+        ...current,
+        [selectedChatId]: { text: `${existing?.text ?? ""}${emoji.emoji}`, attachment: existing?.attachment ?? null }
+      };
+    });
   }
 
   function logout() {
@@ -1117,6 +1167,7 @@ export function AppShell() {
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
     setChatMessages({});
+    setDrafts({});
     setDirectoryChats([]);
     setChatSearch("");
     setIsChatSearchOpen(false);
@@ -2101,12 +2152,12 @@ export function AppShell() {
                     <EmojiPicker height={390} onEmojiClick={addEmoji} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
                   </div>
                 ) : null}
-                {attachmentDraft ? (
+                {currentAttachmentDraft ? (
                   <div className="mb-3 flex items-center justify-between rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
                     <div className="min-w-0 truncate">
-                      <span className="font-black text-[#00a884]">{attachmentDraft.kind.toUpperCase()}</span> {attachmentDraft.name}
+                      <span className="font-black text-[#00a884]">{currentAttachmentDraft.kind.toUpperCase()}</span> {currentAttachmentDraft.name}
                     </div>
-                    <button className="ml-3 text-[#64748b] hover:text-[#18212f]" onClick={() => setAttachmentDraft(null)} type="button">Remove</button>
+                    <button className="ml-3 text-[#64748b] hover:text-[#18212f]" onClick={() => { if (selectedChatId) setDraftAttachment(selectedChatId, null); }} type="button">Remove</button>
                   </div>
                 ) : null}
                 <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
@@ -2119,13 +2170,13 @@ export function AppShell() {
                   </label>
                   <input
                     className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
-                    onChange={(event) => setMessageDraft(event.target.value)}
+                    onChange={(event) => { if (selectedChatId) setDraftText(selectedChatId, event.target.value); }}
                     onKeyDown={sendOnEnter}
                     placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
-                    value={messageDraft}
+                    value={currentMessageDraft}
                     disabled={selectedChatBlocked}
                   />
-                  <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={selectedChatBlocked || (!messageDraft.trim() && !attachmentDraft)} onClick={sendChatMessage}>
+                  <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={selectedChatBlocked || (!currentMessageDraft.trim() && !currentAttachmentDraft)} onClick={sendChatMessage}>
                     <span className="hidden sm:inline">Send</span>
                     <Send size={18} />
                   </button>
