@@ -110,6 +110,10 @@ export function AppShell() {
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
+  const [isInboxLoading, setIsInboxLoading] = useState(true);
+  const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
+  const [inboxError, setInboxError] = useState("");
+  const [directoryError, setDirectoryError] = useState("");
 
   const knownChats = useMemo(() => {
     const byId = new Map(directoryChats.map((chat) => [chat.id, chat]));
@@ -355,10 +359,15 @@ export function AppShell() {
 
     let cancelled = false;
     const loadUsers = () => {
+      setIsDirectoryLoading(true);
+      setDirectoryError("");
       fetch(`${apiUrl()}/api/v1/users`, {
         headers: authHeaders(authToken)
       })
-        .then((response) => (response.ok ? response.json() : { users: [] }))
+        .then((response) => {
+          if (!response.ok) throw new Error("Could not load users");
+          return response.json();
+        })
         .then((data) => {
           if (cancelled) return;
           const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
@@ -382,8 +391,12 @@ export function AppShell() {
             });
           });
         })
-        .catch(() => {
-          // Keep the last good contact list so tab switching never flashes empty on a slow request.
+        .catch((error) => {
+          if (cancelled) return;
+          setDirectoryError(error instanceof Error ? error.message : "Could not load users");
+        })
+        .finally(() => {
+          if (!cancelled) setIsDirectoryLoading(false);
         });
     };
 
@@ -400,10 +413,15 @@ export function AppShell() {
     if (!isAuthed || !authToken || !currentUserId) return;
 
     let cancelled = false;
+    setIsInboxLoading(true);
+    setInboxError("");
     fetch(`${apiUrl()}/api/v1/messages/inbox`, {
       headers: authHeaders(authToken)
     })
-      .then((response) => (response.ok ? response.json() : { messages: [] }))
+      .then((response) => {
+        if (!response.ok) throw new Error("Could not load inbox");
+        return response.json();
+      })
       .then((data) => {
         if (cancelled) return;
         const messages: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
@@ -421,7 +439,13 @@ export function AppShell() {
           return next;
         });
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (cancelled) return;
+        setInboxError(error instanceof Error ? error.message : "Could not load inbox");
+      })
+      .finally(() => {
+        if (!cancelled) setIsInboxLoading(false);
+      });
 
     return () => {
       cancelled = true;
@@ -559,6 +583,10 @@ export function AppShell() {
           avatarPreview: user.avatarUrl ?? ""
         })
       );
+      setIsInboxLoading(true);
+      setIsDirectoryLoading(true);
+      setInboxError("");
+      setDirectoryError("");
       setIsAuthed(true);
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Could not login");
@@ -848,6 +876,10 @@ export function AppShell() {
       setSelectedChatId("");
       setSelectedChatSnapshot(null);
       setChatSearch("");
+      setIsInboxLoading(true);
+      setIsDirectoryLoading(true);
+      setInboxError("");
+      setDirectoryError("");
       setIsAuthed(true);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "Could not save profile");
@@ -1059,6 +1091,10 @@ export function AppShell() {
     setIsChatSearchOpen(false);
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
+    setIsInboxLoading(false);
+    setIsDirectoryLoading(false);
+    setInboxError("");
+    setDirectoryError("");
   }
 
   function openWorkspace(mode: WorkspaceMode) {
@@ -1693,7 +1729,11 @@ export function AppShell() {
               ].map(([label, count], index) => (
                 <button key={label} className={`rounded-xl border px-3 py-2 text-left ${index === 1 ? "border-[#00a884] bg-[#e7f8f2]" : "border-[#e5e9f0] bg-[#f7f9fb]"}`} type="button">
                   <div className="text-xs font-bold text-[#64748b]">{label}</div>
-                  <div className="mt-1 text-lg font-black">{count}</div>
+                  {isInboxLoading || isDirectoryLoading ? (
+                    <div className="cs-skeleton mt-1.5 h-5 w-8" />
+                  ) : (
+                    <div className="mt-1 text-lg font-black">{count}</div>
+                  )}
                 </button>
               ))}
             </div>
@@ -1798,7 +1838,30 @@ export function AppShell() {
               </div>
             ) : workspaceMode === "inbox" ? (
               <div className="space-y-2">
-                {inboxChats.length ? (
+                {isInboxLoading ? (
+                  <>
+                    {[0, 1, 2].map((item) => (
+                      <div key={item} className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3">
+                        <div className="cs-skeleton h-11 w-11 shrink-0 rounded-xl" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="cs-skeleton h-4 w-24" />
+                            <div className="cs-skeleton h-3 w-10" />
+                          </div>
+                          <div className="cs-skeleton mt-2 h-3 w-40" />
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : inboxError ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-8 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-red-100 text-red-600">
+                      <MessageCircle size={24} />
+                    </div>
+                    <h2 className="mt-5 text-base font-black text-red-700">Could not load inbox</h2>
+                    <p className="mt-2 text-sm leading-6 text-red-600">{inboxError}</p>
+                  </div>
+                ) : inboxChats.length ? (
                   inboxChats.map((chat) => {
                     const lastMessage = chatMessages[chat.id]?.at(-1);
                     const unread = unreadByChat[chat.id] ?? 0;
