@@ -114,6 +114,7 @@ export function AppShell() {
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
   const [directoryError, setDirectoryError] = useState("");
+  const [isRestoring, setIsRestoring] = useState(true);
 
   const knownChats = useMemo(() => {
     const byId = new Map(directoryChats.map((chat) => [chat.id, chat]));
@@ -201,6 +202,7 @@ export function AppShell() {
     if (savedAdminToken) {
       setAdminToken(savedAdminToken);
       setIsAdmin(true);
+      setIsRestoring(false);
       return;
     }
 
@@ -224,8 +226,21 @@ export function AppShell() {
         window.localStorage.removeItem("chatsphere-profile");
       }
     }
+    if (!hasProfile) {
+      const savedDraft = window.localStorage.getItem("chatsphere-onboarding-draft");
+      if (savedDraft) {
+        try {
+          const draft = JSON.parse(savedDraft) as { firstName?: string; lastName?: string };
+          setFirstName(draft.firstName ?? "");
+          setLastName(draft.lastName ?? "");
+        } catch {
+          window.localStorage.removeItem("chatsphere-onboarding-draft");
+        }
+      }
+    }
     setIsAuthed(hasVerifiedEmail && hasProfile && Boolean(savedToken));
     if (hasVerifiedEmail && !hasProfile) setAuthStep("profile");
+    setIsRestoring(false);
   }, []);
 
   useEffect(() => {
@@ -529,6 +544,10 @@ export function AppShell() {
       setAuthError("Passwords do not match");
       return;
     }
+    window.localStorage.setItem(
+      "chatsphere-onboarding-draft",
+      JSON.stringify({ firstName: firstName.trim(), lastName: lastName.trim() })
+    );
     await sendCode();
   }
 
@@ -856,6 +875,7 @@ export function AppShell() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Could not save profile");
 
+      window.localStorage.removeItem("chatsphere-onboarding-draft");
       window.localStorage.setItem("chatsphere-profile-complete", "true");
       const profile = data.profile ?? {};
       const token = data.token ?? "";
@@ -1065,6 +1085,7 @@ export function AppShell() {
     window.localStorage.removeItem("chatsphere-profile");
     window.localStorage.removeItem("chatsphere-user-id");
     window.localStorage.removeItem("chatsphere-token");
+    window.localStorage.removeItem("chatsphere-onboarding-draft");
     setIsAuthed(false);
     setIsAdmin(false);
     setAdminToken("");
@@ -1299,6 +1320,16 @@ export function AppShell() {
   }
 
   if (!isAuthed) {
+    if (isRestoring) {
+      return (
+        <main className="grid min-h-screen place-items-center bg-[#07130f] text-white">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="animate-spin text-[#00a884]" size={40} />
+            <p className="text-sm font-bold text-[#aebac1]">Restoring your session...</p>
+          </div>
+        </main>
+      );
+    }
     return (
       <main className="min-h-screen bg-[#07130f] text-white">
         <section className="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
@@ -1574,12 +1605,55 @@ export function AppShell() {
                   <div className="text-sm font-bold text-[#00a884]">Account details</div>
                   <div className="mt-3 space-y-2 text-sm text-[#d1d7db]">
                     <div>
-                      <span className="text-[#8696a0]">Name:</span> {firstName} {lastName}
-                    </div>
-                    <div>
                       <span className="text-[#8696a0]">Email:</span> {email}
                     </div>
                   </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-[#d1d7db]">First name</span>
+                    <input
+                      value={firstName}
+                      onChange={(event) => setFirstName(event.target.value)}
+                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Enter first name"
+                      type="text"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-[#d1d7db]">
+                      Last name <span className="text-[#8696a0]">(optional)</span>
+                    </span>
+                    <input
+                      value={lastName}
+                      onChange={(event) => setLastName(event.target.value)}
+                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Enter last name"
+                      type="text"
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-[#d1d7db]">Set password</span>
+                    <input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Create password"
+                      type="password"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-[#d1d7db]">Confirm password</span>
+                    <input
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Repeat password"
+                      type="password"
+                    />
+                  </label>
                 </div>
                 <div className="flex items-center gap-4 rounded-md border border-white/10 bg-[#0b141a] p-4">
                   <label className="grid h-20 w-20 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-full border border-white/10 bg-[#202c33] text-[#00a884]">
@@ -1599,6 +1673,20 @@ export function AppShell() {
                 <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
                   {isSubmitting ? "Saving profile..." : "Continue to chats"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
+                </button>
+                <button
+                  className="flex w-full items-center justify-center gap-1 text-center text-sm font-bold text-[#aebac1] hover:text-white disabled:cursor-not-allowed disabled:text-[#6f8188]"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    window.localStorage.removeItem("chatsphere-auth");
+                    setAuthStep("signup");
+                    setAuthError("");
+                    setProfileError("");
+                  }}
+                  type="button"
+                >
+                  <ArrowLeft size={14} />
+                  Back to signup
                 </button>
                 {profileError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{profileError}</p> : null}
               </form>
