@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useRef, useState } from "react";
-import { Bot, Loader2, Send } from "lucide-react";
+import { Bot, Loader2, Send, X } from "lucide-react";
 
 type AIMessage = {
   id: string;
@@ -13,9 +13,10 @@ type AIMessage = {
 type AIChatProps = {
   apiUrl: string;
   authToken: string;
+  onClose?: () => void;
 };
 
-export function AIChat({ apiUrl, authToken }: AIChatProps) {
+export function AIChat({ apiUrl, authToken, onClose }: AIChatProps) {
   const [messages, setMessages] = useState<AIMessage[]>([
     {
       id: "welcome",
@@ -128,7 +129,7 @@ export function AIChat({ apiUrl, authToken }: AIChatProps) {
   return (
     <div className="flex h-full flex-col bg-[#f7f9fb]">
       {/* Header */}
-      <header className="flex min-h-[80px] shrink-0 items-center justify-between border-b border-[#e5e9f0] bg-white px-4 sm:px-8">
+      <header className="flex min-h-[80px] shrink-0 items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-8">
         <div className="flex items-center gap-3.5">
           <span className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_22px_rgba(124,58,237,.35)]">
             <Bot size={22} />
@@ -144,6 +145,16 @@ export function AIChat({ apiUrl, authToken }: AIChatProps) {
             </p>
           </div>
         </div>
+        {onClose ? (
+          <button
+            aria-label="Close AI Assistant"
+            className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#64748b] transition hover:bg-[#f1f5f9] hover:text-[#18212f]"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={22} />
+          </button>
+        ) : null}
       </header>
 
       {/* Messages area */}

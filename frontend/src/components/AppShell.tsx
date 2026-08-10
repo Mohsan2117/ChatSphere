@@ -109,6 +109,7 @@ export function AppShell() {
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
+  const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
 
   const knownChats = useMemo(() => {
     const byId = new Map(directoryChats.map((chat) => [chat.id, chat]));
@@ -450,6 +451,16 @@ export function AppShell() {
 
     return () => window.clearInterval(timer);
   }, [resendSeconds]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsMobileAIChatOpen(false);
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   async function sendCode() {
     if (!email.includes("@")) return;
@@ -1837,7 +1848,7 @@ export function AppShell() {
         </aside>
         ) : null}
 
-        <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
+        <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat ? "flex" : "hidden lg:flex"} ${workspaceMode === "ai" ? "hidden lg:flex" : ""}`}>
           {workspaceMode === "ai" ? (
             <AIChat apiUrl={apiUrl()} authToken={authToken} />
           ) : selectedChat ? (
@@ -1975,6 +1986,26 @@ export function AppShell() {
         </section>
 
       </section>
+
+      {/* Floating AI button - mobile & tablet only */}
+      {!isMobileAIChatOpen ? (
+        <button
+          aria-label="Open AI Assistant"
+          className="cs-press fixed bottom-24 right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_12px_32px_rgba(124,58,237,.45)] transition hover:scale-105 hover:shadow-[0_16px_40px_rgba(124,58,237,.55)] lg:hidden sm:bottom-28 sm:right-6"
+          onClick={() => setIsMobileAIChatOpen(true)}
+          type="button"
+        >
+          <Bot size={26} />
+        </button>
+      ) : null}
+
+      {/* Mobile & tablet AI chat overlay */}
+      {isMobileAIChatOpen ? (
+        <div className="cs-scale-in fixed inset-0 z-[60] flex flex-col bg-[#f7f9fb] lg:hidden">
+          <AIChat apiUrl={apiUrl()} authToken={authToken} onClose={() => setIsMobileAIChatOpen(false)} />
+        </div>
+      ) : null}
+
       {isProfileEditorOpen ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#0f172a]/45 px-4">
           <form className="cs-scale-in w-full max-w-md rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
