@@ -1604,7 +1604,6 @@ export function AppShell() {
               </form>
             ) : (
               <form className="mt-5 space-y-4" onSubmit={verifyCode}>
-                {authMessage ? <p className="rounded-md bg-[#00a884]/10 px-3 py-2 text-sm text-[#98ffd4]">{authMessage}</p> : null}
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Verification code</span>
                   <input
