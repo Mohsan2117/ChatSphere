@@ -1149,7 +1149,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			read_at timestamptz null,
 			created_at timestamptz not null default now()
 		);
-		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at, seq);
+		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at);
 		create table if not exists user_blocks (
 			blocker_id text not null,
 			blocked_id text not null,
@@ -1237,6 +1237,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		where lower(u.email) = lower(m.sender_email)
 		  and coalesce(m.sender_id, '') = ''
 	`)
+	_, _ = s.db.Exec(ctx, `drop index if exists idx_messages_conversation_created`)
+	_, _ = s.db.Exec(ctx, `create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at, seq)`)
 	return err
 }
 
