@@ -996,6 +996,44 @@ func (s *Store) DeleteMessage(userEmail, id string) error {
 	return nil
 }
 
+func (s *Store) ClearConversation(userEmail, otherUserID string) error {
+	if s.db == nil && s.my == nil {
+		return errors.New("database is not configured")
+	}
+	user, err := s.UserByEmail(userEmail)
+	if err != nil {
+		return err
+	}
+	other, err := s.UserByID(otherUserID)
+	if err != nil {
+		return errors.New("other user not found")
+	}
+
+	convID := conversationID(user.ID, other.ID)
+
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			delete from messages
+			where coalesce(conversation_id, '') = $1
+			   or (sender_id = $2 and recipient_id = $3)
+			   or (sender_id = $3 and recipient_id = $2)
+			   or (lower(sender_email) = lower($4) and recipient_id = $3)
+			   or (lower(sender_email) = lower($5) and recipient_id = $2)
+		`, convID, user.ID, other.ID, user.Email, other.Email)
+		return err
+	}
+
+	_, err = s.my.ExecContext(context.Background(), `
+		delete from messages
+		where coalesce(conversation_id, '') = ?
+		   or (sender_id = ? and recipient_id = ?)
+		   or (sender_id = ? and recipient_id = ?)
+		   or (lower(sender_email) = lower(?) and recipient_id = ?)
+		   or (lower(sender_email) = lower(?) and recipient_id = ?)
+	`, convID, user.ID, other.ID, other.ID, user.ID, user.Email, other.ID, other.Email, user.ID)
+	return err
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	if s.my != nil {
 		statements := []string{

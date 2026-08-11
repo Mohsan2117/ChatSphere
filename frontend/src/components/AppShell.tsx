@@ -1326,14 +1326,26 @@ export function AppShell() {
     });
   }
 
-  function clearCurrentChat() {
-    if (!selectedChatId) return;
-    setChatMessages((current) => {
-      const next = { ...current };
-      delete next[selectedChatId];
-      return next;
-    });
-    setIsChatMenuOpen(false);
+  async function clearCurrentChat() {
+    if (!selectedChatId || !authToken) return;
+    const chatId = selectedChatId;
+    setChatNotice("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/messages/conversation/${chatId}`, {
+        method: "DELETE",
+        headers: authHeaders(authToken)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not clear conversation");
+      setChatMessages((current) => {
+        const next = { ...current };
+        delete next[chatId];
+        return next;
+      });
+      setIsChatMenuOpen(false);
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not clear conversation");
+    }
   }
 
   async function blockCurrentChat() {

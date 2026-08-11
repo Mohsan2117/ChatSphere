@@ -457,6 +457,17 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
 	})
+	group.DELETE("/conversation/:recipientId", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.ClearConversation(authUser.Email, c.Param("recipientId")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not clear conversation"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "cleared"})
+	})
 	group.DELETE("/:id", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
