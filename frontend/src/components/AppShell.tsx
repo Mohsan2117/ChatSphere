@@ -111,6 +111,10 @@ export function AppShell() {
   const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
   const [isClearingChat, setIsClearingChat] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
+  const [typingUser, setTypingUser] = useState<string | null>(null);
+
+  const isTypingRef = useRef<boolean>(false);
+  const typingTimeoutRef = useRef<number | null>(null);
   const [socketAttempt, setSocketAttempt] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
@@ -415,6 +419,23 @@ export function AppShell() {
           }
           return;
         }
+        if (data.type === "typing.start") {
+          const payload = data.payload as unknown as { userId?: string; userName?: string };
+          const userId = payload?.userId;
+          const userName = payload?.userName;
+          if (userId === selectedChatIdRef.current && userName) {
+            setTypingUser(userName);
+          }
+          return;
+        }
+        if (data.type === "typing.stop") {
+          const payload = data.payload as unknown as { userId?: string };
+          const userId = payload?.userId;
+          if (userId === selectedChatIdRef.current) {
+            setTypingUser(null);
+          }
+          return;
+        }
         if (data.type !== "chat.message" || !data.payload) return;
         if (!data.payload.id || !data.payload.time) return;
         if (data.payload.senderEmail === email) return;
@@ -460,6 +481,7 @@ export function AppShell() {
     };
 
     socket.onclose = () => {
+      setTypingUser(null);
       if (closedByCleanup) return;
       reconnectTimer = window.setTimeout(() => setSocketAttempt((attempt) => attempt + 1), 2500);
     };
@@ -1223,6 +1245,52 @@ export function AppShell() {
     isProcessingQueueRef.current = false;
   }
 
+  async function sendTypingStatus(event: "start" | "stop", targetId?: string) {
+    const chatId = targetId ?? selectedChatId;
+    if (!chatId || !authToken) return;
+    try {
+      await fetch(`${apiUrl()}/api/v1/messages/typing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
+        body: JSON.stringify({ recipientId: chatId, event })
+      });
+    } catch {
+      // Ignore network errors for typing status
+    }
+  }
+
+  const handleInputChange = (value: string) => {
+    if (!selectedChatId) return;
+    setDraftText(selectedChatId, value);
+
+    if (!authToken) return;
+
+    if (value.trim().length > 0) {
+      if (!isTypingRef.current) {
+        isTypingRef.current = true;
+        sendTypingStatus("start");
+      }
+
+      if (typingTimeoutRef.current) {
+        window.clearTimeout(typingTimeoutRef.current);
+      }
+      typingTimeoutRef.current = window.setTimeout(() => {
+        sendTypingStatus("stop");
+        isTypingRef.current = false;
+        typingTimeoutRef.current = null;
+      }, 2000);
+    } else {
+      if (isTypingRef.current) {
+        sendTypingStatus("stop");
+        isTypingRef.current = false;
+        if (typingTimeoutRef.current) {
+          window.clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = null;
+        }
+      }
+    }
+  };
+
   async function sendChatMessage() {
     const body = currentMessageDraft.trim();
     if ((!body && !currentAttachmentDraft) || !selectedChatId || !authToken) return;
@@ -1268,6 +1336,15 @@ export function AppShell() {
     });
 
     processSendQueue();
+
+    if (isTypingRef.current) {
+      sendTypingStatus("stop", chatId);
+      isTypingRef.current = false;
+      if (typingTimeoutRef.current) {
+        window.clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+    }
   }
 
   function sendOnEnter(event: KeyboardEvent<HTMLInputElement>) {
@@ -1341,9 +1418,18 @@ export function AppShell() {
   }
 
   function selectChat(chat: ChatSeed) {
+    if (selectedChatId && isTypingRef.current) {
+      sendTypingStatus("stop", selectedChatId);
+    }
     setSelectedChatId(chat.id);
     setSelectedChatSnapshot(chat);
     setIsChatMenuOpen(false);
+    setTypingUser(null);
+    isTypingRef.current = false;
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
   }
 
   function toggleChatSearch() {
@@ -1441,11 +1527,20 @@ export function AppShell() {
   }
 
   function closeCurrentChat() {
+    if (selectedChatId && isTypingRef.current) {
+      sendTypingStatus("stop", selectedChatId);
+    }
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
     setIsChatSearchOpen(false);
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
+    setTypingUser(null);
+    isTypingRef.current = false;
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
   }
 
   if (isAdmin) {
@@ -2327,6 +2422,11 @@ export function AppShell() {
                     <button className="ml-3 text-[#64748b] hover:text-[#18212f]" onClick={() => { if (selectedChatId) setDraftAttachment(selectedChatId, null); }} type="button">Remove</button>
                   </div>
                 ) : null}
+                {typingUser ? (
+                  <div className="mb-2 text-xs font-bold text-[#00a884] cs-fade-up">
+                    {typingUser} is typing...
+                  </div>
+                ) : null}
                 <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
                   <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
                     <Smile size={22} />
@@ -2337,7 +2437,7 @@ export function AppShell() {
                   </label>
                   <input
                     className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
-                    onChange={(event) => { if (selectedChatId) setDraftText(selectedChatId, event.target.value); }}
+                    onChange={(event) => handleInputChange(event.target.value)}
                     onKeyDown={sendOnEnter}
                     placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
                     value={currentMessageDraft}

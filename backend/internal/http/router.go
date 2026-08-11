@@ -499,6 +499,58 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
+	group.POST("/typing", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			RecipientID string `json:"recipientId"`
+			Event       string `json:"event"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		recipient, err := dataStore.UserByID(body.RecipientID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "recipient not found"})
+			return
+		}
+		left := authUser.ID
+		right := recipient.ID
+		var convID string
+		if left < right {
+			convID = left + ":" + right
+		} else {
+			convID = right + ":" + left
+		}
+		var eventType string
+		if body.Event == "start" {
+			eventType = "typing.start"
+		} else {
+			eventType = "typing.stop"
+		}
+		sender, err := dataStore.UserByEmail(authUser.Email)
+		var userName string
+		if err == nil {
+			userName = sender.FirstName + " " + sender.LastName
+		} else {
+			userName = authUser.Email
+		}
+		payload, _ := json.Marshal(map[string]string{
+			"userId":         authUser.ID,
+			"userName":       userName,
+			"conversationId": convID,
+		})
+		hub.Broadcast(realtime.Event{
+			Type:           eventType,
+			ConversationID: convID,
+			TargetUserIDs:  []string{authUser.ID, recipient.ID},
+			Payload:        payload,
+		})
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 	group.POST("/reactions/:id", accepted("react to message"))
 }
 
