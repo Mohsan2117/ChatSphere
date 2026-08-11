@@ -124,6 +124,14 @@ export function AppShell() {
   const prevMessagesLengthRef = useRef(0);
   const prevChatIdRef = useRef("");
 
+  const pendingSendQueueRef = useRef<{
+    chatId: string;
+    message: ChatMessage;
+    draftText: string;
+    draftAttachment: AttachmentDraft | null;
+  }[]>([]);
+  const isProcessingQueueRef = useRef(false);
+
   const scrollToBottom = () => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
@@ -1098,6 +1106,91 @@ export function AppShell() {
     } as NonNullable<ChatMessage["attachment"]>;
   }
 
+  async function processSendQueue() {
+    if (isProcessingQueueRef.current || pendingSendQueueRef.current.length === 0) return;
+    isProcessingQueueRef.current = true;
+
+    while (pendingSendQueueRef.current.length > 0) {
+      const task = pendingSendQueueRef.current[0];
+      const { chatId, message, draftText, draftAttachment } = task;
+
+      let uploadedAttachment: NonNullable<ChatMessage["attachment"]> | undefined;
+      let uploadFailed = false;
+
+      if (draftAttachment) {
+        try {
+          uploadedAttachment = await uploadAttachment(draftAttachment);
+        } catch (error) {
+          uploadFailed = true;
+          setDraftText(chatId, draftText);
+          if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
+          setAuthError(error instanceof Error ? error.message : "Could not upload file");
+          
+          setChatMessages((current) => ({
+            ...current,
+            [chatId]: (current[chatId] ?? []).filter((msg) => msg.id !== message.id)
+          }));
+        }
+      }
+
+      if (uploadFailed) {
+        pendingSendQueueRef.current.shift();
+        continue;
+      }
+
+      if (uploadedAttachment) {
+        message.attachment = uploadedAttachment;
+        setChatMessages((current) => ({
+          ...current,
+          [chatId]: (current[chatId] ?? []).map((msg) =>
+            msg.id === message.id ? { ...msg, attachment: uploadedAttachment } : msg
+          )
+        }));
+      }
+
+      try {
+        const response = await fetch(`${apiUrl()}/api/v1/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
+          body: JSON.stringify({
+            recipientId: chatId,
+            body: message.body,
+            attachment: uploadedAttachment
+              ? {
+                  name: uploadedAttachment.name,
+                  type: uploadedAttachment.type,
+                  kind: uploadedAttachment.kind,
+                  url: uploadedAttachment.url
+                }
+              : undefined
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error ?? "Message could not be saved");
+        if (data.message?.id) {
+          setChatMessages((current) => ({
+            ...current,
+            [chatId]: (current[chatId] ?? []).map((currentMessage) =>
+              currentMessage.id === message.id ? { ...data.message, mine: true, localSeq: currentMessage.localSeq } : currentMessage
+            )
+          }));
+        }
+      } catch (error) {
+        setChatMessages((current) => ({
+          ...current,
+          [chatId]: (current[chatId] ?? []).filter((currentMessage) => currentMessage.id !== message.id)
+        }));
+        setDraftText(chatId, draftText);
+        if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
+        setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
+      }
+
+      pendingSendQueueRef.current.shift();
+    }
+
+    isProcessingQueueRef.current = false;
+  }
+
   async function sendChatMessage() {
     const body = currentMessageDraft.trim();
     if ((!body && !currentAttachmentDraft) || !selectedChatId || !authToken) return;
@@ -1111,16 +1204,6 @@ export function AppShell() {
     removeDraft(chatId);
     setIsEmojiOpen(false);
 
-    let uploadedAttachment: NonNullable<ChatMessage["attachment"]> | undefined;
-    try {
-      uploadedAttachment = draftAttachment ? await uploadAttachment(draftAttachment) : undefined;
-    } catch (error) {
-      setDraftText(chatId, draftText);
-      if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
-      setAuthError(error instanceof Error ? error.message : "Could not upload file");
-      return;
-    }
-
     const message: ChatMessage = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       body,
@@ -1128,7 +1211,14 @@ export function AppShell() {
       mine: true,
       senderEmail: email,
       recipientId: chatId,
-      attachment: uploadedAttachment,
+      attachment: draftAttachment
+        ? {
+            name: draftAttachment.name,
+            type: draftAttachment.type,
+            url: draftAttachment.url,
+            kind: draftAttachment.kind
+          }
+        : undefined,
       createdAt: new Date().toISOString(),
       localSeq: getNextLocalSeq()
     };
@@ -1137,42 +1227,15 @@ export function AppShell() {
       ...current,
       [chatId]: mergeMessages(current[chatId] ?? [], [message])
     }));
-    try {
-      const response = await fetch(`${apiUrl()}/api/v1/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
-        body: JSON.stringify({
-          recipientId: chatId,
-          body,
-          attachment: uploadedAttachment
-            ? {
-                name: uploadedAttachment.name,
-                type: uploadedAttachment.type,
-                kind: uploadedAttachment.kind,
-                url: uploadedAttachment.url
-              }
-            : undefined
-        })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? "Message could not be saved");
-      if (data.message?.id) {
-        setChatMessages((current) => ({
-          ...current,
-          [chatId]: (current[chatId] ?? []).map((currentMessage) =>
-            currentMessage.id === message.id ? { ...data.message, mine: true, localSeq: currentMessage.localSeq } : currentMessage
-          )
-        }));
-      }
-    } catch (error) {
-      setChatMessages((current) => ({
-        ...current,
-        [chatId]: (current[chatId] ?? []).filter((currentMessage) => currentMessage.id !== message.id)
-      }));
-      setDraftText(chatId, draftText);
-      if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
-      setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
-    }
+
+    pendingSendQueueRef.current.push({
+      chatId,
+      message,
+      draftText,
+      draftAttachment
+    });
+
+    processSendQueue();
   }
 
   function sendOnEnter(event: KeyboardEvent<HTMLInputElement>) {
