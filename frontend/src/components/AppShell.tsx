@@ -1171,7 +1171,7 @@ export function AppShell() {
           setChatMessages((current) => ({
             ...current,
             [chatId]: (current[chatId] ?? []).map((currentMessage) =>
-              currentMessage.id === message.id ? { ...data.message, mine: true, localSeq: currentMessage.localSeq } : currentMessage
+              currentMessage.id === message.id ? { ...data.message, mine: true, localSeq: currentMessage.localSeq, createdAt: currentMessage.createdAt } : currentMessage
             )
           }));
         }
