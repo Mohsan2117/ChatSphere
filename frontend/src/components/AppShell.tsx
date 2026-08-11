@@ -208,10 +208,10 @@ export function AppShell() {
     return Object.fromEntries(
       Object.entries(chatMessages).map(([chatId, messages]) => [
         chatId,
-        messages.filter((message) => !message.mine && !message.readAt).length
+        chatId === selectedChatId ? 0 : messages.filter((message) => !message.mine && !message.readAt).length
       ])
     ) as Record<string, number>;
-  }, [chatMessages]);
+  }, [chatMessages, selectedChatId]);
   const contactResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return directoryChats;
