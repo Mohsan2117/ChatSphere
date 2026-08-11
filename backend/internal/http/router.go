@@ -436,6 +436,26 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not mark messages read"})
 			return
 		}
+		if recipient, err := dataStore.UserByID(c.Param("recipientId")); err == nil {
+			left := authUser.ID
+			right := recipient.ID
+			var convID string
+			if left < right {
+				convID = left + ":" + right
+			} else {
+				convID = right + ":" + left
+			}
+			payload, _ := json.Marshal(map[string]string{
+				"readerId":       authUser.ID,
+				"conversationId": convID,
+			})
+			hub.Broadcast(realtime.Event{
+				Type:           "chat.read",
+				ConversationID: convID,
+				TargetUserIDs:  []string{authUser.ID, recipient.ID},
+				Payload:        payload,
+			})
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "read"})
 	})
 	group.PATCH("/:id", func(c *gin.Context) {

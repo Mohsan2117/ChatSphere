@@ -393,6 +393,24 @@ export function AppShell() {
           );
           return;
         }
+        if (data.type === "chat.read") {
+          const payload = data.payload as unknown as { readerId?: string };
+          const readerId = payload?.readerId;
+          if (readerId && readerId !== currentUserId) {
+            const readAt = new Date().toISOString();
+            setChatMessages((current) => {
+              const existing = current[readerId] ?? [];
+              const updated = existing.map((msg) =>
+                msg.mine ? { ...msg, readAt } : msg
+              );
+              return {
+                ...current,
+                [readerId]: updated
+              };
+            });
+          }
+          return;
+        }
         if (data.type !== "chat.message" || !data.payload) return;
         if (!data.payload.id || !data.payload.time) return;
         if (data.payload.senderEmail === email) return;
