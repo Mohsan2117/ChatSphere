@@ -42,6 +42,7 @@ type ChatMessage = {
     url: string;
     kind: "image" | "video" | "file";
   };
+  localSeq?: number;
 };
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type ChatDraft = {
@@ -113,6 +114,29 @@ export function AppShell() {
   const socketRef = useRef<WebSocket | null>(null);
   const chatSearchRef = useRef<HTMLInputElement | null>(null);
   const chatMessageSearchRef = useRef<HTMLInputElement | null>(null);
+  const selectedChatIdRef = useRef(selectedChatId);
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChatId;
+  }, [selectedChatId]);
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const userIsNearBottomRef = useRef(true);
+  const prevMessagesLengthRef = useRef(0);
+  const prevChatIdRef = useRef("");
+
+  const scrollToBottom = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  };
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const threshold = 150;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+    userIsNearBottomRef.current = nearBottom;
+  };
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
   const [isInboxLoading, setIsInboxLoading] = useState(true);
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
@@ -269,8 +293,9 @@ export function AppShell() {
   useEffect(() => {
     if (!isAuthed || !authToken || !selectedChatId) return;
 
+    const chatId = selectedChatId;
     let cancelled = false;
-    fetch(`${apiUrl()}/api/v1/messages/${selectedChatId}`, {
+    fetch(`${apiUrl()}/api/v1/messages/${chatId}`, {
       headers: authHeaders(authToken)
     })
       .then((response) => {
@@ -278,14 +303,14 @@ export function AppShell() {
         return response.json();
       })
       .then((data) => {
-        if (cancelled) return;
+        if (cancelled || chatId !== selectedChatIdRef.current) return;
         const messages = Array.isArray(data.messages) ? data.messages : [];
         setChatMessages((current) => {
-          const existing = current[selectedChatId] ?? [];
+          const existing = current[chatId] ?? [];
           if (messages.length === 0 && existing.length > 0) return current;
           return {
             ...current,
-            [selectedChatId]: mergeMessages(existing, messages)
+            [chatId]: mergeMessages(existing, messages)
           };
         });
       })
@@ -295,6 +320,33 @@ export function AppShell() {
       cancelled = true;
     };
   }, [authToken, isAuthed, selectedChatId]);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || !selectedChatId) return;
+
+    const messages = chatMessages[selectedChatId] ?? [];
+    const prevLength = prevMessagesLengthRef.current;
+    const prevChatId = prevChatIdRef.current;
+
+    prevMessagesLengthRef.current = messages.length;
+    prevChatIdRef.current = selectedChatId;
+
+    if (selectedChatId !== prevChatId) {
+      userIsNearBottomRef.current = true;
+      scrollToBottom();
+      const timer = setTimeout(() => scrollToBottom(), 50);
+      return () => clearTimeout(timer);
+    }
+
+    if (messages.length > prevLength) {
+      if (userIsNearBottomRef.current || prevLength === 0) {
+        scrollToBottom();
+        const timer = setTimeout(() => scrollToBottom(), 50);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [chatMessages, selectedChatId]);
 
   useEffect(() => {
     if (!email) return;
@@ -348,13 +400,14 @@ export function AppShell() {
             senderEmail: data.payload?.senderEmail,
             senderId: data.payload?.senderId,
             recipientId: data.payload?.recipientId,
-            attachment: data.payload?.attachment
+            attachment: data.payload?.attachment,
+            createdAt: data.payload?.createdAt,
+            localSeq: getNextLocalSeq()
           };
           const existing = current[conversationId] ?? [];
-          if (existing.some((message) => message.id === incomingMessage.id)) return current;
           return {
             ...current,
-            [conversationId]: [...existing, incomingMessage]
+            [conversationId]: mergeMessages(existing, [incomingMessage])
           };
         });
       } catch {
@@ -1075,12 +1128,14 @@ export function AppShell() {
       mine: true,
       senderEmail: email,
       recipientId: chatId,
-      attachment: uploadedAttachment
+      attachment: uploadedAttachment,
+      createdAt: new Date().toISOString(),
+      localSeq: getNextLocalSeq()
     };
 
     setChatMessages((current) => ({
       ...current,
-      [chatId]: [...(current[chatId] ?? []), message]
+      [chatId]: mergeMessages(current[chatId] ?? [], [message])
     }));
     try {
       const response = await fetch(`${apiUrl()}/api/v1/messages`, {
@@ -1105,7 +1160,7 @@ export function AppShell() {
         setChatMessages((current) => ({
           ...current,
           [chatId]: (current[chatId] ?? []).map((currentMessage) =>
-            currentMessage.id === message.id ? { ...data.message, mine: true } : currentMessage
+            currentMessage.id === message.id ? { ...data.message, mine: true, localSeq: currentMessage.localSeq } : currentMessage
           )
         }));
       }
@@ -2114,7 +2169,7 @@ export function AppShell() {
                 </div>
               </header>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
+              <div ref={scrollContainerRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
                 <div className="mx-auto mb-8 w-fit rounded-full border border-[#dce1e8] bg-white px-4 py-2 text-xs font-bold text-[#64748b]">Conversation started</div>
                 {visibleSelectedMessages.length ? (
                   <div className="space-y-4">
@@ -2298,17 +2353,61 @@ function wsUrl(token: string) {
   return `${base.replace(/^http/, "ws").replace(/\/$/, "")}/ws?token=${encodeURIComponent(token)}`;
 }
 
+let localSeqCounter = 0;
+function getNextLocalSeq() {
+  localSeqCounter++;
+  return localSeqCounter;
+}
+
 function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]) {
   const byId = new Map<string, ChatMessage>();
-  [...existing, ...incoming].forEach((message) => {
-    if (!message.id) return;
-    byId.set(message.id, message);
+  
+  existing.forEach((msg) => {
+    if (msg.id) byId.set(msg.id, msg);
   });
+
+  incoming.forEach((incMsg) => {
+    if (!incMsg.id) return;
+
+    let matchedOptimisticId: string | null = null;
+    byId.forEach((extMsg, id) => {
+      if (matchedOptimisticId) return;
+      if (id.includes("-") && extMsg.mine && !incMsg.id.includes("-")) {
+        const sameBody = extMsg.body === incMsg.body;
+        const sameRecipient = extMsg.recipientId === incMsg.recipientId;
+        const extTime = Date.parse(extMsg.createdAt ?? "");
+        const incTime = Date.parse(incMsg.createdAt ?? "");
+        const closeTime = Number.isFinite(extTime) && Number.isFinite(incTime) && Math.abs(extTime - incTime) < 15000;
+
+        if (sameBody && sameRecipient && closeTime) {
+          matchedOptimisticId = id;
+        }
+      }
+    });
+
+    if (matchedOptimisticId) {
+      const extMsg = byId.get(matchedOptimisticId)!;
+      byId.delete(matchedOptimisticId);
+      byId.set(incMsg.id, {
+        ...incMsg,
+        localSeq: extMsg.localSeq ?? incMsg.localSeq ?? getNextLocalSeq()
+      });
+    } else {
+      const existingMsg = byId.get(incMsg.id);
+      const localSeq = existingMsg?.localSeq ?? incMsg.localSeq ?? getNextLocalSeq();
+      byId.set(incMsg.id, { ...incMsg, localSeq });
+    }
+  });
+
   return Array.from(byId.values()).sort((first, second) => {
     const firstTime = Date.parse(first.createdAt ?? "");
     const secondTime = Date.parse(second.createdAt ?? "");
-    if (Number.isFinite(firstTime) && Number.isFinite(secondTime)) return firstTime - secondTime;
-    return first.id.localeCompare(second.id);
+    if (Number.isFinite(firstTime) && Number.isFinite(secondTime)) {
+      if (firstTime !== secondTime) {
+        return firstTime - secondTime;
+      }
+    }
+    return (first.localSeq ?? 0) - (second.localSeq ?? 0);
   });
 }
 

@@ -852,7 +852,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 		   or (lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
 		   or (%s <> '' and lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
 		   or (coalesce(m.sender_id, '') = %s and coalesce(m.recipient_id, '') = %s)
-		order by m.created_at desc
+		order by m.created_at desc, m.seq desc
 		limit %s
 	`
 	var rows messageRows
@@ -898,7 +898,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where lower(coalesce(m.sender_email, '')) = %s or coalesce(m.recipient_id, '') = %s
-		order by m.created_at desc
+		order by m.created_at desc, m.seq desc
 		limit %s
 	`
 	var rows messageRows
@@ -1013,6 +1013,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			)`,
 			`
 			create table if not exists messages (
+				seq bigint auto_increment unique,
 				id varchar(64) primary key,
 				conversation_id varchar(255) not null,
 				sender_email varchar(255) not null,
@@ -1075,6 +1076,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column blocked boolean not null default false`)
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column created_at datetime not null default current_timestamp`)
 		_, _ = s.my.ExecContext(ctx, `alter table app_users add column updated_at datetime not null default current_timestamp`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column seq bigint auto_increment unique`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column conversation_id varchar(255) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column sender_email varchar(255) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column sender_id varchar(64) not null default ''`)
@@ -1116,7 +1118,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			set m.sender_id = u.id
 			where coalesce(m.sender_id, '') = ''
 		`)
-		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at)`)
+		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at, seq)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
 		return nil
 	}
@@ -1133,6 +1135,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			updated_at timestamptz not null default now()
 		);
 		create table if not exists messages (
+			seq bigserial,
 			id text primary key,
 			conversation_id text not null,
 			sender_email text not null,
@@ -1146,7 +1149,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			read_at timestamptz null,
 			created_at timestamptz not null default now()
 		);
-		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at);
+		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at, seq);
 		create table if not exists user_blocks (
 			blocker_id text not null,
 			blocked_id text not null,
@@ -1184,6 +1187,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists seq bigserial`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_url text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists read_at timestamptz null`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists conversation_id text not null default ''`)
