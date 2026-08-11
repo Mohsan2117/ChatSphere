@@ -317,9 +317,13 @@ export function AppShell() {
         setChatMessages((current) => {
           const existing = current[chatId] ?? [];
           if (messages.length === 0 && existing.length > 0) return current;
+          const readAt = new Date().toISOString();
+          const processedMessages = chatId === selectedChatIdRef.current
+            ? messages.map((m: ChatMessage) => (m.mine ? m : { ...m, readAt: m.readAt || readAt }))
+            : messages;
           return {
             ...current,
-            [chatId]: mergeMessages(existing, messages)
+            [chatId]: mergeMessages(existing, processedMessages)
           };
         });
       })
@@ -419,6 +423,8 @@ export function AppShell() {
         setChatMessages((current) => {
           const conversationId = data.payload?.senderId || data.conversationId;
           if (!conversationId) return current;
+          const isOpen = conversationId === selectedChatIdRef.current;
+          const readAt = isOpen ? new Date().toISOString() : undefined;
           const incomingMessage: ChatMessage = {
             id: data.payload?.id as string,
             body: data.payload?.body as string,
@@ -429,8 +435,15 @@ export function AppShell() {
             recipientId: data.payload?.recipientId,
             attachment: data.payload?.attachment,
             createdAt: data.payload?.createdAt,
+            readAt,
             localSeq: getNextLocalSeq()
           };
+          if (isOpen && authToken) {
+            fetch(`${apiUrl()}/api/v1/messages/${conversationId}/read`, {
+              method: "POST",
+              headers: authHeaders(authToken)
+            }).catch(() => {});
+          }
           const existing = current[conversationId] ?? [];
           return {
             ...current,
