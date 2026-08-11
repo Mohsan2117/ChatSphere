@@ -294,6 +294,9 @@ export function AppShell() {
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
     setChatSearch("");
+    setWorkspaceMode("inbox");
+    setIsMobileAIChatOpen(false);
+    setIsMobileDrawerOpen(false);
   }, [isAuthed]);
 
   useEffect(() => {
@@ -1383,6 +1386,12 @@ export function AppShell() {
     setAdminUsers([]);
     setCurrentUserId("");
     setAuthStep("signup");
+    setWorkspaceMode("inbox");
+    setSelectedChatId("");
+    setSelectedChatSnapshot(null);
+    setIsMobileAIChatOpen(false);
+    setIsMobileDrawerOpen(false);
+    setChatSearch("");
     setVerificationCode("");
     setAuthMessage("");
     setAuthError("");
