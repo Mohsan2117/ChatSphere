@@ -109,6 +109,7 @@ export function AppShell() {
   const [chatMessageSearch, setChatMessageSearch] = useState("");
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false);
   const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
+  const [isClearingChat, setIsClearingChat] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
   const [socketAttempt, setSocketAttempt] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
@@ -1327,9 +1328,10 @@ export function AppShell() {
   }
 
   async function clearCurrentChat() {
-    if (!selectedChatId || !authToken) return;
+    if (!selectedChatId || !authToken || isClearingChat) return;
     const chatId = selectedChatId;
     setChatNotice("");
+    setIsClearingChat(true);
     try {
       const response = await fetch(`${apiUrl()}/api/v1/messages/conversation/${chatId}`, {
         method: "DELETE",
@@ -1345,6 +1347,8 @@ export function AppShell() {
       setIsChatMenuOpen(false);
     } catch (error) {
       setChatNotice(error instanceof Error ? error.message : "Could not clear conversation");
+    } finally {
+      setIsClearingChat(false);
     }
   }
 
@@ -2237,7 +2241,9 @@ export function AppShell() {
                       ) : (
                         <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={blockCurrentChat} type="button">Block user</button>
                       )}
-                      <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={clearCurrentChat} type="button">Clear chat</button>
+                      <button className={`flex w-full items-center px-4 py-3 text-left text-[#b42318] ${isClearingChat ? "opacity-50 cursor-not-allowed" : "hover:bg-[#fff5f5]"}`} onClick={clearCurrentChat} disabled={isClearingChat} type="button">
+                        {isClearingChat ? "Chat clearing..." : "Clear chat"}
+                      </button>
                       <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={closeCurrentChat} type="button">Close chat</button>
                     </div>
                   ) : null}
