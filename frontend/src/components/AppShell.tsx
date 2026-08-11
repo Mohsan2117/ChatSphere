@@ -19,7 +19,9 @@ import {
   Smile,
   Upload,
   UserPlus,
-  Users
+  Users,
+  Menu,
+  X
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
@@ -111,6 +113,7 @@ export function AppShell() {
   const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
   const [isClearingChat, setIsClearingChat] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
 
   const isTypingRef = useRef<boolean>(false);
@@ -2053,9 +2056,122 @@ export function AppShell() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[#eef1f5] text-[#18212f]">
+    <main className="h-screen overflow-hidden bg-[#eef1f5] text-[#18212f] flex flex-col">
+      {/* Mobile Top Navbar */}
+      <header className="flex h-16 shrink-0 items-center justify-between bg-[#0b1120] px-4 text-white lg:hidden z-30 shadow-md">
+        <div className="flex items-center gap-3">
+          <button
+            aria-label={isMobileDrawerOpen ? "Close menu" : "Open menu"}
+            onClick={() => setIsMobileDrawerOpen(!isMobileDrawerOpen)}
+            className="cs-press grid h-10 w-10 place-items-center rounded-xl text-[#94a3b8] hover:bg-white/10 hover:text-white transition focus:outline-none"
+            type="button"
+          >
+            {isMobileDrawerOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
+          <span className="text-base font-black tracking-tight">ChatSphere</span>
+          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-white/10 text-[#00a884]">
+            {workspaceTitle}
+          </span>
+        </div>
+        <button
+          className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-white/10 text-xs font-black text-[#00a884] hover:bg-white/20"
+          onClick={() => {
+            setIsProfileEditorOpen(true);
+            setProfileError("");
+            setProfileMessage("");
+          }}
+          title="Edit your profile"
+          type="button"
+          >
+          {avatarPreview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img alt="Your profile" className="h-full w-full object-cover" src={avatarPreview} />
+          ) : (
+            userInitials
+          )}
+        </button>
+      </header>
+
+      {/* Mobile Drawer (Left Sidebar) */}
+      <div className={`fixed inset-0 z-50 flex lg:hidden transition-opacity duration-300 ${isMobileDrawerOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
+        <div
+          className={`fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity duration-300 ease-in-out ${isMobileDrawerOpen ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setIsMobileDrawerOpen(false)}
+        />
+        <div
+          className={`relative flex w-full max-w-[280px] flex-col bg-[#0b1120] text-white shadow-2xl transition-transform duration-300 ease-in-out h-full ${
+            isMobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white">
+                <MessageCircle size={18} />
+              </span>
+              <span className="text-base font-black tracking-tight">ChatSphere</span>
+            </div>
+            <button
+              aria-label="Close menu"
+              onClick={() => setIsMobileDrawerOpen(false)}
+              className="grid h-8 w-8 place-items-center rounded-lg text-[#94a3b8] hover:bg-white/10 hover:text-white transition"
+              type="button"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <nav className="flex-1 space-y-1.5 px-4 py-6">
+            {[
+              { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
+              { label: "Search", mode: "search" as const, icon: Search },
+              { label: "Users", mode: "contacts" as const, icon: Users },
+              { label: "Documents", mode: "files" as const, icon: FileText },
+              { label: "AI Assistant", mode: "ai" as const, icon: Bot }
+            ].map(({ icon: Icon, label, mode }) => {
+              const isActive = workspaceMode === mode;
+              return (
+                <button
+                  aria-label={label}
+                  className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    isActive && mode === "ai"
+                      ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
+                      : isActive
+                        ? "bg-white/10 text-white"
+                        : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
+                  }`}
+                  key={mode}
+                  onClick={() => {
+                    openWorkspace(mode);
+                    setIsMobileDrawerOpen(false);
+                  }}
+                  type="button"
+                >
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="border-t border-white/10 p-4">
+            <button
+              aria-label="Logout"
+              className="cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/5 hover:text-white"
+              onClick={() => {
+                logout();
+                setIsMobileDrawerOpen(false);
+              }}
+              type="button"
+            >
+              <LogOut size={18} />
+              <span>Logout</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <section
-        className={`grid h-screen min-h-0 ${
+        className={`grid flex-1 min-h-0 ${
           workspaceMode === "ai"
             ? "lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]"
             : "lg:grid-cols-[250px_350px_minmax(0,1fr)] xl:grid-cols-[270px_390px_minmax(0,1fr)]"
@@ -2109,7 +2225,7 @@ export function AppShell() {
         </aside>
 
         {workspaceMode !== "ai" ? (
-        <aside className={`h-screen min-h-0 overflow-y-auto border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+        <aside className={`h-full lg:h-screen min-h-0 overflow-y-auto border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
           <header className="border-b border-[#e5e9f0] px-5 py-5">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -2319,7 +2435,7 @@ export function AppShell() {
         </aside>
         ) : null}
 
-        <section className={`h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat ? "flex" : "hidden lg:flex"} ${workspaceMode === "ai" ? "hidden lg:flex" : ""}`}>
+        <section className={`h-full lg:h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
           {workspaceMode === "ai" ? (
             <AIChat apiUrl={apiUrl()} authToken={authToken} />
           ) : selectedChat ? (
