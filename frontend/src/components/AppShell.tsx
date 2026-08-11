@@ -2582,7 +2582,7 @@ export function AppShell() {
       </section>
 
       {/* Floating AI button - mobile & tablet only */}
-      {(!isMobileAIChatOpen && !isMobileDrawerOpen) ? (
+      {(!isMobileAIChatOpen && !isMobileDrawerOpen && workspaceMode !== "ai") ? (
         <button
           aria-label="Open AI Assistant"
           className="cs-press fixed bottom-24 right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_12px_32px_rgba(124,58,237,.45)] transition hover:scale-105 hover:shadow-[0_16px_40px_rgba(124,58,237,.55)] lg:hidden sm:bottom-28 sm:right-6"
