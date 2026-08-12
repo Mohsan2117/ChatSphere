@@ -159,6 +159,8 @@ export function AppShell() {
   const [inboxError, setInboxError] = useState("");
   const [directoryError, setDirectoryError] = useState("");
   const [isRestoring, setIsRestoring] = useState(true);
+  const [isAppInitializing, setIsAppInitializing] = useState(true);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   const knownChats = useMemo(() => {
     const byId = new Map(directoryChats.map((chat) => [chat.id, chat]));
@@ -298,6 +300,16 @@ export function AppShell() {
     setIsMobileAIChatOpen(false);
     setIsMobileDrawerOpen(false);
   }, [isAuthed]);
+
+  useEffect(() => {
+    if (!isRestoring) {
+      if (!isAuthed) {
+        setIsAppInitializing(false);
+      } else if (!isInboxLoading && !inboxError) {
+        setIsAppInitializing(false);
+      }
+    }
+  }, [isRestoring, isAuthed, isInboxLoading, inboxError]);
 
   useEffect(() => {
     setIsEmojiOpen(false);
@@ -553,7 +565,7 @@ export function AppShell() {
       cancelled = true;
       window.clearInterval(refresh);
     };
-  }, [authToken, email, isAuthed]);
+  }, [authToken, email, isAuthed, retryAttempt]);
 
   useEffect(() => {
     if (!isAuthed || !authToken || !currentUserId) return;
@@ -596,7 +608,7 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [authToken, currentUserId, email, isAuthed]);
+  }, [authToken, currentUserId, email, isAuthed, retryAttempt]);
 
   useEffect(() => {
     if (!selectedChatId || !authToken) return;
@@ -1386,6 +1398,7 @@ export function AppShell() {
     setAdminUsers([]);
     setCurrentUserId("");
     setAuthStep("signup");
+    setIsAppInitializing(true);
     setWorkspaceMode("inbox");
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
@@ -1648,6 +1661,48 @@ export function AppShell() {
             )}
           </div>
         </section>
+      </main>
+    );
+  }
+
+  if (isAppInitializing) {
+    return (
+      <main className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0b1120] text-white px-6">
+        <div className="flex flex-col items-center max-w-sm w-full text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#00a884] text-[#0b1120] shadow-[0_16px_40px_rgba(0,168,132,.3)] transition-transform duration-500 hover:scale-105">
+            <MessageCircle size={36} />
+          </div>
+          
+          <h1 className="mt-8 text-3xl font-black tracking-normal text-white">ChatSphere</h1>
+          
+          {inboxError || directoryError ? (
+            <div className="mt-6 w-full">
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-center">
+                <p className="text-sm font-semibold text-red-200">
+                  {inboxError || directoryError || "Failed to initialize ChatSphere"}
+                </p>
+              </div>
+              <button
+                className="cs-press mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] py-3 text-sm font-black text-[#0b1120] shadow-[0_8px_24px_rgba(0,168,132,.25)] hover:bg-[#00c298] transition"
+                onClick={() => {
+                  setInboxError("");
+                  setDirectoryError("");
+                  setRetryAttempt((current) => current + 1);
+                }}
+                type="button"
+              >
+                Retry Connection
+              </button>
+            </div>
+          ) : (
+            <div className="mt-8 flex flex-col items-center gap-4">
+              <Loader2 className="animate-spin text-[#00a884]" size={36} />
+              <p className="text-sm font-bold text-[#94a3b8] tracking-wide animate-pulse">
+                Initializing secure session...
+              </p>
+            </div>
+          )}
+        </div>
       </main>
     );
   }
