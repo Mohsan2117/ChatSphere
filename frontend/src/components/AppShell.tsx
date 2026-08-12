@@ -2359,7 +2359,7 @@ export function AppShell() {
                       </span>
                       <span className="min-w-0 flex-1">
                         <strong className="block truncate text-sm">{message.attachment?.name}</strong>
-                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat?.name ?? "Unknown chat"} - {message.time}</span>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat?.name ?? "Unknown chat"} - {formatMessageTime(message)}</span>
                       </span>
                     </button>
                   ))
@@ -2414,7 +2414,9 @@ export function AppShell() {
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
                           <strong className="truncate text-sm">{chat.name}</strong>
-                          <span className="text-xs font-bold text-[#94a3b8]">{chatMessages[chat.id]?.at(-1)?.time ?? "new"}</span>
+                          <span className="text-xs font-bold text-[#94a3b8]">
+                            {chatMessages[chat.id]?.at(-1) ? formatMessageTime(chatMessages[chat.id].at(-1)) : "new"}
+                          </span>
                         </span>
                         <span className="mt-1 block truncate text-sm text-[#64748b]">{chat.online ? "Online now" : "Offline"}</span>
                       </span>
@@ -2466,7 +2468,7 @@ export function AppShell() {
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center justify-between gap-2">
                             <strong className="truncate text-sm">{chat.name}</strong>
-                            <span className="text-xs font-bold text-[#94a3b8]">{lastMessage?.time}</span>
+                            <span className="text-xs font-bold text-[#94a3b8]">{formatMessageTime(lastMessage)}</span>
                           </span>
                           <span className="mt-1 flex items-center justify-between gap-2 text-sm text-[#64748b]">
                             <span className="truncate">{lastMessage?.body || lastMessage?.attachment?.name || "Attachment"}</span>
@@ -2566,7 +2568,7 @@ export function AppShell() {
                           {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
                           {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
                           <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
-                            {message.time}
+                            {formatMessageTime(message)}
                             {message.mine ? (
                               <>
                                 <span>{message.readAt ? "Seen" : "Sent"}</span>
@@ -2725,6 +2727,23 @@ export function AppShell() {
     </main>
   );
 }
+
+const formatMessageTime = (message: ChatMessage | undefined) => {
+  if (!message) return "";
+
+  if (message.createdAt) {
+    const date = new Date(message.createdAt);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
+  }
+
+  return message.time;
+};
 
 function apiUrl() {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
