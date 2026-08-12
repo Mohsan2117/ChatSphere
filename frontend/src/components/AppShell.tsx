@@ -456,7 +456,7 @@ export function AppShell() {
         }
         if (data.type !== "chat.message" || !data.payload) return;
         if (!data.payload.id || !data.payload.time) return;
-        if (data.payload.senderEmail === email) return;
+        if (data.payload.senderEmail?.toLowerCase() === email.toLowerCase()) return;
         if (currentUserId && data.payload.recipientId !== currentUserId) return;
 
         setChatMessages((current) => {
@@ -584,7 +584,7 @@ export function AppShell() {
         if (cancelled) return;
         const messages: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
         const grouped = messages.reduce<MessageStore>((next, message) => {
-          const chatId = message.senderEmail === email ? message.recipientId : message.senderId;
+          const chatId = message.senderEmail?.toLowerCase() === email.toLowerCase() ? message.recipientId : message.senderId;
           if (!chatId) return next;
           next[chatId] = [...(next[chatId] ?? []), message];
           return next;
