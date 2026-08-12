@@ -245,6 +245,11 @@ export function AppShell() {
     ai: "AI Assistant"
   }[workspaceMode];
 
+  // Warm up connection to backend to bypass DNS/network latency in Android WebView
+  useEffect(() => {
+    fetch(`${apiUrl()}/health`).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const savedAdminToken = window.localStorage.getItem("chatsphere-admin-token") ?? "";
     if (savedAdminToken) {
