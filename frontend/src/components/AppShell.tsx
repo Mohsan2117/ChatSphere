@@ -156,7 +156,8 @@ export function AppShell() {
     toggleMute,
     toggleCamera,
     switchCamera,
-    handleSignalingEvent
+    handleSignalingEvent,
+    inviteParticipant
   } = useAudioCall(currentUserId, socketRef, directoryChats);
 
   const endCallRef = useRef(endCall);
@@ -3060,6 +3061,8 @@ export function AppShell() {
         toggleMute={toggleMute}
         toggleCamera={toggleCamera}
         switchCamera={switchCamera}
+        directoryChats={directoryChats}
+        inviteParticipant={inviteParticipant}
       />
     </main>
   );

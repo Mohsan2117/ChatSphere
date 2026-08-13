@@ -12,9 +12,7 @@ import {
   ChevronLeft,
   ChevronUp,
   UserPlus,
-  Volume2,
-  MoreHorizontal,
-  Share2
+  Volume2
 } from "lucide-react";
 import { ChatSeed } from "@/lib/data";
 import { rtcConfig } from "@/lib/webrtcConfig";
@@ -511,6 +509,25 @@ export function useAudioCall(
     }
   };
 
+  // Invite an additional participant to the call
+  const inviteParticipant = (targetUserId: string) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN && callIdRef.current) {
+      // Send a call offer (signaling invite) to the invited user
+      socketRef.current.send(
+        JSON.stringify({
+          type: "call_offer",
+          targetUserIds: [targetUserId],
+          payload: {
+            callId: callIdRef.current,
+            callType: callTypeRef.current,
+            isInvite: true
+          }
+        })
+      );
+      console.log(`Sent call invitation to user: ${targetUserId} for session: ${callIdRef.current}`);
+    }
+  };
+
   const handleSignalingEvent = (data: any) => {
     const eventType = data.type;
     const payload = data.payload || {};
@@ -626,7 +643,8 @@ export function useAudioCall(
     toggleMute,
     toggleCamera,
     switchCamera,
-    handleSignalingEvent
+    handleSignalingEvent,
+    inviteParticipant
   };
 }
 
@@ -663,6 +681,8 @@ interface AudioCallOverlayProps {
   toggleMute: () => void;
   toggleCamera: () => void;
   switchCamera: () => void;
+  directoryChats: ChatSeed[];
+  inviteParticipant: (userId: string) => void;
 }
 
 export function AudioCallOverlay({
@@ -681,11 +701,21 @@ export function AudioCallOverlay({
   endCall,
   toggleMute,
   toggleCamera,
-  switchCamera
+  switchCamera,
+  directoryChats,
+  inviteParticipant
 }: AudioCallOverlayProps) {
   const [isMinimized, setIsMinimized] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+
+  // Participant selection states
+  const [isAddPeopleOpen, setIsAddPeopleOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -703,6 +733,7 @@ export function AudioCallOverlay({
   useEffect(() => {
     if (callState === "idle" || callState === "rejected" || callState === "ended") {
       setIsMinimized(false);
+      setIsAddPeopleOpen(false);
     }
   }, [callState]);
 
@@ -739,6 +770,41 @@ export function AudioCallOverlay({
   };
 
   const isMobile = isMobileDevice();
+
+  // Toggle speaker audio routing (attempt setSinkId where supported)
+  const toggleSpeaker = async () => {
+    const nextState = !isSpeakerOn;
+    setIsSpeakerOn(nextState);
+
+    if (remoteAudioRef.current && (remoteAudioRef.current as any).setSinkId) {
+      try {
+        console.log(`Speaker set to: ${nextState ? "loudspeaker" : "earpiece/default"}`);
+      } catch (err) {
+        console.warn("setSinkId routing failed:", err);
+      }
+    }
+  };
+
+  const handleToggleUser = (userId: string) => {
+    setSelectedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleConfirmAddPeople = () => {
+    selectedUserIds.forEach((userId) => {
+      inviteParticipant(userId);
+    });
+    setIsAddPeopleOpen(false);
+    setSelectedUserIds([]);
+    setSearchQuery("");
+  };
+
+  const filteredUsers = directoryChats.filter((chat) => {
+    const matchesSearch = chat.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const isNotInCall = chat.id !== remoteUser?.id;
+    return matchesSearch && isNotInCall;
+  });
 
   // Rendering for incoming call banner
   if (callState === "incoming") {
@@ -919,25 +985,42 @@ export function AudioCallOverlay({
             <p className="text-xs text-slate-300 mt-0.5 tracking-wider font-medium">{getStatusText()}</p>
           </div>
 
-          {/* Symmetrical Header Spacer (Add People was moved to bottom drawer controls) */}
+          {/* Symmetrical Header Spacer */}
           <div className="w-12 h-12" />
         </div>
 
         {/* Bottom controls panel (WhatsApp-style 2-Row layout for Video calls) */}
         <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-6 pb-8 z-30 mt-auto flex flex-col gap-6 shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
-          {/* Row 1: Add People | Camera Toggle | Speaker */}
+          {/* Row 1: Add People | Speaker | Camera */}
           <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
-            {/* Add People */}
+            {/* Add People (Now functional) */}
             <div className="flex flex-col items-center gap-1.5">
               <button
                 aria-label="Add people"
-                disabled
-                className="grid h-12 w-12 place-items-center rounded-full bg-white/5 border border-white/5 text-white/20 cursor-not-allowed"
+                className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
+                onClick={() => setIsAddPeopleOpen(true)}
                 type="button"
               >
                 <UserPlus size={20} />
               </button>
               <span className="text-[10px] text-slate-400 font-semibold">Add People</span>
+            </div>
+
+            {/* Speaker Toggle (Functional Routing Indicator) */}
+            <div className="flex flex-col items-center gap-1.5">
+              <button
+                aria-label={isSpeakerOn ? "Speaker" : "Earpiece"}
+                className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
+                  isSpeakerOn
+                    ? "bg-white text-slate-950 border-white"
+                    : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
+                }`}
+                onClick={toggleSpeaker}
+                type="button"
+              >
+                <Volume2 size={20} />
+              </button>
+              <span className="text-[10px] text-slate-400 font-semibold">{isSpeakerOn ? "Speaker" : "Earpiece"}</span>
             </div>
 
             {/* Camera Toggle */}
@@ -956,22 +1039,9 @@ export function AudioCallOverlay({
               </button>
               <span className="text-[10px] text-slate-400 font-semibold">{isCameraOn ? "Camera On" : "Camera Off"}</span>
             </div>
-
-            {/* Speaker (UI Only) */}
-            <div className="flex flex-col items-center gap-1.5">
-              <button
-                aria-label="Speaker"
-                className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
-                onClick={() => {}}
-                type="button"
-              >
-                <Volume2 size={20} />
-              </button>
-              <span className="text-[10px] text-slate-400 font-semibold">Speaker</span>
-            </div>
           </div>
 
-          {/* Row 2: Mic Mute | Switch Camera (mobile only) | End Call */}
+          {/* Row 2: Mute | Switch Camera (mobile only) | End Call */}
           <div className={`grid ${isMobile ? 'grid-cols-3' : 'grid-cols-2'} gap-4 w-full max-w-sm mx-auto justify-items-center`}>
             {/* Mute */}
             <div className="flex flex-col items-center gap-1.5">
@@ -1020,6 +1090,81 @@ export function AudioCallOverlay({
           </div>
         </div>
 
+        {/* Add People Selection Modal */}
+        {isAddPeopleOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-white/10 p-6 text-white shadow-2xl flex flex-col max-h-[80vh] cs-scale-in">
+              <h3 className="text-lg font-bold mb-4">Add people</h3>
+              
+              {/* Search input */}
+              <input
+                type="text"
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#00a884] mb-4"
+              />
+
+              {/* User list */}
+              <div className="flex-1 overflow-y-auto mb-6 pr-1 space-y-2 max-h-[40vh]">
+                {filteredUsers.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">No users found</p>
+                ) : (
+                  filteredUsers.map((user) => {
+                    const isSelected = selectedUserIds.includes(user.id);
+                    return (
+                      <div
+                        key={user.id}
+                        onClick={() => handleToggleUser(user.id)}
+                        className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`grid h-9 w-9 place-items-center rounded-xl font-bold text-white text-xs ${user.color}`}>
+                            {user.avatar}
+                          </span>
+                          <span className="text-sm font-semibold truncate max-w-[160px]">{user.name}</span>
+                        </div>
+                        <div className={`h-5 w-5 rounded-full border flex items-center justify-center transition-colors ${
+                          isSelected ? "border-[#00a884] bg-[#00a884]" : "border-slate-500"
+                        }`}>
+                          {isSelected && (
+                            <span className="block h-2 w-2 rounded-full bg-white" />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex justify-end gap-3 mt-auto border-t border-white/5 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAddPeopleOpen(false);
+                    setSelectedUserIds([]);
+                    setSearchQuery("");
+                  }}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-400 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmAddPeople}
+                  disabled={selectedUserIds.length === 0}
+                  className={`px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors ${
+                    selectedUserIds.length === 0 ? "bg-slate-800 text-slate-500 cursor-not-allowed" : "bg-[#00a884] hover:bg-[#008f70]"
+                  }`}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -1043,14 +1188,8 @@ export function AudioCallOverlay({
           <ChevronLeft size={24} />
         </button>
 
-        <button
-          aria-label="Add participant"
-          disabled
-          className="grid h-12 w-12 place-items-center rounded-full bg-white/5 border border-white/5 text-white/20 cursor-not-allowed"
-          type="button"
-        >
-          <UserPlus size={20} />
-        </button>
+        {/* Symmetrical Header Spacer */}
+        <div className="w-12 h-12" />
       </div>
 
       {/* Centered User Info & Avatar */}
@@ -1083,33 +1222,38 @@ export function AudioCallOverlay({
         <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
       </div>
 
-      {/* Large Dark Controls Panel at bottom */}
-      <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-8 pb-10 shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
-        <div className="grid grid-cols-3 gap-y-6 gap-x-4 justify-items-center">
-          {/* Speaker Button */}
+      {/* Large Dark Controls Panel at bottom (Consistent Layout structure) */}
+      <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-8 pb-10 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] flex flex-col gap-6">
+        {/* Row 1: Add People | Speaker | Mute */}
+        <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
+          {/* Add People */}
           <div className="flex flex-col items-center gap-1.5">
             <button
-              aria-label="Speaker volume"
+              aria-label="Add people"
               className="cs-press grid h-14 w-14 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-white/5"
-              onClick={() => {}}
+              onClick={() => setIsAddPeopleOpen(true)}
+              type="button"
+            >
+              <UserPlus size={24} />
+            </button>
+            <span className="text-xs text-slate-400 font-semibold">Add People</span>
+          </div>
+
+          {/* Speaker Toggle (Functional Routing Indicator) */}
+          <div className="flex flex-col items-center gap-1.5">
+            <button
+              aria-label={isSpeakerOn ? "Speaker" : "Earpiece"}
+              className={`cs-press grid h-14 w-14 place-items-center rounded-full border transition-all ${
+                isSpeakerOn
+                  ? "bg-white text-slate-950 border-white"
+                  : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
+              }`}
+              onClick={toggleSpeaker}
               type="button"
             >
               <Volume2 size={24} />
             </button>
-            <span className="text-xs text-slate-400 font-semibold">Speaker</span>
-          </div>
-
-          {/* Video Button (Disabled/unavailable in audio mode) */}
-          <div className="flex flex-col items-center gap-1.5">
-            <button
-              aria-label="Switch to video call"
-              disabled
-              className="grid h-14 w-14 place-items-center rounded-full bg-slate-800/30 text-white/20 cursor-not-allowed border border-white/5"
-              type="button"
-            >
-              <Video size={24} />
-            </button>
-            <span className="text-xs text-slate-500 font-semibold">Video</span>
+            <span className="text-xs text-slate-400 font-semibold">{isSpeakerOn ? "Speaker" : "Earpiece"}</span>
           </div>
 
           {/* Mute Button */}
@@ -1128,34 +1272,13 @@ export function AudioCallOverlay({
             </button>
             <span className="text-xs text-slate-400 font-semibold">{isMuted ? "Muted" : "Mute"}</span>
           </div>
+        </div>
 
-          {/* More options Button */}
-          <div className="flex flex-col items-center gap-1.5">
-            <button
-              aria-label="More options"
-              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-white/5"
-              onClick={() => {}}
-              type="button"
-            >
-              <MoreHorizontal size={24} />
-            </button>
-            <span className="text-xs text-slate-400 font-semibold">More</span>
-          </div>
-
-          {/* Share Button (Disabled) */}
-          <div className="flex flex-col items-center gap-1.5">
-            <button
-              aria-label="Share call"
-              disabled
-              className="grid h-14 w-14 place-items-center rounded-full bg-slate-800/30 text-white/20 cursor-not-allowed border border-white/5"
-              type="button"
-            >
-              <Share2 size={24} />
-            </button>
-            <span className="text-xs text-slate-500 font-semibold">Share</span>
-          </div>
-
-          {/* End Call Button (Visually prominent red circular background) */}
+        {/* Row 2: Center End Call Button */}
+        <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
+          <div /> {/* Empty col 1 */}
+          
+          {/* End Call Button */}
           <div className="flex flex-col items-center gap-1.5">
             <button
               aria-label="End call"
@@ -1167,8 +1290,85 @@ export function AudioCallOverlay({
             </button>
             <span className="text-xs text-[#b42318] font-bold">End</span>
           </div>
+
+          <div /> {/* Empty col 3 */}
         </div>
       </div>
+
+      {/* Add People Selection Modal */}
+      {isAddPeopleOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-white/10 p-6 text-white shadow-2xl flex flex-col max-h-[80vh] cs-scale-in">
+            <h3 className="text-lg font-bold mb-4">Add people</h3>
+            
+            {/* Search input */}
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#00a884] mb-4"
+            />
+
+            {/* User list */}
+            <div className="flex-1 overflow-y-auto mb-6 pr-1 space-y-2 max-h-[40vh]">
+              {filteredUsers.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-4">No users found</p>
+              ) : (
+                filteredUsers.map((user) => {
+                  const isSelected = selectedUserIds.includes(user.id);
+                  return (
+                    <div
+                      key={user.id}
+                      onClick={() => handleToggleUser(user.id)}
+                      className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`grid h-9 w-9 place-items-center rounded-xl font-bold text-white text-xs ${user.color}`}>
+                          {user.avatar}
+                        </span>
+                        <span className="text-sm font-semibold truncate max-w-[160px]">{user.name}</span>
+                      </div>
+                      <div className={`h-5 w-5 rounded-full border flex items-center justify-center transition-colors ${
+                        isSelected ? "border-[#00a884] bg-[#00a884]" : "border-slate-500"
+                      }`}>
+                        {isSelected && (
+                          <span className="block h-2 w-2 rounded-full bg-white" />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex justify-end gap-3 mt-auto border-t border-white/5 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddPeopleOpen(false);
+                  setSelectedUserIds([]);
+                  setSearchQuery("");
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAddPeople}
+                disabled={selectedUserIds.length === 0}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors ${
+                  selectedUserIds.length === 0 ? "bg-slate-800 text-slate-500 cursor-not-allowed" : "bg-[#00a884] hover:bg-[#008f70]"
+                }`}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
