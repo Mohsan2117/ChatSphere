@@ -90,8 +90,8 @@ func (h *Hub) Run() {
 				var removedCalls []removedCall
 				if onlineCount <= 0 {
 					delete(h.online, client.userID)
-					removedCalls = h.removeCallsForUserLocked(client.userID)
 				}
+				removedCalls = h.removeCallsForUserLocked(client.userID)
 				h.mu.Unlock()
 				if onlineCount <= 0 {
 					h.dispatch(Event{

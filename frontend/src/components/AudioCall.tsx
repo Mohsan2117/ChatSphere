@@ -25,6 +25,31 @@ export function useAudioCall(
   const durationIntervalRef = useRef<any>(null);
   const remoteOfferRef = useRef<any>(null);
 
+  // Connection timeout for outgoing/incoming/connecting states (30s)
+  const connectionTimeoutRef = useRef<any>(null);
+  // Recovery timeout for WebRTC temporary disconnects (10s)
+  const disconnectTimeoutRef = useRef<any>(null);
+
+  // Safe references to prevent stale closures in event handlers
+  const callStateRef = useRef<CallState>("idle");
+  const callIdRef = useRef<string | null>(null);
+  const remoteUserRef = useRef<ChatSeed | null>(null);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
+    callIdRef.current = callId;
+  }, [callId]);
+
+  useEffect(() => {
+    remoteUserRef.current = remoteUser;
+  }, [remoteUser]);
+
+  // Stable reference to endCall to be called inside setTimeout callbacks safely
+  const endCallRef = useRef<() => void>();
+
   // Monitor callState to handle transitions to idle after reject or end
   useEffect(() => {
     if (callState === "rejected" || callState === "ended") {
@@ -59,7 +84,7 @@ export function useAudioCall(
     };
   }, [callState]);
 
-  // Helper to cleanup all WebRTC elements
+  // Helper to cleanup all WebRTC elements and timers
   const cleanupCall = () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -76,6 +101,14 @@ export function useAudioCall(
       remoteAudioRef.current.pause();
       remoteAudioRef.current.srcObject = null;
       remoteAudioRef.current = null;
+    }
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+    if (disconnectTimeoutRef.current) {
+      clearTimeout(disconnectTimeoutRef.current);
+      disconnectTimeoutRef.current = null;
     }
     iceCandidatesBufferRef.current = [];
     remoteOfferRef.current = null;
@@ -125,11 +158,28 @@ export function useAudioCall(
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") {
+        const state = pc.connectionState;
+        console.log("WebRTC connection state change:", state);
+
+        if (state === "connected") {
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
           setCallState("connected");
-        } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-          cleanupCall();
-          setCallState("ended");
+        } else if (state === "failed" || state === "closed") {
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
+          endCallRef.current?.();
+        } else if (state === "disconnected") {
+          if (!disconnectTimeoutRef.current) {
+            disconnectTimeoutRef.current = setTimeout(() => {
+              console.warn("WebRTC connection failed to recover from disconnected state");
+              endCallRef.current?.();
+            }, 10000); // 10s recovery window
+          }
         }
       };
 
@@ -193,11 +243,28 @@ export function useAudioCall(
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") {
+        const state = pc.connectionState;
+        console.log("WebRTC connection state change:", state);
+
+        if (state === "connected") {
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
           setCallState("connected");
-        } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-          cleanupCall();
-          setCallState("ended");
+        } else if (state === "failed" || state === "closed") {
+          if (disconnectTimeoutRef.current) {
+            clearTimeout(disconnectTimeoutRef.current);
+            disconnectTimeoutRef.current = null;
+          }
+          endCallRef.current?.();
+        } else if (state === "disconnected") {
+          if (!disconnectTimeoutRef.current) {
+            disconnectTimeoutRef.current = setTimeout(() => {
+              console.warn("WebRTC connection failed to recover from disconnected state");
+              endCallRef.current?.();
+            }, 10000); // 10s recovery window
+          }
         }
       };
 
@@ -245,14 +312,14 @@ export function useAudioCall(
   };
 
   const rejectCall = () => {
-    if (callState !== "incoming" || !callId || !remoteUser) return;
+    if (callStateRef.current !== "incoming" || !callIdRef.current || !remoteUserRef.current) return;
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
           type: "call_reject",
-          targetUserIds: [remoteUser.id],
-          payload: { callId }
+          targetUserIds: [remoteUserRef.current.id],
+          payload: { callId: callIdRef.current }
         })
       );
     }
@@ -261,20 +328,46 @@ export function useAudioCall(
   };
 
   const endCall = () => {
-    if (callState === "idle") return;
+    if (callStateRef.current === "idle") return;
 
-    if (remoteUser && callId && socketRef.current?.readyState === WebSocket.OPEN) {
+    if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
           type: "call_end",
-          targetUserIds: [remoteUser.id],
-          payload: { callId }
+          targetUserIds: [remoteUserRef.current.id],
+          payload: { callId: callIdRef.current }
         })
       );
     }
     cleanupCall();
     setCallState("ended");
   };
+
+  useEffect(() => {
+    endCallRef.current = endCall;
+  });
+
+  // Monitor callState to handle connection timeout (30 seconds)
+  useEffect(() => {
+    if (callState === "outgoing" || callState === "incoming" || callState === "connecting") {
+      if (!connectionTimeoutRef.current) {
+        connectionTimeoutRef.current = setTimeout(() => {
+          console.warn("WebRTC calling connection timeout reached");
+          endCallRef.current?.();
+        }, 30000); // 30s timeout
+      }
+    } else {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
+    }
+    return () => {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+    };
+  }, [callState]);
 
   const toggleMute = () => {
     if (localStreamRef.current) {
@@ -295,7 +388,7 @@ export function useAudioCall(
     if (!msgCallId) return;
 
     if (eventType === "call_offer") {
-      if (callState !== "idle") {
+      if (callStateRef.current !== "idle") {
         // Automatically reject if busy
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(
@@ -329,7 +422,7 @@ export function useAudioCall(
       setCallDuration(0);
       iceCandidatesBufferRef.current = [];
     } else if (eventType === "call_answer") {
-      if (callId === msgCallId && callState === "outgoing" && peerConnectionRef.current) {
+      if (callIdRef.current === msgCallId && callStateRef.current === "outgoing" && peerConnectionRef.current) {
         peerConnectionRef.current
           .setRemoteDescription(new RTCSessionDescription(payload.sdp))
           .then(() => {
@@ -350,7 +443,7 @@ export function useAudioCall(
           });
       }
     } else if (eventType === "call_ice_candidate") {
-      if (callId === msgCallId) {
+      if (callIdRef.current === msgCallId) {
         const candidate = payload.candidate;
         if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
           peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch((e) =>
@@ -361,12 +454,12 @@ export function useAudioCall(
         }
       }
     } else if (eventType === "call_reject") {
-      if (callId === msgCallId) {
+      if (callIdRef.current === msgCallId) {
         cleanupCall();
         setCallState("rejected");
       }
     } else if (eventType === "call_end") {
-      if (callId === msgCallId) {
+      if (callIdRef.current === msgCallId) {
         cleanupCall();
         setCallState("ended");
       }
@@ -452,13 +545,13 @@ export function AudioCallOverlay({
   };
 
   if (callState === "incoming") {
-    // Elegant floating non-backdrop alert banner for incoming calls
+    // Responsive, non-overflowing banner for incoming calls (designed to fit on 320px screens)
     return (
-      <div className="cs-scale-in fixed left-1/2 top-6 z-[100] w-[90%] max-w-sm -translate-x-1/2 rounded-3xl border border-[#dce1e8] bg-white p-4 shadow-[0_24px_60px_rgba(15,23,42,.16)]">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
+      <div className="cs-scale-in fixed left-1/2 top-4 z-[100] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-3xl border border-[#dce1e8] bg-white p-3 sm:p-4 shadow-[0_24px_60px_rgba(15,23,42,.16)]">
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex min-w-0 items-center gap-2">
             <span
-              className={`grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl font-black text-white ${
+              className={`grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl font-black text-white text-sm ${
                 remoteUser?.color || "bg-[#0f766e]"
               }`}
             >
@@ -470,8 +563,8 @@ export function AudioCallOverlay({
               )}
             </span>
             <div className="min-w-0">
-              <div className="truncate text-base font-bold text-[#18212f]">{remoteUser?.name}</div>
-              <div className="text-xs font-semibold text-[#00a884]">Incoming audio call</div>
+              <div className="truncate text-sm sm:text-base font-bold text-[#18212f]">{remoteUser?.name}</div>
+              <div className="text-[10px] sm:text-xs font-semibold text-[#00a884]">Incoming audio call</div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -500,7 +593,7 @@ export function AudioCallOverlay({
   // Centered overlay modal for outgoing, active, and term status calls
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-[#0f172a]/60 px-4 backdrop-blur-sm">
-      <div className="cs-scale-in flex w-full max-w-sm flex-col items-center rounded-3xl border border-[#dce1e8] bg-white p-8 text-center shadow-[0_28px_90px_rgba(15,23,42,.22)]">
+      <div className="cs-scale-in flex w-full max-w-sm max-h-[calc(100vh-2rem)] overflow-y-auto flex-col items-center rounded-3xl border border-[#dce1e8] bg-white p-8 text-center shadow-[0_28px_90px_rgba(15,23,42,.22)]">
         <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Audio Call</p>
 
         {/* Pulse effect avatar */}
