@@ -57,6 +57,7 @@ export function useAudioCall(
   const callIdRef = useRef<string | null>(null);
   const remoteUserRef = useRef<ChatSeed | null>(null);
   const callTypeRef = useRef<"audio" | "video">("audio");
+  const isCameraOnRef = useRef<boolean>(true);
 
   useEffect(() => {
     callStateRef.current = callState;
@@ -74,6 +75,10 @@ export function useAudioCall(
     callTypeRef.current = callType;
   }, [callType]);
 
+  useEffect(() => {
+    isCameraOnRef.current = isCameraOn;
+  }, [isCameraOn]);
+
   // Stable reference to endCall to be called inside setTimeout callbacks safely
   const endCallRef = useRef<() => void>();
 
@@ -89,6 +94,7 @@ export function useAudioCall(
         setLocalStream(null);
         setRemoteStream(null);
         setIsCameraOn(true);
+        isCameraOnRef.current = true;
         setIsRemoteCameraOn(true);
         setFacingMode("user");
       }, 2500);
@@ -159,6 +165,7 @@ export function useAudioCall(
     setCallState("outgoing");
     setIsMuted(false);
     setIsCameraOn(true);
+    isCameraOnRef.current = true;
     setIsRemoteCameraOn(true);
     setFacingMode("user");
     setCallDuration(0);
@@ -440,15 +447,17 @@ export function useAudioCall(
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsCameraOn(videoTrack.enabled);
+        const newEnabled = !videoTrack.enabled;
+        videoTrack.enabled = newEnabled;
+        setIsCameraOn(newEnabled);
+        isCameraOnRef.current = newEnabled;
 
         if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(
             JSON.stringify({
               type: "call_camera_toggle",
               targetUserIds: [remoteUserRef.current.id],
-              payload: { callId: callIdRef.current, enabled: videoTrack.enabled }
+              payload: { callId: callIdRef.current, enabled: newEnabled }
             })
           );
         }
@@ -485,7 +494,7 @@ export function useAudioCall(
       setFacingMode(newFacingMode);
 
       // Re-apply local camera toggle state
-      newVideoTrack.enabled = isCameraOn;
+      newVideoTrack.enabled = isCameraOnRef.current;
 
       // Replace track on the RTCRtpSender
       const senders = peerConnectionRef.current.getSenders();
@@ -545,6 +554,7 @@ export function useAudioCall(
       setCallState("incoming");
       setIsMuted(false);
       setIsCameraOn(true);
+      isCameraOnRef.current = true;
       setIsRemoteCameraOn(true);
       setFacingMode("user");
       setCallDuration(0);
@@ -728,6 +738,8 @@ export function AudioCallOverlay({
     return /Mobi|Android/i.test(navigator.userAgent);
   };
 
+  const isMobile = isMobileDevice();
+
   // Rendering for incoming call banner
   if (callState === "incoming") {
     return (
@@ -907,81 +919,105 @@ export function AudioCallOverlay({
             <p className="text-xs text-slate-300 mt-0.5 tracking-wider font-medium">{getStatusText()}</p>
           </div>
 
-          <button
-            aria-label="Add participant"
-            disabled
-            className="grid h-12 w-12 place-items-center rounded-full bg-black/20 border border-white/5 text-white/20 cursor-not-allowed"
-            type="button"
-          >
-            <UserPlus size={20} />
-          </button>
+          {/* Symmetrical Header Spacer (Add People was moved to bottom drawer controls) */}
+          <div className="w-12 h-12" />
         </div>
 
-        {/* Bottom controls panel */}
-        <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-6 pb-8 z-30 mt-auto flex justify-around items-center shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
-          <button
-            aria-label="More options"
-            className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
-            onClick={() => {}}
-            type="button"
-          >
-            <MoreHorizontal size={20} />
-          </button>
+        {/* Bottom controls panel (WhatsApp-style 2-Row layout for Video calls) */}
+        <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-6 pb-8 z-30 mt-auto flex flex-col gap-6 shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
+          {/* Row 1: Add People | Camera Toggle | Speaker */}
+          <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
+            {/* Add People */}
+            <div className="flex flex-col items-center gap-1.5">
+              <button
+                aria-label="Add people"
+                disabled
+                className="grid h-12 w-12 place-items-center rounded-full bg-white/5 border border-white/5 text-white/20 cursor-not-allowed"
+                type="button"
+              >
+                <UserPlus size={20} />
+              </button>
+              <span className="text-[10px] text-slate-400 font-semibold">Add People</span>
+            </div>
 
-          <button
-            aria-label={isCameraOn ? "Turn camera off" : "Turn camera on"}
-            className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
-              isCameraOn
-                ? "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
-                : "bg-white text-slate-950 border-white"
-            }`}
-            onClick={toggleCamera}
-            type="button"
-          >
-            {isCameraOn ? <Video size={20} /> : <VideoOff size={20} />}
-          </button>
+            {/* Camera Toggle */}
+            <div className="flex flex-col items-center gap-1.5">
+              <button
+                aria-label={isCameraOn ? "Turn camera off" : "Turn camera on"}
+                className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
+                  isCameraOn
+                    ? "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
+                    : "bg-white text-slate-950 border-white"
+                }`}
+                onClick={toggleCamera}
+                type="button"
+              >
+                {isCameraOn ? <Video size={20} /> : <VideoOff size={20} />}
+              </button>
+              <span className="text-[10px] text-slate-400 font-semibold">{isCameraOn ? "Camera On" : "Camera Off"}</span>
+            </div>
 
-          <button
-            aria-label="Speaker"
-            className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
-            onClick={() => {}}
-            type="button"
-          >
-            <Volume2 size={20} />
-          </button>
+            {/* Speaker (UI Only) */}
+            <div className="flex flex-col items-center gap-1.5">
+              <button
+                aria-label="Speaker"
+                className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
+                onClick={() => {}}
+                type="button"
+              >
+                <Volume2 size={20} />
+              </button>
+              <span className="text-[10px] text-slate-400 font-semibold">Speaker</span>
+            </div>
+          </div>
 
-          <button
-            aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
-            className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
-              isMuted
-                ? "bg-white text-slate-950 border-white"
-                : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
-            }`}
-            onClick={toggleMute}
-            type="button"
-          >
-            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
-          </button>
+          {/* Row 2: Mic Mute | Switch Camera (mobile only) | End Call */}
+          <div className={`grid ${isMobile ? 'grid-cols-3' : 'grid-cols-2'} gap-4 w-full max-w-sm mx-auto justify-items-center`}>
+            {/* Mute */}
+            <div className="flex flex-col items-center gap-1.5">
+              <button
+                aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+                className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
+                  isMuted
+                    ? "bg-white text-slate-950 border-white"
+                    : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
+                }`}
+                onClick={toggleMute}
+                type="button"
+              >
+                {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+              </button>
+              <span className="text-[10px] text-slate-400 font-semibold">{isMuted ? "Muted" : "Mute"}</span>
+            </div>
 
-          {isMobileDevice() && (
-            <button
-              aria-label="Switch camera"
-              className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
-              onClick={switchCamera}
-              type="button"
-            >
-              <RotateCw size={20} />
-            </button>
-          )}
+            {/* Switch camera (mobile only) */}
+            {isMobile && (
+              <div className="flex flex-col items-center gap-1.5">
+                <button
+                  aria-label="Switch camera"
+                  className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
+                  onClick={switchCamera}
+                  type="button"
+                >
+                  <RotateCw size={20} />
+                </button>
+                <span className="text-[10px] text-slate-400 font-semibold">Switch</span>
+              </div>
+            )}
 
-          <button
-            aria-label="End call"
-            className="cs-press grid h-14 w-14 place-items-center rounded-full bg-[#b42318] hover:bg-[#911c13] text-white"
-            onClick={endCall}
-            type="button"
-          >
-            <PhoneOff size={22} />
-          </button>
+            {/* End Call */}
+            <div className="flex flex-col items-center gap-1.5">
+              <button
+                aria-label="End call"
+                className="cs-press grid h-12 w-12 place-items-center rounded-full bg-[#b42318] hover:bg-[#911c13] text-white"
+                onClick={endCall}
+                type="button"
+              >
+                <PhoneOff size={20} />
+              </button>
+              <span className="text-[10px] text-[#b42318] font-bold">End</span>
+            </div>
+          </div>
         </div>
 
       </div>
