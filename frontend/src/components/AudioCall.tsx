@@ -56,6 +56,7 @@ export function useAudioCall(
   const remoteUserRef = useRef<ChatSeed | null>(null);
   const callTypeRef = useRef<"audio" | "video">("audio");
   const isCameraOnRef = useRef<boolean>(true);
+  const facingModeRef = useRef<"user" | "environment">("user");
 
   useEffect(() => {
     callStateRef.current = callState;
@@ -77,6 +78,10 @@ export function useAudioCall(
     isCameraOnRef.current = isCameraOn;
   }, [isCameraOn]);
 
+  useEffect(() => {
+    facingModeRef.current = facingMode;
+  }, [facingMode]);
+
   // Stable reference to endCall to be called inside setTimeout callbacks safely
   const endCallRef = useRef<() => void>();
 
@@ -95,6 +100,7 @@ export function useAudioCall(
         isCameraOnRef.current = true;
         setIsRemoteCameraOn(true);
         setFacingMode("user");
+        facingModeRef.current = "user";
       }, 2500);
       return () => clearTimeout(timer);
     }
@@ -166,6 +172,7 @@ export function useAudioCall(
     isCameraOnRef.current = true;
     setIsRemoteCameraOn(true);
     setFacingMode("user");
+    facingModeRef.current = "user";
     setCallDuration(0);
 
     try {
@@ -441,23 +448,103 @@ export function useAudioCall(
   };
 
   // Toggle local camera (disable/enable video track and propagate update to peer)
-  const toggleCamera = () => {
+  const toggleCamera = async () => {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
         const newEnabled = !videoTrack.enabled;
-        videoTrack.enabled = newEnabled;
-        setIsCameraOn(newEnabled);
-        isCameraOnRef.current = newEnabled;
 
-        if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(
-            JSON.stringify({
-              type: "call_camera_toggle",
-              targetUserIds: [remoteUserRef.current.id],
-              payload: { callId: callIdRef.current, enabled: newEnabled }
-            })
-          );
+        // If turning camera ON, check if track is valid or reacquire a new track
+        if (newEnabled && videoTrack.readyState === "ended") {
+          try {
+            const constraints = {
+              audio: false,
+              video: { facingMode: facingModeRef.current }
+            };
+            const tempStream = await navigator.mediaDevices.getUserMedia(constraints);
+            const newVideoTrack = tempStream.getVideoTracks()[0];
+            if (!newVideoTrack) {
+              throw new Error("No video track found in re-acquired stream");
+            }
+
+            localStreamRef.current.removeTrack(videoTrack);
+            videoTrack.stop();
+            localStreamRef.current.addTrack(newVideoTrack);
+
+            const senders = peerConnectionRef.current?.getSenders();
+            const videoSender = senders?.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+            if (videoSender) {
+              await videoSender.replaceTrack(newVideoTrack);
+            }
+
+            setIsCameraOn(true);
+            isCameraOnRef.current = true;
+            setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+
+            if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.send(
+                JSON.stringify({
+                  type: "call_camera_toggle",
+                  targetUserIds: [remoteUserRef.current.id],
+                  payload: { callId: callIdRef.current, enabled: true }
+                })
+              );
+            }
+          } catch (err) {
+            console.error("Failed to re-acquire camera track on toggle ON:", err);
+          }
+        } else {
+          // Normal track toggling without reacquisition
+          videoTrack.enabled = newEnabled;
+          setIsCameraOn(newEnabled);
+          isCameraOnRef.current = newEnabled;
+
+          if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(
+              JSON.stringify({
+                type: "call_camera_toggle",
+                targetUserIds: [remoteUserRef.current.id],
+                payload: { callId: callIdRef.current, enabled: newEnabled }
+              })
+            );
+          }
+        }
+      } else if (isCameraOnRef.current === false) {
+        // Fallback reacquisition if video track does not exist
+        try {
+          const constraints = {
+            audio: false,
+            video: { facingMode: facingModeRef.current }
+          };
+          const tempStream = await navigator.mediaDevices.getUserMedia(constraints);
+          const newVideoTrack = tempStream.getVideoTracks()[0];
+          if (!newVideoTrack) {
+            throw new Error("No video track found");
+          }
+
+          localStreamRef.current.addTrack(newVideoTrack);
+
+          const senders = peerConnectionRef.current?.getSenders();
+          const videoSender = senders?.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+          if (videoSender) {
+            await videoSender.replaceTrack(newVideoTrack);
+          }
+
+          setIsCameraOn(true);
+          isCameraOnRef.current = true;
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+
+          if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(
+              JSON.stringify({
+                type: "call_camera_toggle",
+                targetUserIds: [remoteUserRef.current.id],
+                payload: { callId: callIdRef.current, enabled: true }
+              })
+            );
+          }
+        } catch (err) {
+          console.error("Failed to re-acquire camera track on toggle ON (missing track fallback):", err);
         }
       }
     }
@@ -467,20 +554,36 @@ export function useAudioCall(
   const switchCamera = async () => {
     if (callTypeRef.current !== "video" || !localStreamRef.current || !peerConnectionRef.current) return;
 
-    const newFacingMode = facingMode === "user" ? "environment" : "user";
+    const newFacingMode = facingModeRef.current === "user" ? "environment" : "user";
     try {
-      const newConstraints = {
-        audio: false,
-        video: { facingMode: newFacingMode }
-      };
-      const tempStream = await navigator.mediaDevices.getUserMedia(newConstraints);
-      const newVideoTrack = tempStream.getVideoTracks()[0];
+      let tempStream: MediaStream;
+      try {
+        tempStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: newFacingMode } },
+          audio: false
+        });
+      } catch (e) {
+        console.warn("exact facingMode failed, falling back to non-exact", e);
+        tempStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: newFacingMode },
+          audio: false
+        });
+      }
 
+      const newVideoTrack = tempStream.getVideoTracks()[0];
       if (!newVideoTrack) {
         throw new Error("No video track found in switched camera stream");
       }
 
-      // Stop old video track
+      // Replace track on the RTCRtpSender
+      const senders = peerConnectionRef.current.getSenders();
+      const videoSender = senders.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+      if (videoSender) {
+        await videoSender.replaceTrack(newVideoTrack);
+        console.log("Replaced video track on RTCRtpSender successfully");
+      }
+
+      // Stop old video track ONLY AFTER new track is successfully started and attached
       const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
       if (oldVideoTrack) {
         oldVideoTrack.stop();
@@ -490,17 +593,10 @@ export function useAudioCall(
       // Add new video track to local stream
       localStreamRef.current.addTrack(newVideoTrack);
       setFacingMode(newFacingMode);
+      facingModeRef.current = newFacingMode;
 
       // Re-apply local camera toggle state
       newVideoTrack.enabled = isCameraOnRef.current;
-
-      // Replace track on the RTCRtpSender
-      const senders = peerConnectionRef.current.getSenders();
-      const videoSender = senders.find((s) => s.track?.kind === "video");
-      if (videoSender) {
-        await videoSender.replaceTrack(newVideoTrack);
-        console.log("Replaced video track on RTCRtpSender successfully");
-      }
 
       // Update localStream state to force UI redraw
       setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
@@ -574,6 +670,7 @@ export function useAudioCall(
       isCameraOnRef.current = true;
       setIsRemoteCameraOn(true);
       setFacingMode("user");
+      facingModeRef.current = "user";
       setCallDuration(0);
       iceCandidatesBufferRef.current = [];
     } else if (eventType === "call_answer") {
@@ -720,12 +817,14 @@ export function AudioCallOverlay({
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch((e) => console.warn("Local video play warning:", e));
     }
   }, [localStream]);
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch((e) => console.warn("Remote video play warning:", e));
     }
   }, [remoteStream]);
 
