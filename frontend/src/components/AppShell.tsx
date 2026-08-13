@@ -11,6 +11,7 @@ import {
   Loader2,
   LogOut,
   MessageCircle,
+  Mic,
   MoreVertical,
   Paperclip,
   Mail,
@@ -43,7 +44,7 @@ type ChatMessage = {
     name: string;
     type: string;
     url: string;
-    kind: "image" | "video" | "file";
+    kind: "image" | "video" | "file" | "audio";
   };
   localSeq?: number;
 };
@@ -116,6 +117,12 @@ export function AppShell() {
   const [chatNotice, setChatNotice] = useState("");
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
   const isTypingRef = useRef<boolean>(false);
   const typingTimeoutRef = useRef<number | null>(null);
@@ -1388,6 +1395,152 @@ export function AppShell() {
     });
   }
 
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function startRecording() {
+    if (typeof window === "undefined" || !navigator.mediaDevices || !window.MediaRecorder) {
+      setAuthError("Voice recording is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      
+      let mimeType = "audio/webm";
+      if (typeof MediaRecorder.isTypeSupported === "function") {
+        if (MediaRecorder.isTypeSupported("audio/webm")) {
+          mimeType = "audio/webm";
+        } else if (MediaRecorder.isTypeSupported("audio/ogg")) {
+          mimeType = "audio/ogg";
+        } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        } else if (MediaRecorder.isTypeSupported("audio/aac")) {
+          mimeType = "audio/aac";
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        stream.getTracks().forEach((track) => track.stop());
+        
+        if (audioChunksRef.current.length > 0 && audioBlob.size > 0) {
+          await handleSendVoiceBlob(audioBlob, recordingDuration);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+
+    } catch (err) {
+      console.error("Failed to start recording:", err);
+      setAuthError("Microphone permission denied or recording failed");
+    }
+  }
+
+  function cancelRecording() {
+    if (!mediaRecorderRef.current) return;
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    mediaRecorderRef.current.onstop = () => {
+      const stream = mediaRecorderRef.current?.stream;
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+    mediaRecorderRef.current.stop();
+    setIsRecording(false);
+    setRecordingDuration(0);
+  }
+
+  function stopAndSendRecording() {
+    if (!mediaRecorderRef.current) return;
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    mediaRecorderRef.current.stop();
+    setIsRecording(false);
+  }
+
+  async function handleSendVoiceBlob(blob: Blob, duration: number) {
+    if (duration <= 0) {
+      setAuthError("Recording is empty or too short");
+      return;
+    }
+    const chatId = selectedChatId;
+    if (!chatId || !authToken) return;
+
+    if (selectedChatBlocked) {
+      setChatNotice("You blocked this user. Unblock them before sending messages.");
+      return;
+    }
+
+    const extension = blob.type.split("/")[1]?.split(";")[0] || "webm";
+    const filename = `voice-message_${duration}s.${extension}`;
+    const voiceFile = new File([blob], filename, { type: blob.type });
+
+    const localUrl = URL.createObjectURL(blob);
+
+    const draftAttachment: AttachmentDraft = {
+      name: filename,
+      type: blob.type,
+      kind: "audio",
+      url: localUrl,
+      file: voiceFile
+    };
+
+    const message: ChatMessage = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      body: "",
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      mine: true,
+      senderEmail: email,
+      recipientId: chatId,
+      attachment: {
+        name: filename,
+        type: blob.type,
+        url: localUrl,
+        kind: "audio"
+      },
+      createdAt: new Date().toISOString(),
+      localSeq: getNextLocalSeq()
+    };
+
+    setChatMessages((current) => ({
+      ...current,
+      [chatId]: mergeMessages(current[chatId] ?? [], [message])
+    }));
+
+    pendingSendQueueRef.current.push({
+      chatId,
+      message,
+      draftText: "",
+      draftAttachment
+    });
+
+    processSendQueue();
+  }
+
   function logout() {
     window.localStorage.removeItem("chatsphere-admin-token");
     window.localStorage.removeItem("chatsphere-auth");
@@ -2621,27 +2774,65 @@ export function AppShell() {
                     {typingUser} is typing...
                   </div>
                 ) : null}
-                <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
-                  <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
-                    <Smile size={22} />
-                  </button>
-                  <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
-                    <Paperclip size={22} />
-                    <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />
-                  </label>
-                  <input
-                    className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
-                    onChange={(event) => handleInputChange(event.target.value)}
-                    onKeyDown={sendOnEnter}
-                    placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
-                    value={currentMessageDraft}
-                    disabled={selectedChatBlocked}
-                  />
-                  <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={selectedChatBlocked || (!currentMessageDraft.trim() && !currentAttachmentDraft)} onClick={sendChatMessage}>
-                    <span className="hidden sm:inline">Send</span>
-                    <Send size={18} />
-                  </button>
-                </div>
+                {isRecording ? (
+                  <div className="flex w-full items-center justify-between rounded-2xl border border-red-200 bg-red-50/50 p-2 shadow-sm focus-within:border-red-400 sm:gap-3">
+                    <div className="flex items-center gap-2 px-3 text-sm font-bold text-red-600 animate-pulse">
+                      <span className="h-2.5 w-2.5 rounded-full bg-red-600"></span>
+                      <span>Recording: {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, "0")}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        aria-label="Cancel recording"
+                        className="cs-press rounded-xl px-3 py-2 text-sm font-bold text-[#64748b] hover:bg-white hover:text-[#18212f]"
+                        onClick={cancelRecording}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        aria-label="Send voice message"
+                        className="cs-press flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-700 shadow-sm"
+                        onClick={stopAndSendRecording}
+                        type="button"
+                      >
+                        <span>Send</span>
+                        <Send size={15} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
+                    <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
+                      <Smile size={22} />
+                    </button>
+                    <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
+                      <Paperclip size={22} />
+                      <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />
+                    </label>
+                    <input
+                      className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
+                      onChange={(event) => handleInputChange(event.target.value)}
+                      onKeyDown={sendOnEnter}
+                      placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
+                      value={currentMessageDraft}
+                      disabled={selectedChatBlocked}
+                    />
+                    {!currentMessageDraft.trim() && !currentAttachmentDraft && !selectedChatBlocked ? (
+                      <button
+                        aria-label="Record voice message"
+                        className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]"
+                        onClick={startRecording}
+                        type="button"
+                      >
+                        <Mic size={22} />
+                      </button>
+                    ) : null}
+                    <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={selectedChatBlocked || (!currentMessageDraft.trim() && !currentAttachmentDraft)} onClick={sendChatMessage}>
+                      <span className="hidden sm:inline">Send</span>
+                      <Send size={18} />
+                    </button>
+                  </div>
+                )}
               </footer>
             </>
           ) : (
@@ -2904,11 +3095,123 @@ function AttachmentPreview({ attachment, authToken }: { attachment: NonNullable<
     return <video className="mb-3 max-h-64 rounded-md" controls onError={() => setFailed(true)} src={source} />;
   }
 
+  if (attachment.kind === "audio" && canPreview) {
+    return <AudioPlayer source={source} name={attachment.name} />;
+  }
+
   return (
     <a className="mb-3 flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
       <FileText size={20} />
       <span className="min-w-0 truncate">{attachment.name}</span>
     </a>
+  );
+}
+
+function AudioPlayer({ source, name }: { source: string; name: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  const parsedDuration = useMemo(() => {
+    const match = name.match(/voice-message_(\d+(\.\d+)?)s\./);
+    return match ? parseFloat(match[1]) : 0;
+  }, [name]);
+
+  useEffect(() => {
+    if (parsedDuration > 0) {
+      setDuration(parsedDuration);
+    }
+  }, [parsedDuration]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch((err) => {
+        console.error("Audio playback failed:", err);
+      });
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setCurrentTime(audio.currentTime);
+  };
+
+  const handleLoadedMetadata = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setDuration(audio.duration || parsedDuration);
+  };
+
+  const handleEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
+  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const time = parseFloat(e.target.value);
+    setCurrentTime(time);
+    audio.currentTime = time;
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time) || !isFinite(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-[#dce1e8] bg-white/90 p-3 text-sm text-[#334155] min-w-[240px] max-w-sm shadow-sm">
+      <audio
+        ref={audioRef}
+        src={source}
+        preload="metadata"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={handleEnded}
+      />
+      <button
+        aria-label={isPlaying ? "Pause" : "Play"}
+        className="cs-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white hover:bg-[#008f70]"
+        onClick={togglePlay}
+        type="button"
+      >
+        {isPlaying ? (
+          <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+          </svg>
+        ) : (
+          <svg className="h-5 w-5 fill-current translate-x-[1px]" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        )}
+      </button>
+      <div className="flex-1 min-w-0">
+        <input
+          type="range"
+          min="0"
+          max={duration || 100}
+          value={currentTime}
+          onChange={handleSliderChange}
+          className="w-full accent-[#00a884] cursor-pointer"
+        />
+        <div className="flex justify-between text-[10px] font-bold text-[#64748b] mt-1">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

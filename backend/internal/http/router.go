@@ -622,6 +622,8 @@ func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			kind = "image"
 		} else if strings.HasPrefix(contentType, "video/") {
 			kind = "video"
+		} else if strings.HasPrefix(contentType, "audio/") {
+			kind = "audio"
 		}
 		attachment, err := dataStore.SaveAttachment(authUser.Email, file.Filename, contentType, kind, content)
 		if err != nil {
