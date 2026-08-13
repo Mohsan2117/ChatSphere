@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
-import { AIChat } from "@/components/AIChat";
+import { AIChat, AIMessage } from "@/components/AIChat";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
@@ -162,6 +162,16 @@ export function AppShell() {
     userIsNearBottomRef.current = nearBottom;
   };
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
+  const [aiMessages, setAiMessages] = useState<AIMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "Hello! I'm your AI assistant. Ask me anything!"
+    }
+  ]);
+  const [aiInput, setAiInput] = useState("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
   const [isInboxLoading, setIsInboxLoading] = useState(true);
   const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
@@ -2689,7 +2699,18 @@ export function AppShell() {
 
         <section className={`h-full lg:h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
           {workspaceMode === "ai" ? (
-            <AIChat apiUrl={apiUrl()} authToken={authToken} />
+            <AIChat
+              apiUrl={apiUrl()}
+              authToken={authToken}
+              messages={aiMessages}
+              setMessages={setAiMessages}
+              input={aiInput}
+              setInput={setAiInput}
+              isLoading={isAiLoading}
+              setIsLoading={setIsAiLoading}
+              error={aiError}
+              setError={setAiError}
+            />
           ) : selectedChat ? (
             <>
               <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
@@ -2892,7 +2913,19 @@ export function AppShell() {
       {/* Mobile & tablet AI chat overlay */}
       {isMobileAIChatOpen ? (
         <div className="cs-scale-in fixed inset-0 z-[60] flex flex-col bg-[#f7f9fb] lg:hidden">
-          <AIChat apiUrl={apiUrl()} authToken={authToken} onClose={() => setIsMobileAIChatOpen(false)} />
+          <AIChat
+            apiUrl={apiUrl()}
+            authToken={authToken}
+            onClose={() => setIsMobileAIChatOpen(false)}
+            messages={aiMessages}
+            setMessages={setAiMessages}
+            input={aiInput}
+            setInput={setAiInput}
+            isLoading={isAiLoading}
+            setIsLoading={setIsAiLoading}
+            error={aiError}
+            setError={setAiError}
+          />
         </div>
       ) : null}
 

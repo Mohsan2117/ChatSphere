@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useRef, useState } from "react";
+import { Dispatch, FormEvent, KeyboardEvent, SetStateAction, useRef } from "react";
 import { Bot, Loader2, Send, X } from "lucide-react";
 
-type AIMessage = {
+export type AIMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -14,19 +14,29 @@ type AIChatProps = {
   apiUrl: string;
   authToken: string;
   onClose?: () => void;
+  messages: AIMessage[];
+  setMessages: Dispatch<SetStateAction<AIMessage[]>>;
+  input: string;
+  setInput: (value: string) => void;
+  isLoading: boolean;
+  setIsLoading: (value: boolean) => void;
+  error: string;
+  setError: (value: string) => void;
 };
 
-export function AIChat({ apiUrl, authToken, onClose }: AIChatProps) {
-  const [messages, setMessages] = useState<AIMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "Hello! I'm your AI assistant. Ask me anything!"
-    }
-  ]);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
+export function AIChat({
+  apiUrl,
+  authToken,
+  onClose,
+  messages,
+  setMessages,
+  input,
+  setInput,
+  isLoading,
+  setIsLoading,
+  error,
+  setError
+}: AIChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   function scrollToBottom() {
