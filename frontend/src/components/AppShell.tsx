@@ -3232,7 +3232,7 @@ function AudioPlayer({ source, name }: { source: string; name: string }) {
   };
 
   return (
-    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-[#dce1e8] bg-white/90 p-3 text-sm text-[#334155] min-w-[240px] max-w-sm shadow-sm">
+    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-[#dce1e8] bg-white/90 p-3 text-sm text-[#334155] w-[calc(72vw-70px)] sm:w-[280px] max-w-[280px] min-w-0 shadow-sm">
       <audio
         ref={audioRef}
         src={source}
