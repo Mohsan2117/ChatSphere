@@ -13,6 +13,11 @@ type Event struct {
 	Payload        json.RawMessage `json:"payload,omitempty"`
 }
 
+type CallSession struct {
+	CallerID   string
+	ReceiverID string
+}
+
 type Hub struct {
 	clients    map[*Client]bool
 	register   chan *Client
@@ -20,6 +25,7 @@ type Hub struct {
 	broadcast  chan Event
 	mu         sync.RWMutex
 	online     map[string]int
+	calls      map[string]CallSession // callId -> CallSession
 }
 
 func NewHub() *Hub {
@@ -29,6 +35,7 @@ func NewHub() *Hub {
 		unregister: make(chan *Client),
 		broadcast:  make(chan Event, 256),
 		online:     make(map[string]int),
+		calls:      make(map[string]CallSession),
 	}
 }
 
@@ -80,8 +87,10 @@ func (h *Hub) Run() {
 				h.mu.Lock()
 				h.online[client.userID]--
 				onlineCount := h.online[client.userID]
+				var removedCalls []removedCall
 				if onlineCount <= 0 {
 					delete(h.online, client.userID)
+					removedCalls = h.removeCallsForUserLocked(client.userID)
 				}
 				h.mu.Unlock()
 				if onlineCount <= 0 {
@@ -92,6 +101,20 @@ func (h *Hub) Run() {
 							"userId": client.userID,
 							"online": false,
 						}),
+					})
+				}
+				for _, cInfo := range removedCalls {
+					var target string
+					if cInfo.Session.CallerID == client.userID {
+						target = cInfo.Session.ReceiverID
+					} else {
+						target = cInfo.Session.CallerID
+					}
+					h.dispatch(Event{
+						Type:          "call_end",
+						UserID:        client.userID,
+						TargetUserIDs: []string{target},
+						Payload:       mustJSON(map[string]string{"callId": cInfo.CallID}),
 					})
 				}
 			}
@@ -130,4 +153,53 @@ func eventTargetsClient(targets []string, userID string) bool {
 		}
 	}
 	return false
+}
+
+type removedCall struct {
+	CallID  string
+	Session CallSession
+}
+
+func (h *Hub) removeCallsForUserLocked(userID string) []removedCall {
+	if h.calls == nil {
+		return nil
+	}
+	var removed []removedCall
+	for callID, session := range h.calls {
+		if session.CallerID == userID || session.ReceiverID == userID {
+			removed = append(removed, removedCall{CallID: callID, Session: session})
+			delete(h.calls, callID)
+		}
+	}
+	return removed
+}
+
+func (h *Hub) AddCall(callID, callerID, receiverID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.calls == nil {
+		h.calls = make(map[string]CallSession)
+	}
+	h.calls[callID] = CallSession{
+		CallerID:   callerID,
+		ReceiverID: receiverID,
+	}
+}
+
+func (h *Hub) GetCall(callID string) (CallSession, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.calls == nil {
+		return CallSession{}, false
+	}
+	session, ok := h.calls[callID]
+	return session, ok
+}
+
+func (h *Hub) RemoveCall(callID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.calls != nil {
+		delete(h.calls, callID)
+	}
 }

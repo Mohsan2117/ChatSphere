@@ -66,7 +66,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "login required"})
 			return
 		}
-		realtime.Serve(c.Writer, c.Request, hub, user.ID)
+		realtime.Serve(c.Writer, c.Request, hub, user.ID, dataStore)
 	})
 
 	api := router.Group("/api/v1")

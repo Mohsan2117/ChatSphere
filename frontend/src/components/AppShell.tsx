@@ -23,11 +23,13 @@ import {
   UserPlus,
   Users,
   Menu,
-  X
+  X,
+  Phone
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 import { AIChat, AIMessage } from "@/components/AIChat";
+import { useAudioCall, AudioCallOverlay } from "./AudioCall";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
@@ -134,6 +136,27 @@ export function AppShell() {
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
+
+  const {
+    callState,
+    remoteUser,
+    isMuted,
+    callDuration,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute,
+    handleSignalingEvent
+  } = useAudioCall(currentUserId, socketRef, directoryChats);
+
+  const endCallRef = useRef(endCall);
+  const handleSignalingEventRef = useRef(handleSignalingEvent);
+
+  useEffect(() => {
+    endCallRef.current = endCall;
+    handleSignalingEventRef.current = handleSignalingEvent;
+  }, [endCall, handleSignalingEvent]);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const userIsNearBottomRef = useRef(true);
@@ -433,6 +456,10 @@ export function AppShell() {
           userId?: string;
           payload?: ChatMessage & { userId?: string; online?: boolean };
         };
+        if (data.type && data.type.startsWith("call_")) {
+          handleSignalingEventRef.current(data);
+          return;
+        }
         if (data.type === "presence.updated") {
           const userId = data.payload?.userId || data.userId;
           const online = Boolean(data.payload?.online);
@@ -518,10 +545,12 @@ export function AppShell() {
     };
 
     socket.onerror = () => {
+      endCallRef.current();
       socket.close();
     };
 
     socket.onclose = () => {
+      endCallRef.current();
       setTypingUser(null);
       if (closedByCleanup) return;
       reconnectTimer = window.setTimeout(() => setSocketAttempt((attempt) => attempt + 1), 2500);
@@ -2737,6 +2766,14 @@ export function AppShell() {
                       />
                     </label>
                   ) : null}
+                  <button
+                    aria-label="Start audio call"
+                    className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
+                    onClick={() => startCall(selectedChat)}
+                    type="button"
+                  >
+                    <Phone size={21} />
+                  </button>
                   <button aria-label="Search this chat" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={toggleChatSearch} type="button">
                     <Search size={23} />
                   </button>
@@ -2987,6 +3024,17 @@ export function AppShell() {
           </form>
         </div>
       ) : null}
+
+      <AudioCallOverlay
+        callState={callState}
+        remoteUser={remoteUser}
+        isMuted={isMuted}
+        callDuration={callDuration}
+        acceptCall={acceptCall}
+        rejectCall={rejectCall}
+        endCall={endCall}
+        toggleMute={toggleMute}
+      />
     </main>
   );
 }
