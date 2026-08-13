@@ -1,7 +1,21 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, RotateCw } from "lucide-react";
+import {
+  Phone,
+  PhoneOff,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  RotateCw,
+  ChevronLeft,
+  ChevronUp,
+  UserPlus,
+  Volume2,
+  MoreHorizontal,
+  Share2
+} from "lucide-react";
 import { ChatSeed } from "@/lib/data";
 import { rtcConfig } from "@/lib/webrtcConfig";
 
@@ -659,6 +673,7 @@ export function AudioCallOverlay({
   toggleCamera,
   switchCamera
 }: AudioCallOverlayProps) {
+  const [isMinimized, setIsMinimized] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -674,6 +689,13 @@ export function AudioCallOverlay({
     }
   }, [remoteStream]);
 
+  // Reset minimized state when a call session transitions out of active states
+  useEffect(() => {
+    if (callState === "idle" || callState === "rejected" || callState === "ended") {
+      setIsMinimized(false);
+    }
+  }, [callState]);
+
   if (callState === "idle") return null;
 
   const formatDuration = (sec: number) => {
@@ -687,9 +709,9 @@ export function AudioCallOverlay({
   const getStatusText = () => {
     switch (callState) {
       case "outgoing":
-        return "Calling...";
+        return "Calling";
       case "connecting":
-        return "Connecting...";
+        return "Connecting";
       case "connected":
         return formatDuration(callDuration);
       case "rejected":
@@ -706,14 +728,14 @@ export function AudioCallOverlay({
     return /Mobi|Android/i.test(navigator.userAgent);
   };
 
+  // Rendering for incoming call banner
   if (callState === "incoming") {
-    // Responsive, non-overflowing banner for incoming calls (designed to fit on 320px screens)
     return (
-      <div className="cs-scale-in fixed left-1/2 top-4 z-[100] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-3xl border border-[#dce1e8] bg-white p-3 sm:p-4 shadow-[0_24px_60px_rgba(15,23,42,.16)]">
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
-          <div className="flex min-w-0 items-center gap-2">
+      <div className="cs-scale-in fixed left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 top-4 z-[100] w-[calc(100vw-2rem)] md:w-full md:max-w-md rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-md p-4 text-white shadow-[0_24px_60px_rgba(0,0,0,0.6)]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <span
-              className={`grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl font-black text-white text-sm ${
+              className={`grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl font-black text-white text-base shadow-md ${
                 remoteUser?.color || "bg-[#0f766e]"
               }`}
             >
@@ -725,16 +747,16 @@ export function AudioCallOverlay({
               )}
             </span>
             <div className="min-w-0">
-              <div className="truncate text-sm sm:text-base font-bold text-[#18212f]">{remoteUser?.name}</div>
-              <div className="text-[10px] sm:text-xs font-semibold text-[#00a884]">
+              <div className="truncate text-base font-bold text-white">{remoteUser?.name}</div>
+              <div className="text-xs font-semibold text-[#00a884]">
                 {callType === "video" ? "Incoming video call" : "Incoming audio call"}
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-3">
             <button
               aria-label="Reject call"
-              className="cs-press grid h-10 w-10 place-items-center rounded-xl bg-[#b42318] text-white hover:bg-[#911c13]"
+              className="cs-press grid h-10 w-10 place-items-center rounded-full bg-[#b42318] text-white hover:bg-[#911c13] transition-colors shadow-md"
               onClick={rejectCall}
               type="button"
             >
@@ -742,7 +764,7 @@ export function AudioCallOverlay({
             </button>
             <button
               aria-label="Accept call"
-              className="cs-press grid h-10 w-10 place-items-center rounded-xl bg-[#00a884] text-white hover:bg-[#008f70]"
+              className="cs-press grid h-10 w-10 place-items-center rounded-full bg-[#00a884] text-white hover:bg-[#008f70] transition-colors shadow-md animate-pulse"
               onClick={acceptCall}
               type="button"
             >
@@ -754,141 +776,261 @@ export function AudioCallOverlay({
     );
   }
 
-  // Render Video Layout for active connected video calls
-  if (callType === "video" && (callState === "connected" || callState === "connecting")) {
+  // Rendering for minimized calling widget
+  if (isMinimized) {
     return (
-      <div className="fixed inset-0 z-[100] grid place-items-center bg-[#0f172a]/60 px-4 backdrop-blur-sm">
-        <div className="cs-scale-in flex w-full max-w-sm h-[75vh] max-h-[calc(100vh-2rem)] overflow-hidden flex-col items-center rounded-3xl border border-[#dce1e8] bg-slate-950 text-center shadow-[0_28px_90px_rgba(15,23,42,.22)] relative">
-          
-          {/* Main Area: Remote Video */}
-          <div className="absolute inset-0 z-0 bg-slate-950 rounded-3xl overflow-hidden">
+      <div className="fixed bottom-20 right-4 z-[90] rounded-2xl bg-slate-900/95 border border-white/10 p-3 shadow-2xl flex items-center gap-3 text-white max-w-xs transition-all duration-300 w-72">
+        <div className="relative h-12 w-12 rounded-xl overflow-hidden bg-slate-800 flex-shrink-0">
+          {callType === "video" && isRemoteCameraOn && remoteStream ? (
             <video
-              ref={remoteVideoRef}
+              ref={(el) => {
+                if (el) el.srcObject = remoteStream;
+              }}
               autoPlay
               playsInline
-              className={`h-full w-full object-cover transition-opacity duration-300 ${
-                isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
-              }`}
+              className="h-full w-full object-cover"
             />
-            {/* Remote Avatar Placeholder */}
-            {!isRemoteCameraOn && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-white">
-                <span className={`grid h-20 w-20 place-items-center overflow-hidden rounded-full text-2xl font-black text-white ${remoteUser?.color || "bg-[#0f766e]"}`}>
-                  {remoteUser?.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
-                  ) : (
-                    remoteUser?.avatar || "U"
-                  )}
-                </span>
-                <h4 className="mt-4 text-lg font-bold truncate max-w-[200px]">{remoteUser?.name}</h4>
-                <p className="text-xs text-slate-400 mt-1">Camera is turned off</p>
-              </div>
-            )}
-          </div>
-
-          {/* Small Overlay: Local Video (Muted to prevent echo feedback, mirrored) */}
-          <div className="absolute top-4 right-4 h-28 w-20 rounded-2xl border border-white/20 bg-slate-900 shadow-md overflow-hidden z-10 flex items-center justify-center">
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
-                isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
-              }`}
-            />
-            {!isCameraOn && (
-              <div className="absolute inset-0 flex items-center justify-center bg-slate-800 text-white">
-                <span className="text-xs font-bold">You</span>
-              </div>
-            )}
-          </div>
-
-          {/* Controls overlay */}
-          <div className="absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black/80 via-black/40 to-transparent flex flex-col items-center z-20">
-            <div className="text-white mb-4 text-center">
-              <h4 className="text-sm font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
-              <p className="text-xs text-slate-300 mt-0.5">{getStatusText()}</p>
-            </div>
-            
-            <div className="flex items-center gap-3 justify-center">
-              {/* Mic mute */}
-              <button
-                aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
-                className={`cs-press grid h-10 w-10 place-items-center rounded-full border transition-colors ${
-                  isMuted
-                    ? "border-red-600 bg-red-600 text-white"
-                    : "border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
-                }`}
-                onClick={toggleMute}
-                type="button"
-              >
-                {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
-              </button>
-
-              {/* Camera toggle */}
-              <button
-                aria-label={isCameraOn ? "Turn camera off" : "Turn camera on"}
-                className={`cs-press grid h-10 w-10 place-items-center rounded-full border transition-colors ${
-                  !isCameraOn
-                    ? "border-red-600 bg-red-600 text-white"
-                    : "border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
-                }`}
-                onClick={toggleCamera}
-                type="button"
-              >
-                {isCameraOn ? <Video size={18} /> : <VideoOff size={18} />}
-              </button>
-
-              {/* Switch camera (mobile only) */}
-              {isMobileDevice() && (
-                <button
-                  aria-label="Switch camera"
-                  className="cs-press grid h-10 w-10 place-items-center rounded-full border border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
-                  onClick={switchCamera}
-                  type="button"
-                >
-                  <RotateCw size={18} />
-                </button>
+          ) : (
+            <span className={`grid h-full w-full place-items-center text-sm font-black text-white ${remoteUser?.color || "bg-[#0f766e]"}`}>
+              {remoteUser?.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+              ) : (
+                remoteUser?.avatar || "U"
               )}
-
-              {/* Hang up */}
-              <button
-                aria-label="Hang up call"
-                className="cs-press grid h-12 w-12 place-items-center rounded-full bg-[#b42318] text-white hover:bg-[#911c13]"
-                onClick={endCall}
-                type="button"
-              >
-                <PhoneOff size={20} />
-              </button>
-            </div>
-          </div>
-
+            </span>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-bold">{remoteUser?.name}</div>
+          <div className="text-[10px] text-slate-400 font-medium">{getStatusText()}</div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            aria-label="Maximize call"
+            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10 text-white transition-colors"
+            onClick={() => setIsMinimized(false)}
+            type="button"
+          >
+            <ChevronUp size={16} />
+          </button>
+          <button
+            aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+            className={`grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10 transition-colors ${
+              isMuted ? "text-red-500" : "text-white"
+            }`}
+            onClick={toggleMute}
+            type="button"
+          >
+            {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
+          </button>
+          <button
+            aria-label="Hang up call"
+            className="grid h-8 w-8 place-items-center rounded-lg bg-[#b42318] text-white hover:bg-[#911c13] transition-colors"
+            onClick={endCall}
+            type="button"
+          >
+            <PhoneOff size={14} />
+          </button>
         </div>
       </div>
     );
   }
 
-  // Centered overlay modal for audio calls, and video calls in outgoing/connecting/ended states
-  return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-[#0f172a]/60 px-4 backdrop-blur-sm">
-      <div className="cs-scale-in flex w-full max-w-sm max-h-[calc(100vh-2rem)] overflow-y-auto flex-col items-center rounded-3xl border border-[#dce1e8] bg-white p-8 text-center shadow-[0_28px_90px_rgba(15,23,42,.22)]">
-        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">
-          {callType === "video" ? "Video Call" : "Audio Call"}
-        </p>
+  // Render Video Layout for active connected video calls (fill-screen viewport)
+  if (callType === "video" && (callState === "connected" || callState === "connecting")) {
+    return (
+      <div className="fixed inset-0 z-[95] flex flex-col items-center justify-between text-white overflow-hidden bg-slate-950">
+        
+        {/* Remote video area (full viewport) */}
+        <div className="absolute inset-0 z-0 h-full w-full bg-slate-950">
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            className={`h-full w-full object-cover transition-opacity duration-500 ${
+              isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
+          />
+          {/* Avatar display if remote camera is disabled */}
+          {!isRemoteCameraOn && (
+            <div
+              style={{
+                backgroundImage: `radial-gradient(circle at center, #15323a 0%, #0b141a 100%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M40 0l40 40-40 40L0 40z' fill='%23ffffff' fill-opacity='.008' fill-rule='evenodd'/%3E%3C/svg%3E")`
+              }}
+              className="absolute inset-0 flex flex-col items-center justify-center bg-[#0b141a]"
+            >
+              <span className={`grid h-28 w-28 place-items-center overflow-hidden rounded-full text-3xl font-black text-white shadow-2xl border-4 border-slate-700/50 ${remoteUser?.color || "bg-[#0f766e]"}`}>
+                {remoteUser?.avatarUrl ? (
+                  <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                ) : (
+                  remoteUser?.avatar || "U"
+                )}
+              </span>
+              <h4 className="mt-5 text-xl font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
+              <p className="text-sm text-slate-400 mt-1">Camera is off</p>
+            </div>
+          )}
+        </div>
 
-        {/* Pulse effect avatar */}
-        <div className="relative my-8 flex items-center justify-center">
+        {/* Local Video floating PIP (top-right, mirrored, constrained to safe boundaries) */}
+        <div className="absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl overflow-hidden z-20 flex items-center justify-center">
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+              isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
+          />
+          {!isCameraOn && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-800 text-white">
+              <span className="text-xs font-bold">You</span>
+            </div>
+          )}
+        </div>
+
+        {/* Header navigation and details */}
+        <div className="z-30 w-full px-6 pt-6 flex justify-between items-center bg-gradient-to-b from-black/50 to-transparent pb-12">
+          <button
+            aria-label="Minimize call"
+            className="cs-press grid h-12 w-12 place-items-center rounded-full bg-black/30 backdrop-blur-md border border-white/10 text-white hover:bg-black/50 transition-colors"
+            onClick={() => setIsMinimized(true)}
+            type="button"
+          >
+            <ChevronLeft size={24} />
+          </button>
+          
+          <div className="text-center text-white drop-shadow-md">
+            <h3 className="truncate text-lg font-bold max-w-[180px] md:max-w-xs">{remoteUser?.name}</h3>
+            <p className="text-xs text-slate-300 mt-0.5 tracking-wider font-medium">{getStatusText()}</p>
+          </div>
+
+          <button
+            aria-label="Add participant"
+            disabled
+            className="grid h-12 w-12 place-items-center rounded-full bg-black/20 border border-white/5 text-white/20 cursor-not-allowed"
+            type="button"
+          >
+            <UserPlus size={20} />
+          </button>
+        </div>
+
+        {/* Bottom controls panel */}
+        <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-6 pb-8 z-30 mt-auto flex justify-around items-center shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
+          <button
+            aria-label="More options"
+            className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
+            onClick={() => {}}
+            type="button"
+          >
+            <MoreHorizontal size={20} />
+          </button>
+
+          <button
+            aria-label={isCameraOn ? "Turn camera off" : "Turn camera on"}
+            className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
+              isCameraOn
+                ? "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
+                : "bg-white text-slate-950 border-white"
+            }`}
+            onClick={toggleCamera}
+            type="button"
+          >
+            {isCameraOn ? <Video size={20} /> : <VideoOff size={20} />}
+          </button>
+
+          <button
+            aria-label="Speaker"
+            className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
+            onClick={() => {}}
+            type="button"
+          >
+            <Volume2 size={20} />
+          </button>
+
+          <button
+            aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+            className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-all ${
+              isMuted
+                ? "bg-white text-slate-950 border-white"
+                : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
+            }`}
+            onClick={toggleMute}
+            type="button"
+          >
+            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+          </button>
+
+          {isMobileDevice() && (
+            <button
+              aria-label="Switch camera"
+              className="cs-press grid h-12 w-12 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white border border-white/5"
+              onClick={switchCamera}
+              type="button"
+            >
+              <RotateCw size={20} />
+            </button>
+          )}
+
+          <button
+            aria-label="End call"
+            className="cs-press grid h-14 w-14 place-items-center rounded-full bg-[#b42318] hover:bg-[#911c13] text-white"
+            onClick={endCall}
+            type="button"
+          >
+            <PhoneOff size={22} />
+          </button>
+        </div>
+
+      </div>
+    );
+  }
+
+  // Render Full Screen Audio Call Interface (also used for video calls in outgoing/connecting/ended states)
+  return (
+    <div
+      style={{
+        backgroundImage: `radial-gradient(circle at center, #15323a 0%, #0b141a 100%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M40 0l40 40-40 40L0 40z' fill='%23ffffff' fill-opacity='.008' fill-rule='evenodd'/%3E%3C/svg%3E")`
+      }}
+      className="fixed inset-0 z-[95] flex flex-col items-center justify-between text-white overflow-hidden bg-[#0b141a] transition-all duration-300"
+    >
+      {/* Top Header bar */}
+      <div className="z-30 w-full px-6 pt-6 flex justify-between items-center bg-gradient-to-b from-black/30 to-transparent pb-10">
+        <button
+          aria-label="Minimize call"
+          className="cs-press grid h-12 w-12 place-items-center rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors"
+          onClick={() => setIsMinimized(true)}
+          type="button"
+        >
+          <ChevronLeft size={24} />
+        </button>
+
+        <button
+          aria-label="Add participant"
+          disabled
+          className="grid h-12 w-12 place-items-center rounded-full bg-white/5 border border-white/5 text-white/20 cursor-not-allowed"
+          type="button"
+        >
+          <UserPlus size={20} />
+        </button>
+      </div>
+
+      {/* Centered User Info & Avatar */}
+      <div className="flex-1 flex flex-col items-center justify-center px-4 max-w-sm w-full -mt-12">
+        <div className="relative flex items-center justify-center my-6">
           {(callState === "outgoing" || callState === "connecting") && (
             <>
-              <div className="absolute h-28 w-28 animate-ping rounded-full bg-[#00a884]/20" />
-              <div className="absolute h-24 w-24 animate-pulse rounded-full bg-[#00a884]/30" />
+              <div className="absolute h-40 w-40 animate-ping rounded-full bg-[#00a884]/15" />
+              <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/20" />
             </>
           )}
-          {callState === "connected" && <div className="absolute h-24 w-24 animate-pulse rounded-full bg-[#00a884]/15" />}
+          {callState === "connected" && (
+            <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/10" />
+          )}
           <span
-            className={`relative z-10 grid h-20 w-20 place-items-center overflow-hidden rounded-full text-2xl font-black text-white ${
+            className={`relative z-10 grid h-28 w-28 md:h-32 md:w-32 place-items-center overflow-hidden rounded-full text-4xl font-black text-white shadow-2xl border-4 border-slate-700/50 ${
               remoteUser?.color || "bg-[#0f766e]"
             }`}
           >
@@ -901,35 +1043,97 @@ export function AudioCallOverlay({
           </span>
         </div>
 
-        <h3 className="truncate text-2xl font-black text-[#18212f]">{remoteUser?.name}</h3>
-        <p className="mt-2 text-sm font-semibold text-[#64748b]">{getStatusText()}</p>
+        <h2 className="truncate text-2xl md:text-3xl font-black text-white text-center w-full">{remoteUser?.name}</h2>
+        <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
+      </div>
 
-        {/* Control buttons */}
-        <div className="mt-8 flex items-center gap-6 justify-center">
-          {callState === "connected" && (
+      {/* Large Dark Controls Panel at bottom */}
+      <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-8 pb-10 shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
+        <div className="grid grid-cols-3 gap-y-6 gap-x-4 justify-items-center">
+          {/* Speaker Button */}
+          <div className="flex flex-col items-center gap-1.5">
+            <button
+              aria-label="Speaker volume"
+              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-white/5"
+              onClick={() => {}}
+              type="button"
+            >
+              <Volume2 size={24} />
+            </button>
+            <span className="text-xs text-slate-400 font-semibold">Speaker</span>
+          </div>
+
+          {/* Video Button (Disabled/unavailable in audio mode) */}
+          <div className="flex flex-col items-center gap-1.5">
+            <button
+              aria-label="Switch to video call"
+              disabled
+              className="grid h-14 w-14 place-items-center rounded-full bg-slate-800/30 text-white/20 cursor-not-allowed border border-white/5"
+              type="button"
+            >
+              <Video size={24} />
+            </button>
+            <span className="text-xs text-slate-500 font-semibold">Video</span>
+          </div>
+
+          {/* Mute Button */}
+          <div className="flex flex-col items-center gap-1.5">
             <button
               aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
-              className={`cs-press grid h-12 w-12 place-items-center rounded-full border transition-colors ${
+              className={`cs-press grid h-14 w-14 place-items-center rounded-full border transition-all ${
                 isMuted
-                  ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
-                  : "border-[#dce1e8] bg-white text-[#64748b] hover:bg-[#f1f5f9]"
+                  ? "bg-white text-slate-950 border-white"
+                  : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
               }`}
               onClick={toggleMute}
               type="button"
             >
-              {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+              {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
             </button>
-          )}
-          <button
-            aria-label="Hang up call"
-            className="cs-press grid h-14 w-14 place-items-center rounded-full bg-[#b42318] text-white hover:bg-[#911c13]"
-            onClick={endCall}
-            type="button"
-          >
-            <PhoneOff size={24} />
-          </button>
+            <span className="text-xs text-slate-400 font-semibold">{isMuted ? "Muted" : "Mute"}</span>
+          </div>
+
+          {/* More options Button */}
+          <div className="flex flex-col items-center gap-1.5">
+            <button
+              aria-label="More options"
+              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-white/5"
+              onClick={() => {}}
+              type="button"
+            >
+              <MoreHorizontal size={24} />
+            </button>
+            <span className="text-xs text-slate-400 font-semibold">More</span>
+          </div>
+
+          {/* Share Button (Disabled) */}
+          <div className="flex flex-col items-center gap-1.5">
+            <button
+              aria-label="Share call"
+              disabled
+              className="grid h-14 w-14 place-items-center rounded-full bg-slate-800/30 text-white/20 cursor-not-allowed border border-white/5"
+              type="button"
+            >
+              <Share2 size={24} />
+            </button>
+            <span className="text-xs text-slate-500 font-semibold">Share</span>
+          </div>
+
+          {/* End Call Button (Visually prominent red circular background) */}
+          <div className="flex flex-col items-center gap-1.5">
+            <button
+              aria-label="End call"
+              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-[#b42318] hover:bg-[#911c13] text-white transition-colors"
+              onClick={endCall}
+              type="button"
+            >
+              <PhoneOff size={24} />
+            </button>
+            <span className="text-xs text-[#b42318] font-bold">End</span>
+          </div>
         </div>
       </div>
+
     </div>
   );
 }
