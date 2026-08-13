@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useS
 import {
   ArrowLeft,
   Bot,
+  Check,
   CheckCheck,
   FileText,
   Image,
@@ -2577,7 +2578,13 @@ export function AppShell() {
                             {message.mine ? (
                               <>
                                 <span>{message.readAt ? "Seen" : "Sent"}</span>
-                                <CheckCheck size={15} className={message.readAt ? "text-[#00a884]" : "text-[#94a3b8]"} />
+                                {message.readAt ? (
+                                  <CheckCheck size={15} className="text-[#00a884]" />
+                                ) : selectedChat?.online ? (
+                                  <CheckCheck size={15} className="text-[#94a3b8]" />
+                                ) : (
+                                  <Check size={15} className="text-[#94a3b8]" />
+                                )}
                               </>
                             ) : null}
                           </div>
