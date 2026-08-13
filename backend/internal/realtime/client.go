@@ -67,7 +67,7 @@ func (c *Client) readPump() {
 
 		// Process call signaling events
 		switch event.Type {
-		case "call_offer", "call_answer", "call_ice_candidate", "call_reject", "call_end":
+		case "call_offer", "call_answer", "call_ice_candidate", "call_reject", "call_end", "call_camera_toggle":
 			var callPayload struct {
 				CallID string `json:"callId"`
 			}

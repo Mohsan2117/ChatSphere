@@ -24,7 +24,8 @@ import {
   Users,
   Menu,
   X,
-  Phone
+  Phone,
+  Video
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
@@ -142,11 +143,19 @@ export function AppShell() {
     remoteUser,
     isMuted,
     callDuration,
+    callType,
+    isCameraOn,
+    isRemoteCameraOn,
+    localStream,
+    remoteStream,
+    facingMode,
     startCall,
     acceptCall,
     rejectCall,
     endCall,
     toggleMute,
+    toggleCamera,
+    switchCamera,
     handleSignalingEvent
   } = useAudioCall(currentUserId, socketRef, directoryChats);
 
@@ -2766,17 +2775,26 @@ export function AppShell() {
                       />
                     </label>
                   ) : null}
-                  <button
-                    aria-label="Start audio call"
-                    className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
-                    onClick={() => startCall(selectedChat)}
-                    type="button"
-                  >
-                    <Phone size={21} />
-                  </button>
-                  <button aria-label="Search this chat" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={toggleChatSearch} type="button">
-                    <Search size={23} />
-                  </button>
+                  {selectedChat.id !== "chatsphere-ai" && (
+                    <>
+                      <button
+                        aria-label="Start audio call"
+                        className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
+                        onClick={() => startCall(selectedChat, "audio")}
+                        type="button"
+                      >
+                        <Phone size={21} />
+                      </button>
+                      <button
+                        aria-label="Start video call"
+                        className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
+                        onClick={() => startCall(selectedChat, "video")}
+                        type="button"
+                      >
+                        <Video size={21} />
+                      </button>
+                    </>
+                  )}
                   <button aria-label="Chat options" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={() => setIsChatMenuOpen((open) => !open)} type="button">
                     <MoreVertical size={23} />
                   </button>
@@ -3030,10 +3048,18 @@ export function AppShell() {
         remoteUser={remoteUser}
         isMuted={isMuted}
         callDuration={callDuration}
+        callType={callType}
+        isCameraOn={isCameraOn}
+        isRemoteCameraOn={isRemoteCameraOn}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        facingMode={facingMode}
         acceptCall={acceptCall}
         rejectCall={rejectCall}
         endCall={endCall}
         toggleMute={toggleMute}
+        toggleCamera={toggleCamera}
+        switchCamera={switchCamera}
       />
     </main>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Phone, PhoneOff, Mic, MicOff } from "lucide-react";
+import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff, RotateCw } from "lucide-react";
 import { ChatSeed } from "@/lib/data";
 import { rtcConfig } from "@/lib/webrtcConfig";
 
@@ -17,6 +17,14 @@ export function useAudioCall(
   const [remoteUser, setRemoteUser] = useState<ChatSeed | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+
+  // Phase 2 video states
+  const [callType, setCallType] = useState<"audio" | "video">("audio");
+  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isRemoteCameraOn, setIsRemoteCameraOn] = useState(true);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -34,6 +42,7 @@ export function useAudioCall(
   const callStateRef = useRef<CallState>("idle");
   const callIdRef = useRef<string | null>(null);
   const remoteUserRef = useRef<ChatSeed | null>(null);
+  const callTypeRef = useRef<"audio" | "video">("audio");
 
   useEffect(() => {
     callStateRef.current = callState;
@@ -47,6 +56,10 @@ export function useAudioCall(
     remoteUserRef.current = remoteUser;
   }, [remoteUser]);
 
+  useEffect(() => {
+    callTypeRef.current = callType;
+  }, [callType]);
+
   // Stable reference to endCall to be called inside setTimeout callbacks safely
   const endCallRef = useRef<() => void>();
 
@@ -59,6 +72,11 @@ export function useAudioCall(
         setCallId(null);
         setIsMuted(false);
         setCallDuration(0);
+        setLocalStream(null);
+        setRemoteStream(null);
+        setIsCameraOn(true);
+        setIsRemoteCameraOn(true);
+        setFacingMode("user");
       }, 2500);
       return () => clearTimeout(timer);
     }
@@ -110,24 +128,35 @@ export function useAudioCall(
       clearTimeout(disconnectTimeoutRef.current);
       disconnectTimeoutRef.current = null;
     }
+    setLocalStream(null);
+    setRemoteStream(null);
     iceCandidatesBufferRef.current = [];
     remoteOfferRef.current = null;
   };
 
-  const startCall = async (targetUser: ChatSeed) => {
+  const startCall = async (targetUser: ChatSeed, type: "audio" | "video" = "audio") => {
     if (callState !== "idle") return;
 
     cleanupCall();
     const newCallId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     setCallId(newCallId);
     setRemoteUser(targetUser);
+    setCallType(type);
     setCallState("outgoing");
     setIsMuted(false);
+    setIsCameraOn(true);
+    setIsRemoteCameraOn(true);
+    setFacingMode("user");
     setCallDuration(0);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const constraints = {
+        audio: true,
+        video: type === "video" ? { facingMode: "user" } : false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = stream;
+      setLocalStream(stream);
 
       const pc = new RTCPeerConnection(rtcConfig);
       peerConnectionRef.current = pc;
@@ -147,13 +176,17 @@ export function useAudioCall(
       };
 
       pc.ontrack = (event) => {
-        const remoteStream = event.streams[0];
-        if (remoteStream) {
-          if (!remoteAudioRef.current) {
-            remoteAudioRef.current = new Audio();
+        const remoteStreamObj = event.streams[0];
+        if (remoteStreamObj) {
+          setRemoteStream(remoteStreamObj);
+          // For audio-only calls, play remote audio using dynamic Audio element to preserve existing behavior
+          if (type === "audio") {
+            if (!remoteAudioRef.current) {
+              remoteAudioRef.current = new Audio();
+            }
+            remoteAudioRef.current.srcObject = remoteStreamObj;
+            remoteAudioRef.current.play().catch((e) => console.error("Play failed", e));
           }
-          remoteAudioRef.current.srcObject = remoteStream;
-          remoteAudioRef.current.play().catch((e) => console.error("Play failed", e));
         }
       };
 
@@ -191,7 +224,7 @@ export function useAudioCall(
           JSON.stringify({
             type: "call_offer",
             targetUserIds: [targetUser.id],
-            payload: { callId: newCallId, sdp: offer }
+            payload: { callId: newCallId, sdp: offer, callType: type }
           })
         );
       } else {
@@ -199,7 +232,7 @@ export function useAudioCall(
       }
     } catch (err) {
       console.error("Failed to start WebRTC call:", err);
-      alert("Could not access microphone or initiate WebRTC stream.");
+      alert("Could not access camera or microphone. Please check permissions.");
       cleanupCall();
       setCallState("idle");
     }
@@ -211,8 +244,13 @@ export function useAudioCall(
     setCallState("connecting");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const constraints = {
+        audio: true,
+        video: callType === "video" ? { facingMode: "user" } : false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = stream;
+      setLocalStream(stream);
 
       const pc = new RTCPeerConnection(rtcConfig);
       peerConnectionRef.current = pc;
@@ -232,13 +270,17 @@ export function useAudioCall(
       };
 
       pc.ontrack = (event) => {
-        const remoteStream = event.streams[0];
-        if (remoteStream) {
-          if (!remoteAudioRef.current) {
-            remoteAudioRef.current = new Audio();
+        const remoteStreamObj = event.streams[0];
+        if (remoteStreamObj) {
+          setRemoteStream(remoteStreamObj);
+          // For audio-only calls, play remote audio using dynamic Audio element to preserve existing behavior
+          if (callType === "audio") {
+            if (!remoteAudioRef.current) {
+              remoteAudioRef.current = new Audio();
+            }
+            remoteAudioRef.current.srcObject = remoteStreamObj;
+            remoteAudioRef.current.play().catch((e) => console.error("Play failed", e));
           }
-          remoteAudioRef.current.srcObject = remoteStream;
-          remoteAudioRef.current.play().catch((e) => console.error("Play failed", e));
         }
       };
 
@@ -296,7 +338,7 @@ export function useAudioCall(
       }
     } catch (err) {
       console.error("Failed to accept WebRTC call:", err);
-      alert("Could not access microphone or connect WebRTC audio.");
+      alert("Could not access camera or microphone. Please check permissions.");
       if (socketRef.current?.readyState === WebSocket.OPEN && remoteUser) {
         socketRef.current.send(
           JSON.stringify({
@@ -379,6 +421,73 @@ export function useAudioCall(
     }
   };
 
+  // Toggle local camera (disable/enable video track and propagate update to peer)
+  const toggleCamera = () => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsCameraOn(videoTrack.enabled);
+
+        if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(
+            JSON.stringify({
+              type: "call_camera_toggle",
+              targetUserIds: [remoteUserRef.current.id],
+              payload: { callId: callIdRef.current, enabled: videoTrack.enabled }
+            })
+          );
+        }
+      }
+    }
+  };
+
+  // Switch camera on mobile using RTCRtpSender.replaceTrack()
+  const switchCamera = async () => {
+    if (callTypeRef.current !== "video" || !localStreamRef.current || !peerConnectionRef.current) return;
+
+    const newFacingMode = facingMode === "user" ? "environment" : "user";
+    try {
+      const newConstraints = {
+        audio: false,
+        video: { facingMode: newFacingMode }
+      };
+      const tempStream = await navigator.mediaDevices.getUserMedia(newConstraints);
+      const newVideoTrack = tempStream.getVideoTracks()[0];
+
+      if (!newVideoTrack) {
+        throw new Error("No video track found in switched camera stream");
+      }
+
+      // Stop old video track
+      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (oldVideoTrack) {
+        oldVideoTrack.stop();
+        localStreamRef.current.removeTrack(oldVideoTrack);
+      }
+
+      // Add new video track to local stream
+      localStreamRef.current.addTrack(newVideoTrack);
+      setFacingMode(newFacingMode);
+
+      // Re-apply local camera toggle state
+      newVideoTrack.enabled = isCameraOn;
+
+      // Replace track on the RTCRtpSender
+      const senders = peerConnectionRef.current.getSenders();
+      const videoSender = senders.find((s) => s.track?.kind === "video");
+      if (videoSender) {
+        await videoSender.replaceTrack(newVideoTrack);
+        console.log("Replaced video track on RTCRtpSender successfully");
+      }
+
+      // Update localStream state to force UI redraw
+      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+    } catch (err) {
+      console.error("Failed to switch camera:", err);
+    }
+  };
+
   const handleSignalingEvent = (data: any) => {
     const eventType = data.type;
     const payload = data.payload || {};
@@ -388,6 +497,7 @@ export function useAudioCall(
     if (!msgCallId) return;
 
     if (eventType === "call_offer") {
+      const msgCallType = payload.callType || "audio";
       if (callStateRef.current !== "idle") {
         // Automatically reject if busy
         if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -416,9 +526,13 @@ export function useAudioCall(
 
       setCallId(msgCallId);
       setRemoteUser(callerChat);
+      setCallType(msgCallType);
       remoteOfferRef.current = payload.sdp;
       setCallState("incoming");
       setIsMuted(false);
+      setIsCameraOn(true);
+      setIsRemoteCameraOn(true);
+      setFacingMode("user");
       setCallDuration(0);
       iceCandidatesBufferRef.current = [];
     } else if (eventType === "call_answer") {
@@ -463,6 +577,10 @@ export function useAudioCall(
         cleanupCall();
         setCallState("ended");
       }
+    } else if (eventType === "call_camera_toggle") {
+      if (callIdRef.current === msgCallId) {
+        setIsRemoteCameraOn(payload.enabled);
+      }
     }
   };
 
@@ -471,11 +589,19 @@ export function useAudioCall(
     remoteUser,
     isMuted,
     callDuration,
+    callType,
+    isCameraOn,
+    isRemoteCameraOn,
+    localStream,
+    remoteStream,
+    facingMode,
     startCall,
     acceptCall,
     rejectCall,
     endCall,
     toggleMute,
+    toggleCamera,
+    switchCamera,
     handleSignalingEvent
   };
 }
@@ -501,10 +627,18 @@ interface AudioCallOverlayProps {
   remoteUser: ChatSeed | null;
   isMuted: boolean;
   callDuration: number;
+  callType: "audio" | "video";
+  isCameraOn: boolean;
+  isRemoteCameraOn: boolean;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  facingMode: "user" | "environment";
   acceptCall: () => void;
   rejectCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
+  toggleCamera: () => void;
+  switchCamera: () => void;
 }
 
 export function AudioCallOverlay({
@@ -512,11 +646,34 @@ export function AudioCallOverlay({
   remoteUser,
   isMuted,
   callDuration,
+  callType,
+  isCameraOn,
+  isRemoteCameraOn,
+  localStream,
+  remoteStream,
+  facingMode,
   acceptCall,
   rejectCall,
   endCall,
-  toggleMute
+  toggleMute,
+  toggleCamera,
+  switchCamera
 }: AudioCallOverlayProps) {
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
   if (callState === "idle") return null;
 
   const formatDuration = (sec: number) => {
@@ -544,6 +701,11 @@ export function AudioCallOverlay({
     }
   };
 
+  const isMobileDevice = () => {
+    if (typeof navigator === "undefined") return false;
+    return /Mobi|Android/i.test(navigator.userAgent);
+  };
+
   if (callState === "incoming") {
     // Responsive, non-overflowing banner for incoming calls (designed to fit on 320px screens)
     return (
@@ -564,7 +726,9 @@ export function AudioCallOverlay({
             </span>
             <div className="min-w-0">
               <div className="truncate text-sm sm:text-base font-bold text-[#18212f]">{remoteUser?.name}</div>
-              <div className="text-[10px] sm:text-xs font-semibold text-[#00a884]">Incoming audio call</div>
+              <div className="text-[10px] sm:text-xs font-semibold text-[#00a884]">
+                {callType === "video" ? "Incoming video call" : "Incoming audio call"}
+              </div>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -590,11 +754,129 @@ export function AudioCallOverlay({
     );
   }
 
-  // Centered overlay modal for outgoing, active, and term status calls
+  // Render Video Layout for active connected video calls
+  if (callType === "video" && (callState === "connected" || callState === "connecting")) {
+    return (
+      <div className="fixed inset-0 z-[100] grid place-items-center bg-[#0f172a]/60 px-4 backdrop-blur-sm">
+        <div className="cs-scale-in flex w-full max-w-sm h-[75vh] max-h-[calc(100vh-2rem)] overflow-hidden flex-col items-center rounded-3xl border border-[#dce1e8] bg-slate-950 text-center shadow-[0_28px_90px_rgba(15,23,42,.22)] relative">
+          
+          {/* Main Area: Remote Video */}
+          <div className="absolute inset-0 z-0 bg-slate-950 rounded-3xl overflow-hidden">
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className={`h-full w-full object-cover transition-opacity duration-300 ${
+                isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+              }`}
+            />
+            {/* Remote Avatar Placeholder */}
+            {!isRemoteCameraOn && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-white">
+                <span className={`grid h-20 w-20 place-items-center overflow-hidden rounded-full text-2xl font-black text-white ${remoteUser?.color || "bg-[#0f766e]"}`}>
+                  {remoteUser?.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                  ) : (
+                    remoteUser?.avatar || "U"
+                  )}
+                </span>
+                <h4 className="mt-4 text-lg font-bold truncate max-w-[200px]">{remoteUser?.name}</h4>
+                <p className="text-xs text-slate-400 mt-1">Camera is turned off</p>
+              </div>
+            )}
+          </div>
+
+          {/* Small Overlay: Local Video (Muted to prevent echo feedback, mirrored) */}
+          <div className="absolute top-4 right-4 h-28 w-20 rounded-2xl border border-white/20 bg-slate-900 shadow-md overflow-hidden z-10 flex items-center justify-center">
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+                isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+              }`}
+            />
+            {!isCameraOn && (
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-800 text-white">
+                <span className="text-xs font-bold">You</span>
+              </div>
+            )}
+          </div>
+
+          {/* Controls overlay */}
+          <div className="absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black/80 via-black/40 to-transparent flex flex-col items-center z-20">
+            <div className="text-white mb-4 text-center">
+              <h4 className="text-sm font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
+              <p className="text-xs text-slate-300 mt-0.5">{getStatusText()}</p>
+            </div>
+            
+            <div className="flex items-center gap-3 justify-center">
+              {/* Mic mute */}
+              <button
+                aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+                className={`cs-press grid h-10 w-10 place-items-center rounded-full border transition-colors ${
+                  isMuted
+                    ? "border-red-600 bg-red-600 text-white"
+                    : "border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
+                }`}
+                onClick={toggleMute}
+                type="button"
+              >
+                {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+              </button>
+
+              {/* Camera toggle */}
+              <button
+                aria-label={isCameraOn ? "Turn camera off" : "Turn camera on"}
+                className={`cs-press grid h-10 w-10 place-items-center rounded-full border transition-colors ${
+                  !isCameraOn
+                    ? "border-red-600 bg-red-600 text-white"
+                    : "border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
+                }`}
+                onClick={toggleCamera}
+                type="button"
+              >
+                {isCameraOn ? <Video size={18} /> : <VideoOff size={18} />}
+              </button>
+
+              {/* Switch camera (mobile only) */}
+              {isMobileDevice() && (
+                <button
+                  aria-label="Switch camera"
+                  className="cs-press grid h-10 w-10 place-items-center rounded-full border border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
+                  onClick={switchCamera}
+                  type="button"
+                >
+                  <RotateCw size={18} />
+                </button>
+              )}
+
+              {/* Hang up */}
+              <button
+                aria-label="Hang up call"
+                className="cs-press grid h-12 w-12 place-items-center rounded-full bg-[#b42318] text-white hover:bg-[#911c13]"
+                onClick={endCall}
+                type="button"
+              >
+                <PhoneOff size={20} />
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // Centered overlay modal for audio calls, and video calls in outgoing/connecting/ended states
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center bg-[#0f172a]/60 px-4 backdrop-blur-sm">
       <div className="cs-scale-in flex w-full max-w-sm max-h-[calc(100vh-2rem)] overflow-y-auto flex-col items-center rounded-3xl border border-[#dce1e8] bg-white p-8 text-center shadow-[0_28px_90px_rgba(15,23,42,.22)]">
-        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Audio Call</p>
+        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">
+          {callType === "video" ? "Video Call" : "Audio Call"}
+        </p>
 
         {/* Pulse effect avatar */}
         <div className="relative my-8 flex items-center justify-center">

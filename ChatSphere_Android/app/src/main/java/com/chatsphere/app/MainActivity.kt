@@ -35,6 +35,28 @@ class MainActivity : AppCompatActivity() {
         pendingPermissionRequest = null
     }
 
+    private val multiplePermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val recordAudioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+        val cameraGranted = permissions[Manifest.permission.CAMERA] ?: (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+        
+        val grantedResources = mutableListOf<String>()
+        if (recordAudioGranted) {
+            grantedResources.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+        }
+        if (cameraGranted) {
+            grantedResources.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+        }
+        
+        if (grantedResources.isNotEmpty()) {
+            pendingPermissionRequest?.grant(grantedResources.toTypedArray())
+        } else {
+            pendingPermissionRequest?.deny()
+        }
+        pendingPermissionRequest = null
+    }
+
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -83,18 +105,27 @@ class MainActivity : AppCompatActivity() {
             override fun onPermissionRequest(request: PermissionRequest?) {
                 if (request == null) return
                 val resources = request.resources
+                val neededPermissions = mutableListOf<String>()
+                
                 for (resource in resources) {
                     if (PermissionRequest.RESOURCE_AUDIO_CAPTURE == resource) {
-                        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                            request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
-                        } else {
-                            this@MainActivity.pendingPermissionRequest = request
-                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                            neededPermissions.add(Manifest.permission.RECORD_AUDIO)
                         }
-                        return
+                    }
+                    if (PermissionRequest.RESOURCE_VIDEO_CAPTURE == resource) {
+                        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                            neededPermissions.add(Manifest.permission.CAMERA)
+                        }
                     }
                 }
-                request.grant(resources)
+                
+                if (neededPermissions.isNotEmpty()) {
+                    this@MainActivity.pendingPermissionRequest = request
+                    multiplePermissionsLauncher.launch(neededPermissions.toTypedArray())
+                } else {
+                    request.grant(resources)
+                }
             }
 
             override fun onShowFileChooser(
