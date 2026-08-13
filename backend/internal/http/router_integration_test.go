@@ -142,3 +142,72 @@ func getMessages(t *testing.T, handler http.Handler, path, token string) []map[s
 	}
 	return payload.Messages
 }
+
+func TestVoiceMessageUpload(t *testing.T) {
+	cfg := config.Load()
+	if strings.TrimSpace(cfg.DatabaseURL) == "" {
+		t.Skip("DATABASE_URL is not configured")
+	}
+	cfg.Port = "0"
+	cfg.FrontendOrigin = "http://localhost:3000"
+
+	dataStore, err := store.New(cfg.DataPath, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	hub := realtime.NewHub()
+	go hub.Run()
+	router := NewRouter(cfg, hub, dataStore)
+	suffix := time.Now().UTC().Format("20060102150405")
+
+	ali := createTestUser(t, router, "ali-voice-"+suffix+"@example.com", "Ali", "Voice")
+	hamza := createTestUser(t, router, "hamza-voice-"+suffix+"@example.com", "Hamza", "Voice")
+
+	// 1. Simulate voice file upload
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "voice-message_5s.webm")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = part.Write([]byte("dummy audio content webm format"))
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+ali.Token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("upload voice message failed: status %d body %s", resp.Code, resp.Body.String())
+	}
+
+	var uploadResp struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Kind string `json:"kind"`
+		URL  string `json:"url"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
+
+	if uploadResp.Kind != "audio" {
+		t.Fatalf("expected upload kind to be audio, got %s", uploadResp.Kind)
+	}
+
+	// 2. Send private message with voice attachment
+	postJSON(t, router, http.MethodPost, "/api/v1/messages", ali.Token, map[string]any{
+		"recipientId": hamza.ID,
+		"body":        "",
+		"attachment": map[string]any{
+			"name": uploadResp.Name,
+			"type": uploadResp.Type,
+			"kind": uploadResp.Kind,
+			"url":  uploadResp.URL,
+		},
+	}, http.StatusOK)
+}

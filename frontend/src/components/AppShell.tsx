@@ -1175,20 +1175,31 @@ export function AppShell() {
     if (!draft.file) return draft;
     const file = await prepareUploadFile(draft.file);
     const formData = new FormData();
-    formData.set("file", file);
-    const response = await fetch(`${apiUrl()}/api/v1/upload`, {
-      method: "POST",
-      headers: authHeaders(authToken),
-      body: formData
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error ?? "Could not upload file");
-    return {
-      name: data.name ?? file.name ?? draft.name,
-      type: data.type ?? file.type ?? draft.type,
-      kind: data.kind ?? draft.kind,
-      url: data.url ?? draft.url
-    } as NonNullable<ChatMessage["attachment"]>;
+    // Explicitly pass third parameter filename to guarantee standard webview compliance
+    formData.set("file", file, file.name);
+    console.log("[VoiceMessage debug] uploadAttachment - Starting upload for file name:", file.name, "size:", file.size, "type:", file.type);
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/upload`, {
+        method: "POST",
+        headers: authHeaders(authToken),
+        body: formData
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.error("[VoiceMessage debug] uploadAttachment - Upload failed. Status:", response.status, "data:", data);
+        throw new Error(data.error ?? `Upload failed with status ${response.status}`);
+      }
+      console.log("[VoiceMessage debug] uploadAttachment - Upload succeeded. Response:", data);
+      return {
+        name: data.name ?? file.name ?? draft.name,
+        type: data.type ?? file.type ?? draft.type,
+        kind: data.kind ?? draft.kind,
+        url: data.url ?? draft.url
+      } as NonNullable<ChatMessage["attachment"]>;
+    } catch (err) {
+      console.error("[VoiceMessage debug] uploadAttachment - Network error during upload:", err);
+      throw err;
+    }
   }
 
   async function processSendQueue() {
@@ -1209,7 +1220,10 @@ export function AppShell() {
           uploadFailed = true;
           setDraftText(chatId, draftText);
           if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
-          setAuthError(error instanceof Error ? error.message : "Could not upload file");
+          const errorMsg = error instanceof Error ? error.message : "Could not upload file";
+          setAuthError(errorMsg);
+          setChatNotice(errorMsg);
+          console.error("[VoiceMessage debug] processSendQueue - Attachment upload failed:", errorMsg);
           
           setChatMessages((current) => ({
             ...current,
@@ -1234,6 +1248,11 @@ export function AppShell() {
       }
 
       try {
+        console.log("[VoiceMessage debug] processSendQueue - Sending message endpoint payload:", {
+          recipientId: chatId,
+          body: message.body,
+          attachment: uploadedAttachment
+        });
         const response = await fetch(`${apiUrl()}/api/v1/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
@@ -1251,7 +1270,11 @@ export function AppShell() {
           })
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error ?? "Message could not be saved");
+        if (!response.ok) {
+          console.error("[VoiceMessage debug] processSendQueue - Save message returned error. Status:", response.status, "data:", data);
+          throw new Error(data.error ?? `Message send failed with status ${response.status}`);
+        }
+        console.log("[VoiceMessage debug] processSendQueue - Message send succeeded. Data:", data);
         if (data.message?.id) {
           setChatMessages((current) => ({
             ...current,
@@ -1261,6 +1284,7 @@ export function AppShell() {
           }));
         }
       } catch (error) {
+        console.error("[VoiceMessage debug] processSendQueue - Send message catch hit:", error);
         setChatMessages((current) => ({
           ...current,
           [chatId]: (current[chatId] ?? []).filter((currentMessage) => currentMessage.id !== message.id)
@@ -1409,6 +1433,7 @@ export function AppShell() {
       return;
     }
     try {
+      const startTime = Date.now();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
       
@@ -1438,8 +1463,10 @@ export function AppShell() {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         stream.getTracks().forEach((track) => track.stop());
         
+        const duration = Math.max(1, Math.round((Date.now() - startTime) / 1000));
+        console.log("[VoiceMessage debug] onstop - Calculated voice message duration:", duration, "seconds");
         if (audioChunksRef.current.length > 0 && audioBlob.size > 0) {
-          await handleSendVoiceBlob(audioBlob, recordingDuration);
+          await handleSendVoiceBlob(audioBlob, duration);
         }
       };
 
