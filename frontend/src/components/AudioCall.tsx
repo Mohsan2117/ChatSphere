@@ -554,8 +554,26 @@ export function useAudioCall(
   const switchCamera = async () => {
     if (callTypeRef.current !== "video" || !localStreamRef.current || !peerConnectionRef.current) return;
 
-    const newFacingMode = facingModeRef.current === "user" ? "environment" : "user";
+    const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+    const oldFacingMode = facingModeRef.current;
+    const newFacingMode = oldFacingMode === "user" ? "environment" : "user";
+
+    // 1. Find the current video sender
+    const senders = peerConnectionRef.current.getSenders();
+    const videoSender = senders.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+    if (!videoSender) {
+      console.warn("Could not find video sender to switch tracks");
+      return;
+    }
+
+    // 2. Stop old track first to release hardware locks on restricted mobile hardware/WebViews
+    if (oldVideoTrack) {
+      oldVideoTrack.stop();
+      localStreamRef.current.removeTrack(oldVideoTrack);
+    }
+
     try {
+      // 3. Request the opposite camera facing mode
       let tempStream: MediaStream;
       try {
         tempStream = await navigator.mediaDevices.getUserMedia({
@@ -571,26 +589,14 @@ export function useAudioCall(
       }
 
       const newVideoTrack = tempStream.getVideoTracks()[0];
-      if (!newVideoTrack) {
-        throw new Error("No video track found in switched camera stream");
+      if (!newVideoTrack || newVideoTrack.readyState !== "live") {
+        throw new Error("Switched camera track is not live/usable");
       }
 
-      // Replace track on the RTCRtpSender
-      const senders = peerConnectionRef.current.getSenders();
-      const videoSender = senders.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
-      if (videoSender) {
-        await videoSender.replaceTrack(newVideoTrack);
-        console.log("Replaced video track on RTCRtpSender successfully");
-      }
+      // 4. Replace track on sender
+      await videoSender.replaceTrack(newVideoTrack);
 
-      // Stop old video track ONLY AFTER new track is successfully started and attached
-      const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-      if (oldVideoTrack) {
-        oldVideoTrack.stop();
-        localStreamRef.current.removeTrack(oldVideoTrack);
-      }
-
-      // Add new video track to local stream
+      // 5. Add new video track to local stream reference
       localStreamRef.current.addTrack(newVideoTrack);
       setFacingMode(newFacingMode);
       facingModeRef.current = newFacingMode;
@@ -598,10 +604,27 @@ export function useAudioCall(
       // Re-apply local camera toggle state
       newVideoTrack.enabled = isCameraOnRef.current;
 
-      // Update localStream state to force UI redraw
+      // Update state to trigger rendering update
       setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+      console.log("Switched camera successfully to facingMode:", newFacingMode);
     } catch (err) {
-      console.error("Failed to switch camera:", err);
+      console.error("Failed to switch camera, executing rollback protection:", err);
+      // ROLLBACK: Re-acquire the old camera to avoid leaving a black screen
+      try {
+        const rollbackStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: oldFacingMode },
+          audio: false
+        });
+        const rollbackTrack = rollbackStream.getVideoTracks()[0];
+        if (rollbackTrack) {
+          localStreamRef.current.addTrack(rollbackTrack);
+          await videoSender.replaceTrack(rollbackTrack);
+          rollbackTrack.enabled = isCameraOnRef.current;
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+        }
+      } catch (rollbackErr) {
+        console.error("Failed rollback to old camera:", rollbackErr);
+      }
     }
   };
 
@@ -805,6 +828,9 @@ export function AudioCallOverlay({
   const [isMinimized, setIsMinimized] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
 
+  // Video PiP Layout Swap State (default showing remote stream full screen)
+  const [mainVideo, setMainVideo] = useState<"remote" | "local">("remote");
+
   // Participant selection states
   const [isAddPeopleOpen, setIsAddPeopleOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -828,11 +854,12 @@ export function AudioCallOverlay({
     }
   }, [remoteStream]);
 
-  // Reset minimized state when a call session transitions out of active states
+  // Reset minimized and video swap states when call ends
   useEffect(() => {
     if (callState === "idle" || callState === "rejected" || callState === "ended") {
       setIsMinimized(false);
       setIsAddPeopleOpen(false);
+      setMainVideo("remote");
     }
   }, [callState]);
 
@@ -1019,13 +1046,20 @@ export function AudioCallOverlay({
     return (
       <div className="fixed inset-0 z-[95] flex flex-col items-center justify-between text-white overflow-hidden bg-slate-950">
         
-        {/* Remote video area (full viewport) */}
-        <div className="absolute inset-0 z-0 h-full w-full bg-slate-950">
+        {/* Remote Video Container (Styled dynamically as Main or PIP) */}
+        <div
+          onClick={mainVideo === "local" ? () => setMainVideo("remote") : undefined}
+          className={
+            mainVideo === "remote"
+              ? "absolute inset-0 z-0 w-full h-full bg-slate-950 transition-all duration-300 overflow-hidden"
+              : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
+          }
+        >
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className={`h-full w-full object-cover transition-opacity duration-500 ${
+            className={`h-full w-full object-cover transition-opacity duration-300 ${
               isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
             }`}
           />
@@ -1037,21 +1071,34 @@ export function AudioCallOverlay({
               }}
               className="absolute inset-0 flex flex-col items-center justify-center bg-[#0b141a]"
             >
-              <span className={`grid h-28 w-28 place-items-center overflow-hidden rounded-full text-3xl font-black text-white shadow-2xl border-4 border-slate-700/50 ${remoteUser?.color || "bg-[#0f766e]"}`}>
+              <span className={`grid place-items-center overflow-hidden rounded-full font-black text-white shadow-2xl border-2 border-slate-700/50 ${
+                mainVideo === "remote" ? "h-28 w-28 text-3xl" : "h-12 w-12 text-sm"
+              } ${remoteUser?.color || "bg-[#0f766e]"}`}>
                 {remoteUser?.avatarUrl ? (
                   <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
                 ) : (
                   remoteUser?.avatar || "U"
                 )}
               </span>
-              <h4 className="mt-5 text-xl font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
-              <p className="text-sm text-slate-400 mt-1">Camera is off</p>
+              {mainVideo === "remote" && (
+                <>
+                  <h4 className="mt-5 text-xl font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
+                  <p className="text-sm text-slate-400 mt-1">Camera is off</p>
+                </>
+              )}
             </div>
           )}
         </div>
 
-        {/* Local Video floating PIP (top-right, mirrored, constrained to safe boundaries) */}
-        <div className="absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl overflow-hidden z-20 flex items-center justify-center">
+        {/* Local Video Container (Styled dynamically as Main or PIP) */}
+        <div
+          onClick={mainVideo === "remote" ? () => setMainVideo("local") : undefined}
+          className={
+            mainVideo === "local"
+              ? "absolute inset-0 z-0 w-full h-full bg-slate-950 transition-all duration-300 overflow-hidden"
+              : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
+          }
+        >
           <video
             ref={localVideoRef}
             autoPlay
