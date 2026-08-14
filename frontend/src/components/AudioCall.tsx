@@ -64,6 +64,18 @@ export function useAudioCall(
 
   useEffect(() => {
     callStateRef.current = callState;
+    if (typeof window !== "undefined") {
+      const bridge = (window as any).AndroidBridge;
+      if (bridge && typeof bridge.setCallActive === "function") {
+        const isActive = callState !== "idle" && callState !== "rejected" && callState !== "ended";
+        try {
+          bridge.setCallActive(isActive);
+          console.log(`Notified AndroidBridge: setCallActive(${isActive})`);
+        } catch (e) {
+          console.error("Failed to call AndroidBridge.setCallActive:", e);
+        }
+      }
+    }
   }, [callState]);
 
   useEffect(() => {
@@ -796,6 +808,22 @@ export function useAudioCall(
               })
             );
           }
+
+          // Add peer to participants if missing
+          const peerChat = directoryChats.find((chat) => chat.id === senderId) || {
+            id: senderId,
+            name: nameFromEmail(senderId),
+            avatar: chatInitials(nameFromEmail(senderId)),
+            color: "bg-[#0f766e]",
+            preview: senderId,
+            time: "",
+            unread: 0,
+            online: true
+          };
+          setParticipants((prev) => {
+            if (prev.some((p) => p.id === senderId)) return prev;
+            return [...prev, peerChat];
+          });
         }
       }
     } else if (eventType === "call_answer") {

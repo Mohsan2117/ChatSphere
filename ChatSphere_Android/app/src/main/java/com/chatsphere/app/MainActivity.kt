@@ -15,6 +15,7 @@ import androidx.activity.OnBackPressedCallback
 import android.Manifest
 import android.content.pm.PackageManager
 import android.webkit.PermissionRequest
+import android.webkit.JavascriptInterface
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
@@ -23,6 +24,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermissionRequest: PermissionRequest? = null
+    private var isCallActive = false
+
+    inner class WebAppInterface {
+        @JavascriptInterface
+        fun setCallActive(active: Boolean) {
+            runOnUiThread {
+                isCallActive = active
+                android.util.Log.d("ChatSphere", "Call active state updated: $active")
+            }
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -82,6 +94,7 @@ class MainActivity : AppCompatActivity() {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
+        webView.addJavascriptInterface(WebAppInterface(), "AndroidBridge")
 
         // Configure Cookies & Persistence
         val cookieManager = CookieManager.getInstance()
@@ -172,6 +185,22 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isCallActive) {
+            webView.onPause()
+            android.util.Log.d("ChatSphere", "WebView paused in background (no active call)")
+        } else {
+            android.util.Log.d("ChatSphere", "WebView kept active in background (active call ongoing)")
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        webView.onResume()
+        android.util.Log.d("ChatSphere", "WebView resumed")
     }
 
     override fun onDestroy() {

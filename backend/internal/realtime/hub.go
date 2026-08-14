@@ -3,6 +3,7 @@ package realtime
 import (
 	"encoding/json"
 	"sync"
+	"time"
 )
 
 type Event struct {
@@ -88,25 +89,31 @@ func (h *Hub) Run() {
 				h.mu.Lock()
 				h.online[client.userID]--
 				onlineCount := h.online[client.userID]
-				var events []Event
 				if onlineCount <= 0 {
 					delete(h.online, client.userID)
 				}
-				events = h.removeCallsForUserLocked(client.userID)
 				h.mu.Unlock()
-				if onlineCount <= 0 {
-					h.dispatch(Event{
-						Type:   "presence.updated",
-						UserID: client.userID,
-						Payload: mustJSON(map[string]any{
-							"userId": client.userID,
-							"online": false,
-						}),
-					})
-				}
-				for _, ev := range events {
-					h.dispatch(ev)
-				}
+
+				// Defer call cleanup and offline presence update to tolerate transient reconnects
+				go func(uid string) {
+					time.Sleep(15 * time.Second)
+					h.mu.Lock()
+					defer h.mu.Unlock()
+					if h.online[uid] <= 0 {
+						events := h.removeCallsForUserLocked(uid)
+						h.dispatch(Event{
+							Type:   "presence.updated",
+							UserID: uid,
+							Payload: mustJSON(map[string]any{
+								"userId": uid,
+								"online": false,
+							}),
+						})
+						for _, ev := range events {
+							h.dispatch(ev)
+						}
+					}
+				}(client.userID)
 			}
 		case event := <-h.broadcast:
 			h.dispatch(event)

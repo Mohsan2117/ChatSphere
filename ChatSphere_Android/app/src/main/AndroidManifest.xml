@@ -21,6 +21,7 @@
         <!-- Main screen of the app -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenLayout|screenSize|smallestScreenSize|keyboardHidden"
             android:exported="true">
 
             <intent-filter>

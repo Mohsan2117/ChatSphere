@@ -172,6 +172,23 @@ export function AppShell() {
     handleSignalingEventRef.current = handleSignalingEvent;
   }, [endCall, handleSignalingEvent]);
 
+  const callStateRef = useRef(callState);
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  const callReconnectTimeoutRef = useRef<any>(null);
+  const reconnectCountRef = useRef(0);
+
+  useEffect(() => {
+    if (callState === "idle" || callState === "ended" || callState === "rejected") {
+      if (callReconnectTimeoutRef.current) {
+        window.clearTimeout(callReconnectTimeoutRef.current);
+        callReconnectTimeoutRef.current = null;
+      }
+    }
+  }, [callState]);
+
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const userIsNearBottomRef = useRef(true);
   const prevMessagesLengthRef = useRef(0);
@@ -460,6 +477,12 @@ export function AppShell() {
       setDirectoryChats((current) =>
         current.map((chat) => (chat.id === currentUserId ? { ...chat, online: true } : chat))
       );
+      reconnectCountRef.current = 0;
+      if (callReconnectTimeoutRef.current) {
+        console.log("WebSocket reconnected successfully during call. Clearing grace period.");
+        window.clearTimeout(callReconnectTimeoutRef.current);
+        callReconnectTimeoutRef.current = null;
+      }
     };
 
     socket.onmessage = (event) => {
@@ -559,15 +582,28 @@ export function AppShell() {
     };
 
     socket.onerror = () => {
-      endCallRef.current();
       socket.close();
     };
 
     socket.onclose = () => {
-      endCallRef.current();
       setTypingUser(null);
       if (closedByCleanup) return;
-      reconnectTimer = window.setTimeout(() => setSocketAttempt((attempt) => attempt + 1), 2500);
+
+      if (callStateRef.current !== "idle" && callStateRef.current !== "ended" && callStateRef.current !== "rejected") {
+        if (!callReconnectTimeoutRef.current) {
+          console.log("WebSocket disconnected during an active call. Starting 15s grace period...");
+          callReconnectTimeoutRef.current = window.setTimeout(() => {
+            console.warn("WebSocket reconnection grace period expired. Ending call.");
+            endCallRef.current();
+            callReconnectTimeoutRef.current = null;
+          }, 15000);
+        }
+      }
+
+      const delay = Math.min(2500 * Math.pow(1.5, reconnectCountRef.current), 15000);
+      reconnectCountRef.current += 1;
+      console.log(`WebSocket disconnected. Reconnecting in ${delay}ms (attempt #${reconnectCountRef.current})`);
+      reconnectTimer = window.setTimeout(() => setSocketAttempt((attempt) => attempt + 1), delay);
     };
 
     return () => {
