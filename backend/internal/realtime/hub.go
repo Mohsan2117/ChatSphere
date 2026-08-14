@@ -196,7 +196,7 @@ func (h *Hub) removeCallsForUserLocked(userID string) []Event {
 	return events
 }
 
-func (h *Hub) AddCall(callID, hostID string) {
+func (h *Hub) AddCall(callID, hostID, recipientID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.calls == nil {
@@ -206,7 +206,8 @@ func (h *Hub) AddCall(callID, hostID string) {
 		CallID: callID,
 		HostID: hostID,
 		Participants: map[string]bool{
-			hostID: true,
+			hostID:      true,
+			recipientID: true,
 		},
 	}
 }

@@ -104,7 +104,7 @@ func (c *Client) readPump() {
 						}
 					}
 
-					c.hub.AddCall(callID, c.userID)
+					c.hub.AddCall(callID, c.userID, recipientID)
 					c.hub.Broadcast(event)
 				} else {
 					// WebRTC connection offer between active participants in an ongoing call.
@@ -264,6 +264,14 @@ func (c *Client) readPump() {
 
 				// Forward reject to target
 				c.hub.Broadcast(event)
+
+				// If the rejecting user was already an active participant, clean them up
+				if _, isActive := session.Participants[c.userID]; isActive {
+					events, _ := c.hub.LeaveCall(callID, c.userID)
+					for _, ev := range events {
+						c.hub.Broadcast(ev)
+					}
+				}
 
 			} else if event.Type == "call_end" {
 				// User hangs up/leaves call
