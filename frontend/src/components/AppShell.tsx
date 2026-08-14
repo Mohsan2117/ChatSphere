@@ -2011,7 +2011,7 @@ export function AppShell() {
     return (
       <main className="min-h-screen bg-[#07130f] text-white">
         <section className="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
-          <div className="cs-fade-up-delay max-w-2xl">
+          <div className="hidden lg:block cs-fade-up-delay max-w-2xl">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#00a884] text-[#07130f] shadow-[0_18px_50px_rgba(0,168,132,.25)]">
               <MessageCircle size={31} />
             </div>
@@ -2033,7 +2033,7 @@ export function AppShell() {
             </div>
           </div>
 
-          <div className="cs-auth-card rounded-2xl border border-white/10 bg-[#101b17] p-6 shadow-[0_30px_90px_rgba(0,0,0,.38)]">
+          <div className="cs-auth-card w-full max-w-md mx-auto lg:max-w-none rounded-2xl border border-white/10 bg-[#101b17] p-6 shadow-[0_30px_90px_rgba(0,0,0,.38)]">
             {(authStep === "signup" || authStep === "login") ? (
               <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/10 bg-[#07130f] p-1">
                 <button
