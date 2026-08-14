@@ -25,7 +25,9 @@ import {
   Menu,
   X,
   Phone,
-  Video
+  Video,
+  Play,
+  Pause
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
@@ -2882,25 +2884,29 @@ export function AppShell() {
                   <div className="space-y-4">
                     {visibleSelectedMessages.map((message) => (
                       <div key={message.id} className={`cs-message-in flex ${message.mine ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
-                          {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
-                          {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
-                          <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
-                            {formatMessageTime(message)}
-                            {message.mine ? (
-                              <>
-                                <span>{message.readAt ? "Seen" : "Sent"}</span>
-                                {message.readAt ? (
-                                  <CheckCheck size={15} className="text-[#00a884]" />
-                                ) : selectedChat?.online ? (
-                                  <CheckCheck size={15} className="text-[#94a3b8]" />
-                                ) : (
-                                  <Check size={15} className="text-[#94a3b8]" />
-                                )}
-                              </>
-                            ) : null}
+                        {message.attachment && message.attachment.kind === "audio" ? (
+                          <VoiceMessageBubble message={message} authToken={authToken} selectedChat={selectedChat} />
+                        ) : (
+                          <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+                            {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
+                            {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
+                            <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
+                              {formatMessageTime(message)}
+                              {message.mine ? (
+                                <>
+                                  <span>{message.readAt ? "Seen" : "Sent"}</span>
+                                  {message.readAt ? (
+                                    <CheckCheck size={15} className="text-[#00a884]" />
+                                  ) : selectedChat?.online ? (
+                                    <CheckCheck size={15} className="text-[#94a3b8]" />
+                                  ) : (
+                                    <Check size={15} className="text-[#94a3b8]" />
+                                  )}
+                                </>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -3405,6 +3411,334 @@ function AudioPlayer({ source, name }: { source: string; name: string }) {
         <div className="flex justify-between text-[10px] font-bold text-[#64748b] mt-1">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const peaksCache = new Map<string, number[]>();
+
+function getFallbackPeaks(seed: string, count: number): number[] {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  const peaks: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const angle = (i / (count - 1)) * Math.PI;
+    const shape = Math.sin(angle);
+    const rand = Math.abs(Math.sin(hash + i * 13.7)) * 0.5 + 0.3;
+    const val = shape * rand + 0.15;
+    peaks.push(Math.min(1.0, Math.max(0.15, val)));
+  }
+  return peaks;
+}
+
+async function getPeaksFromAudio(url: string, count: number): Promise<number[]> {
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Fetch failed");
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const rawData = audioBuffer.getChannelData(0);
+    const blockSize = Math.floor(rawData.length / count);
+    const peaks: number[] = [];
+    for (let i = 0; i < count; i++) {
+      let max = 0;
+      const start = i * blockSize;
+      for (let j = 0; j < blockSize; j++) {
+        const val = Math.abs(rawData[start + j]);
+        if (val > max) {
+          max = val;
+        }
+      }
+      peaks.push(max);
+    }
+    const maxPeak = Math.max(...peaks) || 1;
+    return peaks.map(p => Math.max(0.15, p / maxPeak));
+  } catch (err) {
+    console.warn("Could not decode audio peaks, falling back to deterministic peaks:", err);
+    return getFallbackPeaks(url, count);
+  }
+}
+
+const pauseAllOtherAudios = (currentAudio: HTMLAudioElement) => {
+  if (typeof document === "undefined") return;
+  const audios = document.querySelectorAll("audio");
+  audios.forEach((audio) => {
+    if (audio !== currentAudio) {
+      audio.pause();
+    }
+  });
+};
+
+function VoiceMessageBubble({
+  message,
+  authToken,
+  selectedChat
+}: {
+  message: ChatMessage;
+  authToken: string;
+  selectedChat: any;
+}) {
+  const attachment = message.attachment!;
+  const [failed, setFailed] = useState(false);
+  const source = attachmentSource(attachment.url, authToken);
+  const canPreview = Boolean(source && /^(https?:|data:|blob:)/i.test(source) && !failed);
+
+  if (!canPreview) {
+    return (
+      <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+        <a className="flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
+          <FileText size={20} />
+          <span className="min-w-0 truncate">{attachment.name}</span>
+        </a>
+        <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
+          {formatMessageTime(message)}
+          {message.mine && (
+            <>
+              <span>{message.readAt ? "Seen" : "Sent"}</span>
+              {message.readAt ? (
+                <CheckCheck size={15} className="text-[#00a884]" />
+              ) : selectedChat?.online ? (
+                <CheckCheck size={15} className="text-[#94a3b8]" />
+              ) : (
+                <Check size={15} className="text-[#94a3b8]" />
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <VoiceMessagePlayer
+      source={source}
+      name={attachment.name}
+      message={message}
+      selectedChat={selectedChat}
+    />
+  );
+}
+
+function VoiceMessagePlayer({
+  source,
+  name,
+  message,
+  selectedChat
+}: {
+  source: string;
+  name: string;
+  message: ChatMessage;
+  selectedChat: any;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [peaks, setPeaks] = useState<number[]>([]);
+  const barsCount = 35;
+
+  const parsedDuration = useMemo(() => {
+    const match = name.match(/voice-message_(\d+(\.\d+)?)s\./);
+    return match ? parseFloat(match[1]) : 0;
+  }, [name]);
+
+  useEffect(() => {
+    if (parsedDuration > 0) {
+      setDuration(parsedDuration);
+    }
+  }, [parsedDuration]);
+
+  useEffect(() => {
+    if (!source) return;
+    if (peaksCache.has(source)) {
+      setPeaks(peaksCache.get(source)!);
+      return;
+    }
+
+    let isMounted = true;
+    getPeaksFromAudio(source, barsCount).then((data) => {
+      if (isMounted) {
+        peaksCache.set(source, data);
+        setPeaks(data);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [source]);
+
+  const displayPeaks = useMemo(() => {
+    if (peaks.length === barsCount) return peaks;
+    return getFallbackPeaks(source || name, barsCount);
+  }, [peaks, source, name]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      pauseAllOtherAudios(audio);
+      audio.play().catch((err) => {
+        console.error("Audio playback failed:", err);
+      });
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setCurrentTime(audio.currentTime);
+  };
+
+  const handleLoadedMetadata = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setDuration(audio.duration || parsedDuration);
+  };
+
+  const handleEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+  };
+
+  const handlePlay = () => {
+    setIsPlaying(true);
+  };
+
+  const handlePause = () => {
+    setIsPlaying(false);
+  };
+
+  const handleSeek = (ratio: number) => {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const newTime = ratio * duration;
+    setCurrentTime(newTime);
+    audio.currentTime = newTime;
+  };
+
+  const handleWaveformClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const rect = container.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+    handleSeek(ratio);
+  };
+
+  const handleWaveformTouch = (e: React.TouchEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const rect = container.getBoundingClientRect();
+    const touch = e.touches[0];
+    if (!touch) return;
+    const clickX = touch.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+    handleSeek(ratio);
+  };
+
+  const formatTime = (time: number) => {
+    if (isNaN(time) || !isFinite(time)) return "0:00";
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  const progressRatio = duration > 0 ? currentTime / duration : 0;
+  const activeBarsCount = Math.floor(progressRatio * barsCount);
+  const displayTime = isPlaying || currentTime > 0 ? currentTime : duration;
+
+  return (
+    <div className={`relative flex items-center gap-3 p-3 pl-4 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.12)] border select-none w-full max-w-[280px] sm:max-w-[320px] min-w-[240px] ${
+      message.mine 
+        ? "bg-[#dff8ef] border-[#00a884]/15 rounded-bl-2xl rounded-br-none" 
+        : "bg-white border-[#e5e9f0] rounded-2xl rounded-bl-none ml-2"
+    }`}>
+      {/* SVG Tail */}
+      <svg
+        className={`absolute bottom-0 left-[-7px] h-[13px] w-[8px] fill-current ${
+          message.mine ? "text-[#dff8ef]" : "text-white"
+        }`}
+        viewBox="0 0 8 13"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path d="M8 13V0C6 3 2 7.5 0 13H8Z" />
+      </svg>
+
+      <audio
+        ref={audioRef}
+        src={source}
+        preload="metadata"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={handleEnded}
+        onPlay={handlePlay}
+        onPause={handlePause}
+      />
+
+      {/* Play/Pause Button */}
+      <button
+        aria-label={isPlaying ? "Pause" : "Play"}
+        className="cs-press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#0284c7] hover:bg-[#0369a1] text-white transition-colors shadow-sm"
+        onClick={togglePlay}
+        type="button"
+      >
+        {isPlaying ? (
+          <Pause className="h-5 w-5 fill-white text-white" />
+        ) : (
+          <Play className="h-5 w-5 fill-white text-white translate-x-[1.5px]" />
+        )}
+      </button>
+
+      {/* Waveform & Info */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div
+          onClick={handleWaveformClick}
+          onTouchStart={handleWaveformTouch}
+          onTouchMove={handleWaveformTouch}
+          className="h-8 flex items-center gap-[2.5px] cursor-pointer w-full select-none"
+        >
+          {displayPeaks.map((peak, idx) => {
+            const isPlayed = idx < activeBarsCount;
+            return (
+              <div
+                key={idx}
+                className="flex-1 rounded-full transition-colors duration-100"
+                style={{
+                  height: `${peak * 100}%`,
+                  maxHeight: "100%",
+                  backgroundColor: isPlayed ? "#0284c7" : "#cbd5e1",
+                  minHeight: "4px"
+                }}
+              />
+            );
+          })}
+        </div>
+
+        {/* Metadata row */}
+        <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-medium text-[#64748b] mt-1 select-none">
+          <span>{formatTime(displayTime)}</span>
+          <div className="flex items-center gap-1">
+            <span>{formatMessageTime(message)}</span>
+            {message.mine && (
+              <>
+                <span>{message.readAt ? "Seen" : "Sent"}</span>
+                {message.readAt ? (
+                  <CheckCheck size={14} className="text-[#00a884]" />
+                ) : selectedChat?.online ? (
+                  <CheckCheck size={14} className="text-[#94a3b8]" />
+                ) : (
+                  <Check size={14} className="text-[#94a3b8]" />
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
