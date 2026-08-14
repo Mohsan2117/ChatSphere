@@ -747,8 +747,12 @@ export function useAudioCall(
 
     if (eventType === "call_offer") {
       const msgCallType = payload.callType || "audio";
+      const isCurrentlyActive = callStateRef.current === "outgoing" || 
+                                callStateRef.current === "incoming" || 
+                                callStateRef.current === "connecting" || 
+                                callStateRef.current === "connected";
 
-      if (callStateRef.current === "idle") {
+      if (!isCurrentlyActive) {
         // Processing incoming call/invitation
         cleanupCall();
         const callerChat = directoryChats.find((c) => c.id === senderId) || {
@@ -781,49 +785,63 @@ export function useAudioCall(
         setCallDuration(0);
         iceCandidatesBuffersRef.current.set(senderId, []);
       } else {
-        // Offer received while already active. Create peer connection and answer.
-        if (payload.sdp) {
-          const pc = peerConnectionsRef.current.get(senderId) || createPeerConnection(senderId, callTypeRef.current);
-          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        // Offer received while already active. Check if it matches our current call session ID.
+        if (msgCallId === callIdRef.current) {
+          if (payload.sdp) {
+            const pc = peerConnectionsRef.current.get(senderId) || createPeerConnection(senderId, callTypeRef.current);
+            await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
 
-          const buffer = iceCandidatesBuffersRef.current.get(senderId) || [];
-          while (buffer.length > 0) {
-            const cand = buffer.shift();
-            if (cand) {
-              await pc.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
-                console.error("Error applying buffered candidate:", e)
+            const buffer = iceCandidatesBuffersRef.current.get(senderId) || [];
+            while (buffer.length > 0) {
+              const cand = buffer.shift();
+              if (cand) {
+                await pc.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
+                  console.error("Error applying buffered candidate:", e)
+                );
+              }
+            }
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            if (socketRef.current?.readyState === WebSocket.OPEN) {
+              socketRef.current.send(
+                JSON.stringify({
+                  type: "call_answer",
+                  targetUserIds: [senderId],
+                  payload: { callId: callIdRef.current, sdp: answer }
+                })
               );
             }
+
+            // Add peer to participants if missing
+            const peerChat = directoryChats.find((chat) => chat.id === senderId) || {
+              id: senderId,
+              name: nameFromEmail(senderId),
+              avatar: chatInitials(nameFromEmail(senderId)),
+              color: "bg-[#0f766e]",
+              preview: senderId,
+              time: "",
+              unread: 0,
+              online: true
+            };
+            setParticipants((prev) => {
+              if (prev.some((p) => p.id === senderId)) return prev;
+              return [...prev, peerChat];
+            });
           }
-
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-
+        } else {
+          // Reject offer with busy status if we are already in another active call
+          console.log(`Received call_offer for different session (${msgCallId}) while busy in (${callIdRef.current}). Rejecting.`);
           if (socketRef.current?.readyState === WebSocket.OPEN) {
             socketRef.current.send(
               JSON.stringify({
-                type: "call_answer",
+                type: "call_reject",
                 targetUserIds: [senderId],
-                payload: { callId: callIdRef.current, sdp: answer }
+                payload: { callId: msgCallId, reason: "busy" }
               })
             );
           }
-
-          // Add peer to participants if missing
-          const peerChat = directoryChats.find((chat) => chat.id === senderId) || {
-            id: senderId,
-            name: nameFromEmail(senderId),
-            avatar: chatInitials(nameFromEmail(senderId)),
-            color: "bg-[#0f766e]",
-            preview: senderId,
-            time: "",
-            unread: 0,
-            online: true
-          };
-          setParticipants((prev) => {
-            if (prev.some((p) => p.id === senderId)) return prev;
-            return [...prev, peerChat];
-          });
         }
       }
     } else if (eventType === "call_answer") {
@@ -870,6 +888,8 @@ export function useAudioCall(
       if (callIdRef.current === msgCallId) {
         if (payload.reason === "blocked") {
           alert("Cannot add user. One or more participants have blocked this user or are blocked by them.");
+        } else if (payload.reason === "busy") {
+          alert("User is busy on another call.");
         }
         if (callStateRef.current === "outgoing") {
           cleanupCall();
@@ -954,6 +974,7 @@ export function useAudioCall(
 
   return {
     callState,
+    callId,
     remoteUser,
     isMuted,
     callDuration,
@@ -995,6 +1016,30 @@ function chatInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return `${parts[0]?.[0] ?? "U"}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
+
+interface CallingVideoProps extends React.VideoHTMLAttributes<HTMLVideoElement> {
+  stream: MediaStream | null;
+}
+
+const CallingVideo = React.memo(({ stream, ...props }: CallingVideoProps) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+      if (stream) {
+        video.play().catch((e) => console.warn("Video play error:", e));
+      }
+    }
+  }, [stream]);
+
+  return <video ref={videoRef} autoPlay playsInline {...props} />;
+});
+
+CallingVideo.displayName = "CallingVideo";
 
 interface AudioCallOverlayProps {
   callState: CallState;
@@ -1052,24 +1097,7 @@ export function AudioCallOverlay({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.play().catch((e) => console.warn("Local video play warning:", e));
-    }
-  }, [localStream]);
-
-  // Bind first remote stream to remoteVideoRef for 1-to-1 PIP layout backwards compatibility
   const firstRemoteStream = participants[0] ? remoteStreams.get(participants[0].id) || null : null;
-  useEffect(() => {
-    if (remoteVideoRef.current && firstRemoteStream) {
-      remoteVideoRef.current.srcObject = firstRemoteStream;
-      remoteVideoRef.current.play().catch((e) => console.warn("Remote video play warning:", e));
-    }
-  }, [firstRemoteStream]);
 
   useEffect(() => {
     if (callState === "idle" || callState === "rejected" || callState === "ended") {
@@ -1205,12 +1233,8 @@ export function AudioCallOverlay({
       <div className="fixed bottom-20 right-4 z-[90] rounded-2xl bg-slate-900/95 border border-white/10 p-3 shadow-2xl flex items-center gap-3 text-white max-w-xs transition-all duration-300 w-72">
         <div className="relative h-12 w-12 rounded-xl overflow-hidden bg-slate-800 flex-shrink-0">
           {callType === "video" && isRemoteCameraOn && firstRemoteStream ? (
-            <video
-              ref={(el) => {
-                if (el) el.srcObject = firstRemoteStream;
-              }}
-              autoPlay
-              playsInline
+            <CallingVideo
+              stream={firstRemoteStream}
               className="h-full w-full object-cover"
             />
           ) : (
@@ -1275,10 +1299,8 @@ export function AudioCallOverlay({
                   : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
               }
             >
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
+              <CallingVideo
+                stream={firstRemoteStream}
                 className={`h-full w-full object-cover transition-opacity duration-300 ${
                   isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
                 }`}
@@ -1317,10 +1339,8 @@ export function AudioCallOverlay({
                   : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
               }
             >
-              <video
-                ref={localVideoRef}
-                autoPlay
-                playsInline
+              <CallingVideo
+                stream={localStream}
                 muted
                 className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
                   isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -1339,15 +1359,8 @@ export function AudioCallOverlay({
             <div className="grid grid-cols-2 gap-3 w-full max-w-2xl aspect-video md:aspect-auto md:max-h-[60vh] h-full">
               {/* Local Participant Tile */}
               <div className="relative rounded-2xl overflow-hidden bg-slate-900 border border-white/10 flex items-center justify-center aspect-square md:aspect-auto h-full">
-                <video
-                  ref={(el) => {
-                    if (el && localStream) {
-                      el.srcObject = localStream;
-                      el.play().catch((e) => console.warn(e));
-                    }
-                  }}
-                  autoPlay
-                  playsInline
+                <CallingVideo
+                  stream={localStream}
                   muted
                   className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
                     isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -1376,15 +1389,8 @@ export function AudioCallOverlay({
                 return (
                   <div key={p.id} className="relative rounded-2xl overflow-hidden bg-slate-900 border border-white/10 flex items-center justify-center aspect-square md:aspect-auto h-full">
                     {stream && (
-                      <video
-                        ref={(el) => {
-                          if (el) {
-                            el.srcObject = stream;
-                            el.play().catch((e) => console.warn(e));
-                          }
-                        }}
-                        autoPlay
-                        playsInline
+                      <CallingVideo
+                        stream={stream}
                         className={`h-full w-full object-cover transition-opacity duration-300 ${
                           pCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
                         }`}

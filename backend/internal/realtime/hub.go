@@ -312,3 +312,41 @@ func (h *Hub) RemoveCall(callID string) {
 		delete(h.calls, callID)
 	}
 }
+
+func (h *Hub) IsUserInAnyCall(userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.calls == nil {
+		return false
+	}
+	for _, session := range h.calls {
+		if _, ok := session.Participants[userID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Hub) InviteToCall(callID, userID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.calls == nil {
+		return false
+	}
+	session, ok := h.calls[callID]
+	if !ok {
+		return false
+	}
+	if len(session.Participants) >= 4 {
+		return false
+	}
+	if session.Participants == nil {
+		session.Participants = make(map[string]bool)
+	}
+	if _, ok := session.Participants[userID]; !ok {
+		session.Participants[userID] = false
+		h.calls[callID] = session
+	}
+	return true
+}
+

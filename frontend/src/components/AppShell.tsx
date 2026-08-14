@@ -140,6 +140,7 @@ export function AppShell() {
 
   const {
     callState,
+    callId,
     remoteUser,
     isMuted,
     callDuration,
@@ -176,6 +177,11 @@ export function AppShell() {
   useEffect(() => {
     callStateRef.current = callState;
   }, [callState]);
+
+  const callIdRef = useRef(callId);
+  useEffect(() => {
+    callIdRef.current = callId;
+  }, [callId]);
 
   const callReconnectTimeoutRef = useRef<any>(null);
   const reconnectCountRef = useRef(0);
@@ -482,6 +488,15 @@ export function AppShell() {
         console.log("WebSocket reconnected successfully during call. Clearing grace period.");
         window.clearTimeout(callReconnectTimeoutRef.current);
         callReconnectTimeoutRef.current = null;
+      }
+      if (callStateRef.current !== "idle" && callStateRef.current !== "ended" && callStateRef.current !== "rejected" && callIdRef.current) {
+        console.log(`Re-sending call_join for active call after reconnect: ${callIdRef.current}`);
+        socket.send(
+          JSON.stringify({
+            type: "call_join",
+            payload: { callId: callIdRef.current }
+          })
+        );
       }
     };
 

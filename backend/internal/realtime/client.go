@@ -104,6 +104,19 @@ func (c *Client) readPump() {
 						}
 					}
 
+					if c.hub.IsUserInAnyCall(recipientID) {
+						c.hub.Broadcast(Event{
+							Type:          "call_reject",
+							UserID:        recipientID,
+							TargetUserIDs: []string{c.userID},
+							Payload: mustJSON(map[string]string{
+								"callId": callID,
+								"reason": "busy",
+							}),
+						})
+						continue
+					}
+
 					c.hub.AddCall(callID, c.userID, recipientID)
 					c.hub.Broadcast(event)
 				} else {
@@ -148,6 +161,19 @@ func (c *Client) readPump() {
 					continue // Already in call
 				}
 
+				if c.hub.IsUserInAnyCall(recipientID) {
+					c.hub.Broadcast(Event{
+						Type:          "call_reject",
+						UserID:        recipientID,
+						TargetUserIDs: []string{c.userID},
+						Payload: mustJSON(map[string]string{
+							"callId": callID,
+							"reason": "busy",
+						}),
+					})
+					continue
+				}
+
 				// Capacity Check
 				if len(session.Participants) >= 4 {
 					c.hub.Broadcast(Event{
@@ -190,13 +216,28 @@ func (c *Client) readPump() {
 					}
 				}
 
+				// Add the invited user with active = false to authorize their join
+				c.hub.InviteToCall(callID, recipientID)
+
 				// Forward invitation to the recipient
 				c.hub.Broadcast(event)
 
 			} else if event.Type == "call_join" {
 				session, exists := c.hub.GetCall(callID)
 				if !exists {
+					// Call session no longer exists. Notify the client to clean up.
+					c.hub.Broadcast(Event{
+						Type:          "call_end",
+						UserID:        c.userID,
+						TargetUserIDs: []string{c.userID},
+						Payload:       mustJSON(map[string]string{"callId": callID}),
+					})
 					continue
+				}
+
+				// Verify that the user is authorized to join (either host, recipient, or invited)
+				if _, ok := session.Participants[c.userID]; !ok {
+					continue // Unauthorized join attempt!
 				}
 
 				// Capacity Check
