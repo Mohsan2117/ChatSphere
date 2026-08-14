@@ -67,9 +67,10 @@ func (c *Client) readPump() {
 
 		// Process call signaling events
 		switch event.Type {
-		case "call_offer", "call_answer", "call_ice_candidate", "call_reject", "call_end", "call_camera_toggle":
+		case "call_offer", "call_answer", "call_ice_candidate", "call_reject", "call_end", "call_camera_toggle", "call_join":
 			var callPayload struct {
-				CallID string `json:"callId"`
+				CallID   string `json:"callId"`
+				IsInvite bool   `json:"isInvite"`
 			}
 			if err := json.Unmarshal(event.Payload, &callPayload); err != nil || callPayload.CallID == "" {
 				continue
@@ -79,55 +80,220 @@ func (c *Client) readPump() {
 			// Force sender ID to the authenticated user ID
 			event.UserID = c.userID
 
-			if event.Type == "call_offer" {
+			if event.Type == "call_offer" && !callPayload.IsInvite {
+				// This can be the initial call setup, or WebRTC connection offer between peers.
+				session, exists := c.hub.GetCall(callID)
+				if !exists {
+					// Initial call creation (1-to-1)
+					if len(event.TargetUserIDs) != 1 {
+						continue
+					}
+					recipientID := event.TargetUserIDs[0]
+
+					if recipientID == c.userID {
+						continue // Can't call yourself
+					}
+
+					if c.store != nil {
+						_, err := c.store.UserByID(recipientID)
+						if err != nil {
+							continue // Recipient must exist
+						}
+						if c.store.IsBlockedBetween(c.userID, recipientID) {
+							continue // Cannot call if blocked
+						}
+					}
+
+					c.hub.AddCall(callID, c.userID)
+					c.hub.Broadcast(event)
+				} else {
+					// WebRTC connection offer between active participants in an ongoing call.
+					if _, ok := session.Participants[c.userID]; !ok {
+						continue
+					}
+					if len(event.TargetUserIDs) != 1 {
+						continue
+					}
+					targetID := event.TargetUserIDs[0]
+					if targetID == c.userID {
+						continue
+					}
+					if _, ok := session.Participants[targetID]; !ok {
+						continue
+					}
+					c.hub.Broadcast(event)
+				}
+
+			} else if event.Type == "call_offer" && callPayload.IsInvite {
+				// Invitation to an existing call session.
+				session, exists := c.hub.GetCall(callID)
+				if !exists {
+					continue
+				}
+
+				// Validate sender is a participant
+				if _, ok := session.Participants[c.userID]; !ok {
+					continue
+				}
+
 				if len(event.TargetUserIDs) != 1 {
 					continue
 				}
 				recipientID := event.TargetUserIDs[0]
-
 				if recipientID == c.userID {
-					continue // Can't call yourself
+					continue
 				}
 
+				if _, active := session.Participants[recipientID]; active {
+					continue // Already in call
+				}
+
+				// Capacity Check
+				if len(session.Participants) >= 4 {
+					c.hub.Broadcast(Event{
+						Type:          "call_full",
+						UserID:        c.userID,
+						TargetUserIDs: []string{c.userID},
+						Payload: mustJSON(map[string]string{
+							"callId": callID,
+							"userId": recipientID,
+						}),
+					})
+					continue
+				}
+
+				// Block Checks
 				if c.store != nil {
 					_, err := c.store.UserByID(recipientID)
 					if err != nil {
 						continue // Recipient must exist
 					}
-					if c.store.IsBlockedBetween(c.userID, recipientID) {
-						continue // Cannot call if blocked
+					blocked := false
+					for activePeer := range session.Participants {
+						if c.store.IsBlockedBetween(activePeer, recipientID) {
+							blocked = true
+							break
+						}
+					}
+					if blocked {
+						// Send reject message to the sender (inviter) to notify them
+						c.hub.Broadcast(Event{
+							Type:          "call_reject",
+							UserID:        recipientID,
+							TargetUserIDs: []string{c.userID},
+							Payload: mustJSON(map[string]string{
+								"callId": callID,
+								"reason": "blocked",
+							}),
+						})
+						continue
 					}
 				}
 
-				// Prevent hijacking / duplicate offer if the callID is already in use
-				if _, exists := c.hub.GetCall(callID); exists {
-					continue
-				}
-
-				c.hub.AddCall(callID, c.userID, recipientID)
+				// Forward invitation to the recipient
 				c.hub.Broadcast(event)
 
-			} else {
-				session, ok := c.hub.GetCall(callID)
-				if !ok {
+			} else if event.Type == "call_join" {
+				session, exists := c.hub.GetCall(callID)
+				if !exists {
 					continue
 				}
 
-				if c.userID != session.CallerID && c.userID != session.ReceiverID {
-					continue // Not a participant
+				// Capacity Check
+				if len(session.Participants) >= 4 {
+					c.hub.Broadcast(Event{
+						Type:          "call_full",
+						UserID:        c.userID,
+						TargetUserIDs: []string{c.userID},
+						Payload: mustJSON(map[string]string{
+							"callId": callID,
+							"userId": c.userID,
+						}),
+					})
+					continue
 				}
 
-				var otherParticipant string
-				if c.userID == session.CallerID {
-					otherParticipant = session.ReceiverID
-				} else {
-					otherParticipant = session.CallerID
+				// Block Checks against all active participants
+				if c.store != nil {
+					blocked := false
+					for activePeer := range session.Participants {
+						if c.store.IsBlockedBetween(activePeer, c.userID) {
+							blocked = true
+							break
+						}
+					}
+					if blocked {
+						continue
+					}
 				}
 
-				event.TargetUserIDs = []string{otherParticipant}
+				// Add to participants list
+				if c.hub.JoinCall(callID, c.userID) {
+					// Broadcast join notification to other participants
+					var targets []string
+					for peerID := range session.Participants {
+						if peerID != c.userID {
+							targets = append(targets, peerID)
+						}
+					}
+					c.hub.Broadcast(Event{
+						Type:          "call_participant_joined",
+						UserID:        c.userID,
+						TargetUserIDs: targets,
+						Payload: mustJSON(map[string]string{
+							"callId": callID,
+							"userId": c.userID,
+						}),
+					})
+				}
 
-				if event.Type == "call_reject" || event.Type == "call_end" {
-					c.hub.RemoveCall(callID)
+			} else if event.Type == "call_reject" {
+				// Rejection of an invite/call
+				session, exists := c.hub.GetCall(callID)
+				if !exists {
+					continue
+				}
+
+				if len(event.TargetUserIDs) != 1 {
+					continue
+				}
+				targetID := event.TargetUserIDs[0]
+				if _, ok := session.Participants[targetID]; !ok {
+					continue
+				}
+
+				// Forward reject to target
+				c.hub.Broadcast(event)
+
+			} else if event.Type == "call_end" {
+				// User hangs up/leaves call
+				events, _ := c.hub.LeaveCall(callID, c.userID)
+				for _, ev := range events {
+					c.hub.Broadcast(ev)
+				}
+
+			} else {
+				// Other signaling events: call_answer, call_ice_candidate, call_camera_toggle
+				session, exists := c.hub.GetCall(callID)
+				if !exists {
+					continue
+				}
+
+				// Verify sender is in call
+				if _, ok := session.Participants[c.userID]; !ok {
+					continue
+				}
+
+				// Verify target is in call and is not sender
+				if len(event.TargetUserIDs) != 1 {
+					continue
+				}
+				targetID := event.TargetUserIDs[0]
+				if targetID == c.userID {
+					continue
+				}
+				if _, ok := session.Participants[targetID]; !ok {
+					continue
 				}
 
 				c.hub.Broadcast(event)

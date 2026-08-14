@@ -14,8 +14,9 @@ type Event struct {
 }
 
 type CallSession struct {
-	CallerID   string
-	ReceiverID string
+	CallID       string
+	HostID       string
+	Participants map[string]bool // userID -> active status
 }
 
 type Hub struct {
@@ -87,11 +88,11 @@ func (h *Hub) Run() {
 				h.mu.Lock()
 				h.online[client.userID]--
 				onlineCount := h.online[client.userID]
-				var removedCalls []removedCall
+				var events []Event
 				if onlineCount <= 0 {
 					delete(h.online, client.userID)
 				}
-				removedCalls = h.removeCallsForUserLocked(client.userID)
+				events = h.removeCallsForUserLocked(client.userID)
 				h.mu.Unlock()
 				if onlineCount <= 0 {
 					h.dispatch(Event{
@@ -103,19 +104,8 @@ func (h *Hub) Run() {
 						}),
 					})
 				}
-				for _, cInfo := range removedCalls {
-					var target string
-					if cInfo.Session.CallerID == client.userID {
-						target = cInfo.Session.ReceiverID
-					} else {
-						target = cInfo.Session.CallerID
-					}
-					h.dispatch(Event{
-						Type:          "call_end",
-						UserID:        client.userID,
-						TargetUserIDs: []string{target},
-						Payload:       mustJSON(map[string]string{"callId": cInfo.CallID}),
-					})
+				for _, ev := range events {
+					h.dispatch(ev)
 				}
 			}
 		case event := <-h.broadcast:
@@ -155,35 +145,146 @@ func eventTargetsClient(targets []string, userID string) bool {
 	return false
 }
 
-type removedCall struct {
-	CallID  string
-	Session CallSession
-}
-
-func (h *Hub) removeCallsForUserLocked(userID string) []removedCall {
+func (h *Hub) removeCallsForUserLocked(userID string) []Event {
 	if h.calls == nil {
 		return nil
 	}
-	var removed []removedCall
+	var events []Event
 	for callID, session := range h.calls {
-		if session.CallerID == userID || session.ReceiverID == userID {
-			removed = append(removed, removedCall{CallID: callID, Session: session})
-			delete(h.calls, callID)
+		if _, ok := session.Participants[userID]; ok {
+			delete(session.Participants, userID)
+
+			if session.HostID == userID {
+				for peerID := range session.Participants {
+					session.HostID = peerID
+					break
+				}
+			}
+
+			if len(session.Participants) < 2 {
+				var lastParticipant string
+				for peerID := range session.Participants {
+					lastParticipant = peerID
+				}
+				delete(h.calls, callID)
+
+				if lastParticipant != "" {
+					events = append(events, Event{
+						Type:          "call_end",
+						UserID:        userID,
+						TargetUserIDs: []string{lastParticipant},
+						Payload:       mustJSON(map[string]string{"callId": callID}),
+					})
+				}
+			} else {
+				var remaining []string
+				for peerID := range session.Participants {
+					remaining = append(remaining, peerID)
+				}
+				events = append(events, Event{
+					Type:          "call_participant_left",
+					UserID:        userID,
+					TargetUserIDs: remaining,
+					Payload: mustJSON(map[string]string{
+						"callId": callID,
+						"userId": userID,
+					}),
+				})
+			}
 		}
 	}
-	return removed
+	return events
 }
 
-func (h *Hub) AddCall(callID, callerID, receiverID string) {
+func (h *Hub) AddCall(callID, hostID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.calls == nil {
 		h.calls = make(map[string]CallSession)
 	}
 	h.calls[callID] = CallSession{
-		CallerID:   callerID,
-		ReceiverID: receiverID,
+		CallID: callID,
+		HostID: hostID,
+		Participants: map[string]bool{
+			hostID: true,
+		},
 	}
+}
+
+func (h *Hub) JoinCall(callID, userID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session, ok := h.calls[callID]
+	if !ok {
+		return false
+	}
+	if len(session.Participants) >= 4 {
+		return false
+	}
+	session.Participants[userID] = true
+	h.calls[callID] = session
+	return true
+}
+
+func (h *Hub) LeaveCall(callID, userID string) ([]Event, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session, ok := h.calls[callID]
+	if !ok {
+		return nil, false
+	}
+
+	if _, ok := session.Participants[userID]; !ok {
+		return nil, false
+	}
+
+	delete(session.Participants, userID)
+
+	if session.HostID == userID {
+		for peerID := range session.Participants {
+			session.HostID = peerID
+			break
+		}
+	}
+
+	if len(session.Participants) < 2 {
+		var lastParticipant string
+		for peerID := range session.Participants {
+			lastParticipant = peerID
+		}
+		delete(h.calls, callID)
+
+		if lastParticipant != "" {
+			return []Event{
+				{
+					Type:          "call_end",
+					UserID:        userID,
+					TargetUserIDs: []string{lastParticipant},
+					Payload:       mustJSON(map[string]string{"callId": callID}),
+				},
+			}, true
+		}
+		return nil, true
+	}
+
+	h.calls[callID] = session
+
+	var remaining []string
+	for peerID := range session.Participants {
+		remaining = append(remaining, peerID)
+	}
+
+	return []Event{
+		{
+			Type:          "call_participant_left",
+			UserID:        userID,
+			TargetUserIDs: remaining,
+			Payload: mustJSON(map[string]string{
+				"callId": callID,
+				"userId": userID,
+			}),
+		},
+	}, false
 }
 
 func (h *Hub) GetCall(callID string) (CallSession, bool) {

@@ -30,25 +30,29 @@ export function useAudioCall(
   const [isMuted, setIsMuted] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
 
-  // Phase 2 video states
+  // Group and Video Call states
   const [callType, setCallType] = useState<"audio" | "video">("audio");
   const [isCameraOn, setIsCameraOn] = useState(true);
-  const [isRemoteCameraOn, setIsRemoteCameraOn] = useState(true);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [isInvite, setIsInvite] = useState(false);
 
+  // Group Multi-Peer structures
+  const [participants, setParticipants] = useState<ChatSeed[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [participantsCameraOn, setParticipantsCameraOn] = useState<Map<string, boolean>>(new Map());
+  const [participantsMuted, setParticipantsMuted] = useState<Map<string, boolean>>(new Map());
+
+  // Refs for WebRTC resources
   const localStreamRef = useRef<MediaStream | null>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const iceCandidatesBufferRef = useRef<RTCIceCandidateInit[]>([]);
-  const durationIntervalRef = useRef<any>(null);
-  const remoteOfferRef = useRef<any>(null);
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const remoteAudiosRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const iceCandidatesBuffersRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const remoteOffersRef = useRef<Map<string, any>>(new Map());
+  const peerDisconnectTimeoutsRef = useRef<Map<string, any>>(new Map());
 
-  // Connection timeout for outgoing/incoming/connecting states (30s)
+  const durationIntervalRef = useRef<any>(null);
   const connectionTimeoutRef = useRef<any>(null);
-  // Recovery timeout for WebRTC temporary disconnects (10s)
-  const disconnectTimeoutRef = useRef<any>(null);
 
   // Safe references to prevent stale closures in event handlers
   const callStateRef = useRef<CallState>("idle");
@@ -82,7 +86,6 @@ export function useAudioCall(
     facingModeRef.current = facingMode;
   }, [facingMode]);
 
-  // Stable reference to endCall to be called inside setTimeout callbacks safely
   const endCallRef = useRef<() => void>();
 
   // Monitor callState to handle transitions to idle after reject or end
@@ -94,13 +97,15 @@ export function useAudioCall(
         setCallId(null);
         setIsMuted(false);
         setCallDuration(0);
-        setLocalStream(null);
-        setRemoteStream(null);
         setIsCameraOn(true);
         isCameraOnRef.current = true;
-        setIsRemoteCameraOn(true);
         setFacingMode("user");
         facingModeRef.current = "user";
+        setIsInvite(false);
+        setParticipants([]);
+        setRemoteStreams(new Map());
+        setParticipantsCameraOn(new Map());
+        setParticipantsMuted(new Map());
       }, 2500);
       return () => clearTimeout(timer);
     }
@@ -126,36 +131,171 @@ export function useAudioCall(
     };
   }, [callState]);
 
-  // Helper to cleanup all WebRTC elements and timers
+  // Cleanup helper
   const cleanupCall = () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.onicecandidate = null;
-      peerConnectionRef.current.ontrack = null;
-      peerConnectionRef.current.onconnectionstatechange = null;
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.pause();
-      remoteAudioRef.current.srcObject = null;
-      remoteAudioRef.current = null;
-    }
+
+    // Close all WebRTC peer connections
+    peerConnectionsRef.current.forEach((pc) => {
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.onconnectionstatechange = null;
+      pc.close();
+    });
+    peerConnectionsRef.current.clear();
+
+    // Release all remote audio outputs
+    remoteAudiosRef.current.forEach((audio) => {
+      audio.pause();
+      audio.srcObject = null;
+    });
+    remoteAudiosRef.current.clear();
+
+    // Clear connection timeouts
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
-    if (disconnectTimeoutRef.current) {
-      clearTimeout(disconnectTimeoutRef.current);
-      disconnectTimeoutRef.current = null;
-    }
+
+    // Clear disconnect recovery timeouts
+    peerDisconnectTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+    peerDisconnectTimeoutsRef.current.clear();
+
     setLocalStream(null);
-    setRemoteStream(null);
-    iceCandidatesBufferRef.current = [];
-    remoteOfferRef.current = null;
+    setRemoteStreams(new Map());
+    setParticipants([]);
+    setParticipantsCameraOn(new Map());
+    setParticipantsMuted(new Map());
+    iceCandidatesBuffersRef.current.clear();
+    remoteOffersRef.current.clear();
+    setIsInvite(false);
+  };
+
+  const removePeer = (targetUserId: string) => {
+    const pc = peerConnectionsRef.current.get(targetUserId);
+    if (pc) {
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.onconnectionstatechange = null;
+      pc.close();
+      peerConnectionsRef.current.delete(targetUserId);
+    }
+
+    const audioEl = remoteAudiosRef.current.get(targetUserId);
+    if (audioEl) {
+      audioEl.pause();
+      audioEl.srcObject = null;
+      remoteAudiosRef.current.delete(targetUserId);
+    }
+
+    const timeout = peerDisconnectTimeoutsRef.current.get(targetUserId);
+    if (timeout) {
+      clearTimeout(timeout);
+      peerDisconnectTimeoutsRef.current.delete(targetUserId);
+    }
+
+    setRemoteStreams((prev) => {
+      const next = new Map(prev);
+      next.delete(targetUserId);
+      return next;
+    });
+
+    setParticipants((prev) => prev.filter((p) => p.id !== targetUserId));
+    setParticipantsCameraOn((prev) => {
+      const next = new Map(prev);
+      next.delete(targetUserId);
+      return next;
+    });
+    setParticipantsMuted((prev) => {
+      const next = new Map(prev);
+      next.delete(targetUserId);
+      return next;
+    });
+
+    // If no more participants remain, end the call
+    if (peerConnectionsRef.current.size === 0) {
+      cleanupCall();
+      setCallState("ended");
+    }
+  };
+
+  const createPeerConnection = (targetUserId: string, type: "audio" | "video") => {
+    if (peerConnectionsRef.current.has(targetUserId)) {
+      const oldPc = peerConnectionsRef.current.get(targetUserId);
+      oldPc?.close();
+    }
+
+    const pc = new RTCPeerConnection(rtcConfig);
+    peerConnectionsRef.current.set(targetUserId, pc);
+
+    // Add local tracks to connection
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN && callIdRef.current) {
+        socketRef.current.send(
+          JSON.stringify({
+            type: "call_ice_candidate",
+            targetUserIds: [targetUserId],
+            payload: { callId: callIdRef.current, candidate: event.candidate }
+          })
+        );
+      }
+    };
+
+    pc.ontrack = (event) => {
+      const remoteStreamObj = event.streams[0];
+      if (remoteStreamObj) {
+        setRemoteStreams((prev) => {
+          const next = new Map(prev);
+          next.set(targetUserId, remoteStreamObj);
+          return next;
+        });
+
+        if (type === "audio") {
+          let audioEl = remoteAudiosRef.current.get(targetUserId);
+          if (!audioEl) {
+            audioEl = new Audio();
+            remoteAudiosRef.current.set(targetUserId, audioEl);
+          }
+          audioEl.srcObject = remoteStreamObj;
+          audioEl.play().catch((e) => console.error(`Play failed for user ${targetUserId}:`, e));
+        }
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      console.log(`WebRTC connection state change for user ${targetUserId}:`, state);
+
+      if (state === "connected") {
+        const timeout = peerDisconnectTimeoutsRef.current.get(targetUserId);
+        if (timeout) {
+          clearTimeout(timeout);
+          peerDisconnectTimeoutsRef.current.delete(targetUserId);
+        }
+        setCallState("connected");
+      } else if (state === "failed" || state === "closed") {
+        removePeer(targetUserId);
+      } else if (state === "disconnected") {
+        if (!peerDisconnectTimeoutsRef.current.has(targetUserId)) {
+          const timeout = setTimeout(() => {
+            console.warn(`WebRTC connection failed to recover for user ${targetUserId}`);
+            removePeer(targetUserId);
+          }, 10000);
+          peerDisconnectTimeoutsRef.current.set(targetUserId, timeout);
+        }
+      }
+    };
+
+    return pc;
   };
 
   const startCall = async (targetUser: ChatSeed, type: "audio" | "video" = "audio") => {
@@ -165,12 +305,12 @@ export function useAudioCall(
     const newCallId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     setCallId(newCallId);
     setRemoteUser(targetUser);
+    setParticipants([targetUser]);
     setCallType(type);
     setCallState("outgoing");
     setIsMuted(false);
     setIsCameraOn(true);
     isCameraOnRef.current = true;
-    setIsRemoteCameraOn(true);
     setFacingMode("user");
     facingModeRef.current = "user";
     setCallDuration(0);
@@ -184,63 +324,8 @@ export function useAudioCall(
       localStreamRef.current = stream;
       setLocalStream(stream);
 
-      const pc = new RTCPeerConnection(rtcConfig);
-      peerConnectionRef.current = pc;
-
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(
-            JSON.stringify({
-              type: "call_ice_candidate",
-              targetUserIds: [targetUser.id],
-              payload: { callId: newCallId, candidate: event.candidate }
-            })
-          );
-        }
-      };
-
-      pc.ontrack = (event) => {
-        const remoteStreamObj = event.streams[0];
-        if (remoteStreamObj) {
-          setRemoteStream(remoteStreamObj);
-          // For audio-only calls, play remote audio using dynamic Audio element to preserve existing behavior
-          if (type === "audio") {
-            if (!remoteAudioRef.current) {
-              remoteAudioRef.current = new Audio();
-            }
-            remoteAudioRef.current.srcObject = remoteStreamObj;
-            remoteAudioRef.current.play().catch((e) => console.error("Play failed", e));
-          }
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        console.log("WebRTC connection state change:", state);
-
-        if (state === "connected") {
-          if (disconnectTimeoutRef.current) {
-            clearTimeout(disconnectTimeoutRef.current);
-            disconnectTimeoutRef.current = null;
-          }
-          setCallState("connected");
-        } else if (state === "failed" || state === "closed") {
-          if (disconnectTimeoutRef.current) {
-            clearTimeout(disconnectTimeoutRef.current);
-            disconnectTimeoutRef.current = null;
-          }
-          endCallRef.current?.();
-        } else if (state === "disconnected") {
-          if (!disconnectTimeoutRef.current) {
-            disconnectTimeoutRef.current = setTimeout(() => {
-              console.warn("WebRTC connection failed to recover from disconnected state");
-              endCallRef.current?.();
-            }, 10000); // 10s recovery window
-          }
-        }
-      };
+      // Create initial 1-to-1 WebRTC peer connection
+      const pc = createPeerConnection(targetUser.id, type);
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -265,7 +350,7 @@ export function useAudioCall(
   };
 
   const acceptCall = async () => {
-    if (callState !== "incoming" || !callId || !remoteUser || !remoteOfferRef.current) return;
+    if (callState !== "incoming" || !callId || !remoteUser) return;
 
     setCallState("connecting");
 
@@ -278,89 +363,57 @@ export function useAudioCall(
       localStreamRef.current = stream;
       setLocalStream(stream);
 
-      const pc = new RTCPeerConnection(rtcConfig);
-      peerConnectionRef.current = pc;
+      const offer = remoteOffersRef.current.get(remoteUser.id);
 
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      if (offer) {
+        // Standard 1-to-1 setup (offer received with invite)
+        const pc = createPeerConnection(remoteUser.id, callType);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
+        // Drain buffered candidates
+        const buffer = iceCandidatesBuffersRef.current.get(remoteUser.id) || [];
+        while (buffer.length > 0) {
+          const cand = buffer.shift();
+          if (cand) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
+              console.error("Error applying buffered candidate:", e)
+            );
+          }
+        }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(
             JSON.stringify({
-              type: "call_ice_candidate",
+              type: "call_answer",
               targetUserIds: [remoteUser.id],
-              payload: { callId, candidate: event.candidate }
+              payload: { callId, sdp: answer }
             })
           );
-        }
-      };
-
-      pc.ontrack = (event) => {
-        const remoteStreamObj = event.streams[0];
-        if (remoteStreamObj) {
-          setRemoteStream(remoteStreamObj);
-          // For audio-only calls, play remote audio using dynamic Audio element to preserve existing behavior
-          if (callType === "audio") {
-            if (!remoteAudioRef.current) {
-              remoteAudioRef.current = new Audio();
-            }
-            remoteAudioRef.current.srcObject = remoteStreamObj;
-            remoteAudioRef.current.play().catch((e) => console.error("Play failed", e));
-          }
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        console.log("WebRTC connection state change:", state);
-
-        if (state === "connected") {
-          if (disconnectTimeoutRef.current) {
-            clearTimeout(disconnectTimeoutRef.current);
-            disconnectTimeoutRef.current = null;
-          }
-          setCallState("connected");
-        } else if (state === "failed" || state === "closed") {
-          if (disconnectTimeoutRef.current) {
-            clearTimeout(disconnectTimeoutRef.current);
-            disconnectTimeoutRef.current = null;
-          }
-          endCallRef.current?.();
-        } else if (state === "disconnected") {
-          if (!disconnectTimeoutRef.current) {
-            disconnectTimeoutRef.current = setTimeout(() => {
-              console.warn("WebRTC connection failed to recover from disconnected state");
-              endCallRef.current?.();
-            }, 10000); // 10s recovery window
-          }
-        }
-      };
-
-      await pc.setRemoteDescription(new RTCSessionDescription(remoteOfferRef.current));
-
-      // Apply any buffered candidates
-      while (iceCandidatesBufferRef.current.length > 0) {
-        const cand = iceCandidatesBufferRef.current.shift();
-        if (cand) {
-          await pc.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
-            console.error("Error applying buffered candidate:", e)
+          // Register in backend CallSession
+          socketRef.current.send(
+            JSON.stringify({
+              type: "call_join",
+              payload: { callId }
+            })
           );
+        } else {
+          throw new Error("WebSocket disconnected");
         }
-      }
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(
-          JSON.stringify({
-            type: "call_answer",
-            targetUserIds: [remoteUser.id],
-            payload: { callId, sdp: answer }
-          })
-        );
       } else {
-        throw new Error("WebSocket disconnected");
+        // Group invitation without initial offer (negotiation is peer-driven post-join)
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(
+            JSON.stringify({
+              type: "call_join",
+              payload: { callId }
+            })
+          );
+        } else {
+          throw new Error("WebSocket disconnected");
+        }
       }
     } catch (err) {
       console.error("Failed to accept WebRTC call:", err);
@@ -398,11 +451,10 @@ export function useAudioCall(
   const endCall = () => {
     if (callStateRef.current === "idle") return;
 
-    if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+    if (callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(
         JSON.stringify({
           type: "call_end",
-          targetUserIds: [remoteUserRef.current.id],
           payload: { callId: callIdRef.current }
         })
       );
@@ -415,14 +467,14 @@ export function useAudioCall(
     endCallRef.current = endCall;
   });
 
-  // Monitor callState to handle connection timeout (30 seconds)
+  // Connection timeout handler
   useEffect(() => {
     if (callState === "outgoing" || callState === "incoming" || callState === "connecting") {
       if (!connectionTimeoutRef.current) {
         connectionTimeoutRef.current = setTimeout(() => {
           console.warn("WebRTC calling connection timeout reached");
           endCallRef.current?.();
-        }, 30000); // 30s timeout
+        }, 30000);
       }
     } else {
       if (connectionTimeoutRef.current) {
@@ -441,21 +493,34 @@ export function useAudioCall(
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
+        const nextMuted = !audioTrack.enabled;
+        audioTrack.enabled = nextMuted;
+        setIsMuted(!nextMuted);
+
+        // Propagate mute state to all connections
+        if (callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+          Array.from(peerConnectionsRef.current.keys()).forEach((peerId) => {
+            socketRef.current!.send(
+              JSON.stringify({
+                type: "call_mic_toggle",
+                targetUserIds: [peerId],
+                payload: { callId: callIdRef.current, muted: !nextMuted }
+              })
+            );
+          });
+        }
       }
     }
   };
 
-  // Toggle local camera (disable/enable video track and propagate update to peer)
   const toggleCamera = async () => {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
         const newEnabled = !videoTrack.enabled;
 
-        // If turning camera ON, check if track is valid or reacquire a new track
         if (newEnabled && videoTrack.readyState === "ended") {
+          // Reacquire track if dead
           try {
             const constraints = {
               audio: false,
@@ -471,46 +536,56 @@ export function useAudioCall(
             videoTrack.stop();
             localStreamRef.current.addTrack(newVideoTrack);
 
-            const senders = peerConnectionRef.current?.getSenders();
-            const videoSender = senders?.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
-            if (videoSender) {
-              await videoSender.replaceTrack(newVideoTrack);
-            }
+            // Replace tracks on all connections
+            Array.from(peerConnectionsRef.current.entries()).forEach(([peerId, pc]) => {
+              const senders = pc.getSenders();
+              const videoSender = senders.find((s: RTCRtpSender) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+              if (videoSender) {
+                videoSender.replaceTrack(newVideoTrack).catch((e: any) =>
+                  console.error(`Failed replaceTrack for peer ${peerId}:`, e)
+                );
+              }
+            });
 
             setIsCameraOn(true);
             isCameraOnRef.current = true;
             setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
 
-            if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
-              socketRef.current.send(
-                JSON.stringify({
-                  type: "call_camera_toggle",
-                  targetUserIds: [remoteUserRef.current.id],
-                  payload: { callId: callIdRef.current, enabled: true }
-                })
-              );
+            // Send camera toggled state to peers
+            if (callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+              Array.from(peerConnectionsRef.current.keys()).forEach((peerId) => {
+                socketRef.current!.send(
+                  JSON.stringify({
+                    type: "call_camera_toggle",
+                    targetUserIds: [peerId],
+                    payload: { callId: callIdRef.current, enabled: true }
+                  })
+                );
+              });
             }
           } catch (err) {
             console.error("Failed to re-acquire camera track on toggle ON:", err);
           }
         } else {
-          // Normal track toggling without reacquisition
+          // Standard toggling
           videoTrack.enabled = newEnabled;
           setIsCameraOn(newEnabled);
           isCameraOnRef.current = newEnabled;
 
-          if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
-            socketRef.current.send(
-              JSON.stringify({
-                type: "call_camera_toggle",
-                targetUserIds: [remoteUserRef.current.id],
-                payload: { callId: callIdRef.current, enabled: newEnabled }
-              })
-            );
+          if (callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+            Array.from(peerConnectionsRef.current.keys()).forEach((peerId) => {
+              socketRef.current!.send(
+                JSON.stringify({
+                  type: "call_camera_toggle",
+                  targetUserIds: [peerId],
+                  payload: { callId: callIdRef.current, enabled: newEnabled }
+                })
+              );
+            });
           }
         }
       } else if (isCameraOnRef.current === false) {
-        // Fallback reacquisition if video track does not exist
+        // Fallback reacquisition if missing video track
         try {
           const constraints = {
             audio: false,
@@ -524,56 +599,61 @@ export function useAudioCall(
 
           localStreamRef.current.addTrack(newVideoTrack);
 
-          const senders = peerConnectionRef.current?.getSenders();
-          const videoSender = senders?.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
-          if (videoSender) {
-            await videoSender.replaceTrack(newVideoTrack);
-          }
+          Array.from(peerConnectionsRef.current.entries()).forEach(([peerId, pc]) => {
+            const senders = pc.getSenders();
+            const videoSender = senders.find((s: RTCRtpSender) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+            if (videoSender) {
+              videoSender.replaceTrack(newVideoTrack).catch((e: any) =>
+                console.error(`Failed replaceTrack for peer ${peerId}:`, e)
+              );
+            }
+          });
 
           setIsCameraOn(true);
           isCameraOnRef.current = true;
           setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
 
-          if (remoteUserRef.current && callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
-            socketRef.current.send(
-              JSON.stringify({
-                type: "call_camera_toggle",
-                targetUserIds: [remoteUserRef.current.id],
-                payload: { callId: callIdRef.current, enabled: true }
-              })
-            );
+          if (callIdRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+            Array.from(peerConnectionsRef.current.keys()).forEach((peerId) => {
+              socketRef.current!.send(
+                JSON.stringify({
+                  type: "call_camera_toggle",
+                  targetUserIds: [peerId],
+                  payload: { callId: callIdRef.current, enabled: true }
+                })
+              );
+            });
           }
         } catch (err) {
-          console.error("Failed to re-acquire camera track on toggle ON (missing track fallback):", err);
+          console.error("Failed to re-acquire camera track ON (missing track fallback):", err);
         }
       }
     }
   };
 
-  // Switch camera on mobile using RTCRtpSender.replaceTrack()
   const switchCamera = async () => {
-    if (callTypeRef.current !== "video" || !localStreamRef.current || !peerConnectionRef.current) return;
+    if (callTypeRef.current !== "video" || !localStreamRef.current) return;
 
     const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
     const oldFacingMode = facingModeRef.current;
     const newFacingMode = oldFacingMode === "user" ? "environment" : "user";
 
-    // 1. Find the current video sender
-    const senders = peerConnectionRef.current.getSenders();
-    const videoSender = senders.find((s) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
-    if (!videoSender) {
-      console.warn("Could not find video sender to switch tracks");
-      return;
-    }
+    // Grab video senders for all connections
+    const sendersMap = new Map<string, RTCRtpSender>();
+    Array.from(peerConnectionsRef.current.entries()).forEach(([peerId, pc]) => {
+      const senders = pc.getSenders();
+      const videoSender = senders.find((s: RTCRtpSender) => s.track?.kind === "video" || (s.track === null && s.dtmf === null));
+      if (videoSender) {
+        sendersMap.set(peerId, videoSender);
+      }
+    });
 
-    // 2. Stop old track first to release hardware locks on restricted mobile hardware/WebViews
     if (oldVideoTrack) {
       oldVideoTrack.stop();
       localStreamRef.current.removeTrack(oldVideoTrack);
     }
 
     try {
-      // 3. Request the opposite camera facing mode
       let tempStream: MediaStream;
       try {
         tempStream = await navigator.mediaDevices.getUserMedia({
@@ -581,7 +661,6 @@ export function useAudioCall(
           audio: false
         });
       } catch (e) {
-        console.warn("exact facingMode failed, falling back to non-exact", e);
         tempStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: newFacingMode },
           audio: false
@@ -593,23 +672,22 @@ export function useAudioCall(
         throw new Error("Switched camera track is not live/usable");
       }
 
-      // 4. Replace track on sender
-      await videoSender.replaceTrack(newVideoTrack);
+      // Replace track on all peer connection video senders
+      for (const [peerId, videoSender] of Array.from(sendersMap.entries())) {
+        await videoSender.replaceTrack(newVideoTrack).catch((e: any) =>
+          console.error(`Failed replaceTrack on switch camera for peer ${peerId}:`, e)
+        );
+      }
 
-      // 5. Add new video track to local stream reference
       localStreamRef.current.addTrack(newVideoTrack);
       setFacingMode(newFacingMode);
       facingModeRef.current = newFacingMode;
 
-      // Re-apply local camera toggle state
       newVideoTrack.enabled = isCameraOnRef.current;
-
-      // Update state to trigger rendering update
       setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
       console.log("Switched camera successfully to facingMode:", newFacingMode);
     } catch (err) {
-      console.error("Failed to switch camera, executing rollback protection:", err);
-      // ROLLBACK: Re-acquire the old camera to avoid leaving a black screen
+      console.error("Failed to switch camera, rollback:", err);
       try {
         const rollbackStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: oldFacingMode },
@@ -618,7 +696,9 @@ export function useAudioCall(
         const rollbackTrack = rollbackStream.getVideoTracks()[0];
         if (rollbackTrack) {
           localStreamRef.current.addTrack(rollbackTrack);
-          await videoSender.replaceTrack(rollbackTrack);
+          for (const videoSender of Array.from(sendersMap.values())) {
+            await videoSender.replaceTrack(rollbackTrack);
+          }
           rollbackTrack.enabled = isCameraOnRef.current;
           setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
         }
@@ -628,10 +708,8 @@ export function useAudioCall(
     }
   };
 
-  // Invite an additional participant to the call
   const inviteParticipant = (targetUserId: string) => {
     if (socketRef.current?.readyState === WebSocket.OPEN && callIdRef.current) {
-      // Send a call offer (signaling invite) to the invited user
       socketRef.current.send(
         JSON.stringify({
           type: "call_offer",
@@ -647,7 +725,7 @@ export function useAudioCall(
     }
   };
 
-  const handleSignalingEvent = (data: any) => {
+  const handleSignalingEvent = async (data: any) => {
     const eventType = data.type;
     const payload = data.payload || {};
     const msgCallId = payload.callId;
@@ -657,93 +735,194 @@ export function useAudioCall(
 
     if (eventType === "call_offer") {
       const msgCallType = payload.callType || "audio";
-      if (callStateRef.current !== "idle") {
-        // Automatically reject if busy
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(
-            JSON.stringify({
-              type: "call_reject",
-              targetUserIds: [senderId],
-              payload: { callId: msgCallId, reason: "busy" }
-            })
-          );
+
+      if (callStateRef.current === "idle") {
+        // Processing incoming call/invitation
+        cleanupCall();
+        const callerChat = directoryChats.find((c) => c.id === senderId) || {
+          id: senderId,
+          name: nameFromEmail(senderId),
+          avatar: chatInitials(nameFromEmail(senderId)),
+          color: "bg-[#0f766e]",
+          preview: senderId,
+          time: "",
+          unread: 0,
+          online: true
+        };
+
+        setCallId(msgCallId);
+        setRemoteUser(callerChat);
+        setParticipants([callerChat]);
+        setCallType(msgCallType);
+        setIsInvite(payload.isInvite || false);
+
+        if (payload.sdp) {
+          remoteOffersRef.current.set(senderId, payload.sdp);
         }
-        return;
-      }
 
-      cleanupCall();
-      const callerChat = directoryChats.find((c) => c.id === senderId) || {
-        id: senderId,
-        name: nameFromEmail(senderId),
-        avatar: chatInitials(nameFromEmail(senderId)),
-        color: "bg-[#0f766e]",
-        preview: senderId,
-        time: "",
-        unread: 0,
-        online: true
-      };
+        setCallState("incoming");
+        setIsMuted(false);
+        setIsCameraOn(true);
+        isCameraOnRef.current = true;
+        setFacingMode("user");
+        facingModeRef.current = "user";
+        setCallDuration(0);
+        iceCandidatesBuffersRef.current.set(senderId, []);
+      } else {
+        // Offer received while already active. Create peer connection and answer.
+        if (payload.sdp) {
+          const pc = peerConnectionsRef.current.get(senderId) || createPeerConnection(senderId, callTypeRef.current);
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
 
-      setCallId(msgCallId);
-      setRemoteUser(callerChat);
-      setCallType(msgCallType);
-      remoteOfferRef.current = payload.sdp;
-      setCallState("incoming");
-      setIsMuted(false);
-      setIsCameraOn(true);
-      isCameraOnRef.current = true;
-      setIsRemoteCameraOn(true);
-      setFacingMode("user");
-      facingModeRef.current = "user";
-      setCallDuration(0);
-      iceCandidatesBufferRef.current = [];
-    } else if (eventType === "call_answer") {
-      if (callIdRef.current === msgCallId && callStateRef.current === "outgoing" && peerConnectionRef.current) {
-        peerConnectionRef.current
-          .setRemoteDescription(new RTCSessionDescription(payload.sdp))
-          .then(() => {
-            setCallState("connecting");
-            while (iceCandidatesBufferRef.current.length > 0) {
-              const cand = iceCandidatesBufferRef.current.shift();
-              if (cand) {
-                peerConnectionRef.current?.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
-                  console.error("Error adding buffered candidate:", e)
-                );
-              }
+          const buffer = iceCandidatesBuffersRef.current.get(senderId) || [];
+          while (buffer.length > 0) {
+            const cand = buffer.shift();
+            if (cand) {
+              await pc.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
+                console.error("Error applying buffered candidate:", e)
+              );
             }
-          })
-          .catch((e) => {
-            console.error("Failed setRemoteDescription on answer:", e);
-            cleanupCall();
-            setCallState("ended");
-          });
+          }
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          if (socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(
+              JSON.stringify({
+                type: "call_answer",
+                targetUserIds: [senderId],
+                payload: { callId: callIdRef.current, sdp: answer }
+              })
+            );
+          }
+        }
+      }
+    } else if (eventType === "call_answer") {
+      if (callIdRef.current === msgCallId) {
+        const pc = peerConnectionsRef.current.get(senderId);
+        if (pc && payload.sdp) {
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp))
+            .then(() => {
+              setCallState("connecting");
+              const buffer = iceCandidatesBuffersRef.current.get(senderId) || [];
+              while (buffer.length > 0) {
+                const cand = buffer.shift();
+                if (cand) {
+                  pc.addIceCandidate(new RTCIceCandidate(cand)).catch((e) =>
+                    console.error("Error adding buffered candidate:", e)
+                  );
+                }
+              }
+            })
+            .catch((e) => {
+              console.error("Failed setRemoteDescription on answer:", e);
+              removePeer(senderId);
+            });
+        }
       }
     } else if (eventType === "call_ice_candidate") {
       if (callIdRef.current === msgCallId) {
         const candidate = payload.candidate;
-        if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
-          peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch((e) =>
+        const pc = peerConnectionsRef.current.get(senderId);
+        if (pc && pc.remoteDescription) {
+          pc.addIceCandidate(new RTCIceCandidate(candidate)).catch((e) =>
             console.error("Error adding ICE candidate:", e)
           );
         } else {
-          iceCandidatesBufferRef.current.push(candidate);
+          let buffer = iceCandidatesBuffersRef.current.get(senderId);
+          if (!buffer) {
+            buffer = [];
+            iceCandidatesBuffersRef.current.set(senderId, buffer);
+          }
+          buffer.push(candidate);
         }
       }
     } else if (eventType === "call_reject") {
       if (callIdRef.current === msgCallId) {
-        cleanupCall();
-        setCallState("rejected");
+        if (payload.reason === "blocked") {
+          alert("Cannot add user. One or more participants have blocked this user or are blocked by them.");
+        }
+        if (callStateRef.current === "outgoing") {
+          cleanupCall();
+          setCallState("rejected");
+        } else {
+          removePeer(senderId);
+        }
       }
     } else if (eventType === "call_end") {
       if (callIdRef.current === msgCallId) {
-        cleanupCall();
-        setCallState("ended");
+        removePeer(senderId);
       }
     } else if (eventType === "call_camera_toggle") {
       if (callIdRef.current === msgCallId) {
-        setIsRemoteCameraOn(payload.enabled);
+        setParticipantsCameraOn((prev) => {
+          const next = new Map(prev);
+          next.set(senderId, payload.enabled);
+          return next;
+        });
+      }
+    } else if (eventType === "call_mic_toggle") {
+      if (callIdRef.current === msgCallId) {
+        setParticipantsMuted((prev) => {
+          const next = new Map(prev);
+          next.set(senderId, payload.muted);
+          return next;
+        });
+      }
+    } else if (eventType === "call_participant_joined") {
+      if (callIdRef.current === msgCallId) {
+        const newUserId = payload.userId;
+        const newParticipant = directoryChats.find((c) => c.id === newUserId) || {
+          id: newUserId,
+          name: nameFromEmail(newUserId),
+          avatar: chatInitials(nameFromEmail(newUserId)),
+          color: "bg-[#0f766e]",
+          preview: newUserId,
+          time: "",
+          unread: 0,
+          online: true
+        };
+
+        setParticipants((prev) => {
+          if (prev.some((p) => p.id === newUserId)) return prev;
+          return [...prev, newParticipant];
+        });
+
+        // Negotiate mesh: existing participants issue WebRTC offers to the newcomer
+        if (!peerConnectionsRef.current.has(newUserId)) {
+          const pc = createPeerConnection(newUserId, callTypeRef.current);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          if (socketRef.current?.readyState === WebSocket.OPEN) {
+            socketRef.current.send(
+              JSON.stringify({
+                type: "call_offer",
+                targetUserIds: [newUserId],
+                payload: { callId: callIdRef.current, sdp: offer, callType: callTypeRef.current }
+              })
+            );
+          }
+        }
+      }
+    } else if (eventType === "call_participant_left") {
+      if (callIdRef.current === msgCallId) {
+        removePeer(payload.userId || senderId);
+      }
+    } else if (eventType === "call_full") {
+      if (callIdRef.current === msgCallId) {
+        alert("Call is full (maximum 4 participants reached).");
+        cleanupCall();
+        setCallState("idle");
       }
     }
   };
+
+  // Backward compatibility properties
+  const firstParticipant = participants[0];
+  const remoteStream = firstParticipant ? remoteStreams.get(firstParticipant.id) || null : null;
+  const isRemoteCameraOn = firstParticipant ? participantsCameraOn.get(firstParticipant.id) ?? true : true;
 
   return {
     callState,
@@ -764,7 +943,12 @@ export function useAudioCall(
     toggleCamera,
     switchCamera,
     handleSignalingEvent,
-    inviteParticipant
+    inviteParticipant,
+    // Multi-peer group variables
+    participants,
+    remoteStreams,
+    participantsCameraOn,
+    participantsMuted
   };
 }
 
@@ -803,6 +987,10 @@ interface AudioCallOverlayProps {
   switchCamera: () => void;
   directoryChats: ChatSeed[];
   inviteParticipant: (userId: string) => void;
+  participants?: ChatSeed[];
+  remoteStreams?: Map<string, MediaStream>;
+  participantsCameraOn?: Map<string, boolean>;
+  participantsMuted?: Map<string, boolean>;
 }
 
 export function AudioCallOverlay({
@@ -823,22 +1011,21 @@ export function AudioCallOverlay({
   toggleCamera,
   switchCamera,
   directoryChats,
-  inviteParticipant
+  inviteParticipant,
+  participants = [],
+  remoteStreams = new Map(),
+  participantsCameraOn = new Map(),
+  participantsMuted = new Map()
 }: AudioCallOverlayProps) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
-
-  // Video PiP Layout Swap State (default showing remote stream full screen)
   const [mainVideo, setMainVideo] = useState<"remote" | "local">("remote");
-
-  // Participant selection states
   const [isAddPeopleOpen, setIsAddPeopleOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
@@ -847,14 +1034,15 @@ export function AudioCallOverlay({
     }
   }, [localStream]);
 
+  // Bind first remote stream to remoteVideoRef for 1-to-1 PIP layout backwards compatibility
+  const firstRemoteStream = participants[0] ? remoteStreams.get(participants[0].id) || null : null;
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+    if (remoteVideoRef.current && firstRemoteStream) {
+      remoteVideoRef.current.srcObject = firstRemoteStream;
       remoteVideoRef.current.play().catch((e) => console.warn("Remote video play warning:", e));
     }
-  }, [remoteStream]);
+  }, [firstRemoteStream]);
 
-  // Reset minimized and video swap states when call ends
   useEffect(() => {
     if (callState === "idle" || callState === "rejected" || callState === "ended") {
       setIsMinimized(false);
@@ -866,9 +1054,7 @@ export function AudioCallOverlay({
   if (callState === "idle") return null;
 
   const formatDuration = (sec: number) => {
-    const m = Math.floor(sec / 60)
-      .toString()
-      .padStart(2, "0");
+    const m = Math.floor(sec / 60).toString().padStart(2, "0");
     const s = (sec % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   };
@@ -897,24 +1083,25 @@ export function AudioCallOverlay({
 
   const isMobile = isMobileDevice();
 
-  // Toggle speaker audio routing (attempt setSinkId where supported)
   const toggleSpeaker = async () => {
     const nextState = !isSpeakerOn;
     setIsSpeakerOn(nextState);
-
-    if (remoteAudioRef.current && (remoteAudioRef.current as any).setSinkId) {
-      try {
-        console.log(`Speaker set to: ${nextState ? "loudspeaker" : "earpiece/default"}`);
-      } catch (err) {
-        console.warn("setSinkId routing failed:", err);
-      }
-    }
+    console.log(`Speaker set to: ${nextState ? "loudspeaker" : "earpiece/default"}`);
   };
 
   const handleToggleUser = (userId: string) => {
-    setSelectedUserIds((prev) =>
-      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
-    );
+    setSelectedUserIds((prev) => {
+      if (prev.includes(userId)) {
+        return prev.filter((id) => id !== userId);
+      } else {
+        // Enforce 4-participant cap (self + existing participants + selection cannot exceed 4)
+        if (participants.length + 1 + prev.length >= 4) {
+          alert("Maximum of 4 participants allowed in a call.");
+          return prev;
+        }
+        return [...prev, userId];
+      }
+    });
   };
 
   const handleConfirmAddPeople = () => {
@@ -928,11 +1115,14 @@ export function AudioCallOverlay({
 
   const filteredUsers = directoryChats.filter((chat) => {
     const matchesSearch = chat.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const isNotInCall = chat.id !== remoteUser?.id;
+    // Filter out current active participants and self
+    const isNotInCall = chat.id !== remoteUser?.id && !participants.some((p) => p.id === chat.id);
     return matchesSearch && isNotInCall;
   });
 
-  // Rendering for incoming call banner
+  const isGroupCall = participants.length > 1;
+
+  // Incoming call banner
   if (callState === "incoming") {
     return (
       <div className="cs-scale-in fixed left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 top-4 z-[100] w-[calc(100vw-2rem)] md:w-full md:max-w-md rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-md p-4 text-white shadow-[0_24px_60px_rgba(0,0,0,0.6)]">
@@ -944,7 +1134,6 @@ export function AudioCallOverlay({
               }`}
             >
               {remoteUser?.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
               ) : (
                 remoteUser?.avatar || "U"
@@ -953,7 +1142,9 @@ export function AudioCallOverlay({
             <div className="min-w-0">
               <div className="truncate text-base font-bold text-white">{remoteUser?.name}</div>
               <div className="text-xs font-semibold text-[#00a884]">
-                {callType === "video" ? "Incoming video call" : "Incoming audio call"}
+                {participants.length > 0
+                  ? (callType === "video" ? "Invited you to a group video call" : "Invited you to a group audio call")
+                  : (callType === "video" ? "Incoming video call" : "Incoming audio call")}
               </div>
             </div>
           </div>
@@ -980,15 +1171,15 @@ export function AudioCallOverlay({
     );
   }
 
-  // Rendering for minimized calling widget
+  // Minimized call widget
   if (isMinimized) {
     return (
       <div className="fixed bottom-20 right-4 z-[90] rounded-2xl bg-slate-900/95 border border-white/10 p-3 shadow-2xl flex items-center gap-3 text-white max-w-xs transition-all duration-300 w-72">
         <div className="relative h-12 w-12 rounded-xl overflow-hidden bg-slate-800 flex-shrink-0">
-          {callType === "video" && isRemoteCameraOn && remoteStream ? (
+          {callType === "video" && isRemoteCameraOn && firstRemoteStream ? (
             <video
               ref={(el) => {
-                if (el) el.srcObject = remoteStream;
+                if (el) el.srcObject = firstRemoteStream;
               }}
               autoPlay
               playsInline
@@ -997,7 +1188,6 @@ export function AudioCallOverlay({
           ) : (
             <span className={`grid h-full w-full place-items-center text-sm font-black text-white ${remoteUser?.color || "bg-[#0f766e]"}`}>
               {remoteUser?.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
               ) : (
                 remoteUser?.avatar || "U"
@@ -1041,79 +1231,155 @@ export function AudioCallOverlay({
     );
   }
 
-  // Render Video Layout for active connected video calls (fill-screen viewport)
+  // Active connected Video Interface
   if (callType === "video" && (callState === "connected" || callState === "connecting")) {
     return (
       <div className="fixed inset-0 z-[95] flex flex-col items-center justify-between text-white overflow-hidden bg-slate-950">
         
-        {/* Remote Video Container (Styled dynamically as Main or PIP) */}
-        <div
-          onClick={mainVideo === "local" ? () => setMainVideo("remote") : undefined}
-          className={
-            mainVideo === "remote"
-              ? "absolute inset-0 z-0 w-full h-full bg-slate-950 transition-all duration-300 overflow-hidden"
-              : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
-          }
-        >
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className={`h-full w-full object-cover transition-opacity duration-300 ${
-              isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
-          />
-          {/* Avatar display if remote camera is disabled */}
-          {!isRemoteCameraOn && (
+        {!isGroupCall ? (
+          // WhatsApp 1-to-1 PIP Video Layout
+          <>
             <div
-              style={{
-                backgroundImage: `radial-gradient(circle at center, #15323a 0%, #0b141a 100%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M40 0l40 40-40 40L0 40z' fill='%23ffffff' fill-opacity='.008' fill-rule='evenodd'/%3E%3C/svg%3E")`
-              }}
-              className="absolute inset-0 flex flex-col items-center justify-center bg-[#0b141a]"
+              onClick={mainVideo === "local" ? () => setMainVideo("remote") : undefined}
+              className={
+                mainVideo === "remote"
+                  ? "absolute inset-0 z-0 w-full h-full bg-slate-950 transition-all duration-300 overflow-hidden"
+                  : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
+              }
             >
-              <span className={`grid place-items-center overflow-hidden rounded-full font-black text-white shadow-2xl border-2 border-slate-700/50 ${
-                mainVideo === "remote" ? "h-28 w-28 text-3xl" : "h-12 w-12 text-sm"
-              } ${remoteUser?.color || "bg-[#0f766e]"}`}>
-                {remoteUser?.avatarUrl ? (
-                  <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
-                ) : (
-                  remoteUser?.avatar || "U"
-                )}
-              </span>
-              {mainVideo === "remote" && (
-                <>
-                  <h4 className="mt-5 text-xl font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
-                  <p className="text-sm text-slate-400 mt-1">Camera is off</p>
-                </>
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className={`h-full w-full object-cover transition-opacity duration-300 ${
+                  isRemoteCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+                }`}
+              />
+              {!isRemoteCameraOn && (
+                <div
+                  style={{
+                    backgroundImage: `radial-gradient(circle at center, #15323a 0%, #0b141a 100%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M40 0l40 40-40 40L0 40z' fill='%23ffffff' fill-opacity='.008' fill-rule='evenodd'/%3E%3C/svg%3E")`
+                  }}
+                  className="absolute inset-0 flex flex-col items-center justify-center bg-[#0b141a]"
+                >
+                  <span className={`grid place-items-center overflow-hidden rounded-full font-black text-white shadow-2xl border-2 border-slate-700/50 ${
+                    mainVideo === "remote" ? "h-28 w-28 text-3xl" : "h-12 w-12 text-sm"
+                  } ${remoteUser?.color || "bg-[#0f766e]"}`}>
+                    {remoteUser?.avatarUrl ? (
+                      <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                    ) : (
+                      remoteUser?.avatar || "U"
+                    )}
+                  </span>
+                  {mainVideo === "remote" && (
+                    <>
+                      <h4 className="mt-5 text-xl font-bold truncate max-w-[240px]">{remoteUser?.name}</h4>
+                      <p className="text-sm text-slate-400 mt-1">Camera is off</p>
+                    </>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
 
-        {/* Local Video Container (Styled dynamically as Main or PIP) */}
-        <div
-          onClick={mainVideo === "remote" ? () => setMainVideo("local") : undefined}
-          className={
-            mainVideo === "local"
-              ? "absolute inset-0 z-0 w-full h-full bg-slate-950 transition-all duration-300 overflow-hidden"
-              : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
-          }
-        >
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
-              isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
-          />
-          {!isCameraOn && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-800 text-white">
-              <span className="text-xs font-bold">You</span>
+            <div
+              onClick={mainVideo === "remote" ? () => setMainVideo("local") : undefined}
+              className={
+                mainVideo === "local"
+                  ? "absolute inset-0 z-0 w-full h-full bg-slate-950 transition-all duration-300 overflow-hidden"
+                  : "absolute top-24 right-4 h-36 w-28 rounded-2xl border-2 border-white/25 bg-slate-900 shadow-2xl z-20 flex items-center justify-center cursor-pointer transition-all duration-300 hover:scale-105 overflow-hidden"
+              }
+            >
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+                  isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+                }`}
+              />
+              {!isCameraOn && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-800 text-white">
+                  <span className="text-xs font-bold">You</span>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          // Group Video Call Responsive Grid Layout (3+ Participants)
+          <div className="z-10 w-full flex-1 px-4 py-24 flex items-center justify-center">
+            <div className="grid grid-cols-2 gap-3 w-full max-w-2xl aspect-video md:aspect-auto md:max-h-[60vh] h-full">
+              {/* Local Participant Tile */}
+              <div className="relative rounded-2xl overflow-hidden bg-slate-900 border border-white/10 flex items-center justify-center aspect-square md:aspect-auto h-full">
+                <video
+                  ref={(el) => {
+                    if (el && localStream) {
+                      el.srcObject = localStream;
+                      el.play().catch((e) => console.warn(e));
+                    }
+                  }}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`h-full w-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+                    isCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+                  }`}
+                />
+                {!isCameraOn && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-800">
+                    <span className="h-16 w-16 rounded-full bg-slate-700 flex items-center justify-center text-xl font-bold border border-white/10 shadow-md">
+                      You
+                    </span>
+                    <span className="text-xs text-slate-400 mt-2">You (Camera off)</span>
+                  </div>
+                )}
+                <div className="absolute bottom-2 left-2 bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-white/5">
+                  <span>You</span>
+                  {isMuted && <MicOff size={12} className="text-red-500" />}
+                </div>
+              </div>
+
+              {/* Remote Participants Tiles */}
+              {participants.map((p) => {
+                const stream = remoteStreams.get(p.id) || null;
+                const pCameraOn = participantsCameraOn.get(p.id) ?? true;
+                const pMuted = participantsMuted.get(p.id) ?? false;
+
+                return (
+                  <div key={p.id} className="relative rounded-2xl overflow-hidden bg-slate-900 border border-white/10 flex items-center justify-center aspect-square md:aspect-auto h-full">
+                    {stream && (
+                      <video
+                        ref={(el) => {
+                          if (el) {
+                            el.srcObject = stream;
+                            el.play().catch((e) => console.warn(e));
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        className={`h-full w-full object-cover transition-opacity duration-300 ${
+                          pCameraOn ? "opacity-100" : "opacity-0 pointer-events-none"
+                        }`}
+                      />
+                    )}
+                    {(!stream || !pCameraOn) && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-800">
+                        <span className={`grid h-16 w-16 place-items-center rounded-full text-xl font-black text-white border border-slate-700/50 shadow-md ${p.color}`}>
+                          {p.avatar}
+                        </span>
+                        <span className="text-xs text-slate-400 mt-2">{p.name} {(!pCameraOn) ? "(Camera off)" : ""}</span>
+                      </div>
+                    )}
+                    <div className="absolute bottom-2 left-2 bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-white/5">
+                      <span className="truncate max-w-[100px]">{p.name}</span>
+                      {pMuted && <MicOff size={12} className="text-red-500" />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Header navigation and details */}
         <div className="z-30 w-full px-6 pt-6 flex justify-between items-center bg-gradient-to-b from-black/50 to-transparent pb-12">
@@ -1127,11 +1393,12 @@ export function AudioCallOverlay({
           </button>
           
           <div className="text-center text-white drop-shadow-md">
-            <h3 className="truncate text-lg font-bold max-w-[180px] md:max-w-xs">{remoteUser?.name}</h3>
+            <h3 className="truncate text-lg font-bold max-w-[180px] md:max-w-xs">
+              {isGroupCall ? "Group Call" : remoteUser?.name}
+            </h3>
             <p className="text-xs text-slate-300 mt-0.5 tracking-wider font-medium">{getStatusText()}</p>
           </div>
 
-          {/* Symmetrical Header Spacer */}
           <div className="w-12 h-12" />
         </div>
 
@@ -1139,7 +1406,7 @@ export function AudioCallOverlay({
         <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-6 pb-8 z-30 mt-auto flex flex-col gap-6 shadow-[0_-12px_40px_rgba(0,0,0,0.6)]">
           {/* Row 1: Add People | Speaker | Camera */}
           <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
-            {/* Add People (Now functional) */}
+            {/* Add People */}
             <div className="flex flex-col items-center gap-1.5">
               <button
                 aria-label="Add people"
@@ -1152,7 +1419,7 @@ export function AudioCallOverlay({
               <span className="text-[10px] text-slate-400 font-semibold">Add People</span>
             </div>
 
-            {/* Speaker Toggle (Functional Routing Indicator) */}
+            {/* Speaker Toggle */}
             <div className="flex flex-col items-center gap-1.5">
               <button
                 aria-label={isSpeakerOn ? "Speaker" : "Earpiece"}
@@ -1242,7 +1509,6 @@ export function AudioCallOverlay({
             <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-white/10 p-6 text-white shadow-2xl flex flex-col max-h-[80vh] cs-scale-in">
               <h3 className="text-lg font-bold mb-4">Add people</h3>
               
-              {/* Search input */}
               <input
                 type="text"
                 placeholder="Search users..."
@@ -1251,7 +1517,6 @@ export function AudioCallOverlay({
                 className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#00a884] mb-4"
               />
 
-              {/* User list */}
               <div className="flex-1 overflow-y-auto mb-6 pr-1 space-y-2 max-h-[40vh]">
                 {filteredUsers.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-4">No users found</p>
@@ -1283,7 +1548,6 @@ export function AudioCallOverlay({
                 )}
               </div>
 
-              {/* Action buttons */}
               <div className="flex justify-end gap-3 mt-auto border-t border-white/5 pt-4">
                 <button
                   type="button"
@@ -1315,7 +1579,7 @@ export function AudioCallOverlay({
     );
   }
 
-  // Render Full Screen Audio Call Interface (also used for video calls in outgoing/connecting/ended states)
+  // Active connected Audio Interface
   return (
     <div
       style={{
@@ -1334,41 +1598,77 @@ export function AudioCallOverlay({
           <ChevronLeft size={24} />
         </button>
 
-        {/* Symmetrical Header Spacer */}
         <div className="w-12 h-12" />
       </div>
 
-      {/* Centered User Info & Avatar */}
-      <div className="flex-1 flex flex-col items-center justify-center px-4 max-w-sm w-full -mt-12">
-        <div className="relative flex items-center justify-center my-6">
-          {(callState === "outgoing" || callState === "connecting") && (
-            <>
-              <div className="absolute h-40 w-40 animate-ping rounded-full bg-[#00a884]/15" />
-              <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/20" />
-            </>
-          )}
-          {callState === "connected" && (
-            <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/10" />
-          )}
-          <span
-            className={`relative z-10 grid h-28 w-28 md:h-32 md:w-32 place-items-center overflow-hidden rounded-full text-4xl font-black text-white shadow-2xl border-4 border-slate-700/50 ${
-              remoteUser?.color || "bg-[#0f766e]"
-            }`}
-          >
-            {remoteUser?.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
-            ) : (
-              remoteUser?.avatar || "U"
-            )}
-          </span>
-        </div>
+      {/* Centered User Info & Avatar Grid */}
+      <div className="flex-1 flex flex-col items-center justify-center px-4 w-full -mt-12 max-w-2xl">
+        {!isGroupCall ? (
+          // WhatsApp 1-to-1 centered avatar
+          <div className="flex flex-col items-center justify-center w-full">
+            <div className="relative flex items-center justify-center my-6">
+              {(callState === "outgoing" || callState === "connecting") && (
+                <>
+                  <div className="absolute h-40 w-40 animate-ping rounded-full bg-[#00a884]/15" />
+                  <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/20" />
+                </>
+              )}
+              {callState === "connected" && (
+                <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/10" />
+              )}
+              <span
+                className={`relative z-10 grid h-28 w-28 md:h-32 md:w-32 place-items-center overflow-hidden rounded-full text-4xl font-black text-white shadow-2xl border-4 border-slate-700/50 ${
+                  remoteUser?.color || "bg-[#0f766e]"
+                }`}
+              >
+                {remoteUser?.avatarUrl ? (
+                  <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                ) : (
+                  remoteUser?.avatar || "U"
+                )}
+              </span>
+            </div>
 
-        <h2 className="truncate text-2xl md:text-3xl font-black text-white text-center w-full">{remoteUser?.name}</h2>
-        <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
+            <h2 className="truncate text-2xl md:text-3xl font-black text-white text-center w-full">{remoteUser?.name}</h2>
+            <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
+          </div>
+        ) : (
+          // Group Audio Avatar Grid (3+ Participants)
+          <div className="w-full flex flex-col items-center">
+            <div className="grid grid-cols-2 gap-4 w-full max-w-md my-6">
+              {/* Local Participant avatar */}
+              <div className="flex flex-col items-center justify-center p-4 bg-slate-800/40 rounded-3xl border border-white/5 relative">
+                <span className="grid h-20 w-20 place-items-center rounded-full text-2xl font-black text-white bg-slate-700 shadow-md border-2 border-slate-600">
+                  You
+                </span>
+                <span className="text-sm font-bold text-white mt-3">You</span>
+                <span className="text-xs text-slate-400 mt-1">
+                  {isMuted ? "Muted" : "Active"}
+                </span>
+              </div>
+
+              {/* Remote Participants Avatars */}
+              {participants.map((p) => {
+                const pMuted = participantsMuted.get(p.id) ?? false;
+                return (
+                  <div key={p.id} className="flex flex-col items-center justify-center p-4 bg-slate-800/40 rounded-3xl border border-white/5 relative">
+                    <span className={`grid h-20 w-20 place-items-center rounded-full text-2xl font-black text-white shadow-md border-2 border-slate-700/50 ${p.color}`}>
+                      {p.avatar}
+                    </span>
+                    <span className="text-sm font-bold text-white mt-3 truncate max-w-[120px]">{p.name}</span>
+                    <span className="text-xs text-slate-400 mt-1">
+                      {pMuted ? "Muted" : "Active"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
+          </div>
+        )}
       </div>
 
-      {/* Large Dark Controls Panel at bottom (Consistent Layout structure) */}
+      {/* Large Dark Controls Panel at bottom */}
       <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-8 pb-10 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] flex flex-col gap-6">
         {/* Row 1: Add People | Speaker | Mute */}
         <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
@@ -1385,7 +1685,7 @@ export function AudioCallOverlay({
             <span className="text-xs text-slate-400 font-semibold">Add People</span>
           </div>
 
-          {/* Speaker Toggle (Functional Routing Indicator) */}
+          {/* Speaker Toggle */}
           <div className="flex flex-col items-center gap-1.5">
             <button
               aria-label={isSpeakerOn ? "Speaker" : "Earpiece"}
@@ -1422,7 +1722,7 @@ export function AudioCallOverlay({
 
         {/* Row 2: Center End Call Button */}
         <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
-          <div /> {/* Empty col 1 */}
+          <div />
           
           {/* End Call Button */}
           <div className="flex flex-col items-center gap-1.5">
@@ -1437,7 +1737,7 @@ export function AudioCallOverlay({
             <span className="text-xs text-[#b42318] font-bold">End</span>
           </div>
 
-          <div /> {/* Empty col 3 */}
+          <div />
         </div>
       </div>
 
@@ -1447,7 +1747,6 @@ export function AudioCallOverlay({
           <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-white/10 p-6 text-white shadow-2xl flex flex-col max-h-[80vh] cs-scale-in">
             <h3 className="text-lg font-bold mb-4">Add people</h3>
             
-            {/* Search input */}
             <input
               type="text"
               placeholder="Search users..."
@@ -1456,7 +1755,6 @@ export function AudioCallOverlay({
               className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#00a884] mb-4"
             />
 
-            {/* User list */}
             <div className="flex-1 overflow-y-auto mb-6 pr-1 space-y-2 max-h-[40vh]">
               {filteredUsers.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">No users found</p>
@@ -1488,7 +1786,6 @@ export function AudioCallOverlay({
               )}
             </div>
 
-            {/* Action buttons */}
             <div className="flex justify-end gap-3 mt-auto border-t border-white/5 pt-4">
               <button
                 type="button"
