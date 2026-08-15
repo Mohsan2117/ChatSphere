@@ -138,6 +138,19 @@ func New(path string, databaseURL string) (*Store, error) {
 	return s, nil
 }
 
+// Ping runs a lightweight query SELECT 1 to verify that the database is reachable and active.
+func (s *Store) Ping(ctx context.Context) error {
+	if s.db != nil {
+		var one int
+		return s.db.QueryRow(ctx, "SELECT 1").Scan(&one)
+	}
+	if s.my != nil {
+		var one int
+		return s.my.QueryRowContext(ctx, "SELECT 1").Scan(&one)
+	}
+	return nil
+}
+
 func mysqlDSN(databaseURL string) string {
 	parsed, err := url.Parse(databaseURL)
 	if err != nil {

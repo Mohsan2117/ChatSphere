@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -55,10 +56,30 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 		MaxAge:           12 * time.Hour,
 	}))
 
-	healthHandler := func(c *gin.Context) {
+	rootHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "chatsphere-api"})
 	}
-	router.GET("/", healthHandler)
+	router.GET("/", rootHandler)
+
+	healthHandler := func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := dataStore.Ping(ctx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"service":  "chatsphere-api",
+				"status":   "error",
+				"database": "error",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"service":  "chatsphere-api",
+			"status":   "ok",
+			"database": "ok",
+		})
+	}
 	router.GET("/health", healthHandler)
 	router.GET("/ws", func(c *gin.Context) {
 		user, ok := authUserFromToken(c.Query("token"))
