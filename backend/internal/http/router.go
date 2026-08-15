@@ -1,8 +1,10 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,8 +13,10 @@ import (
 	"io"
 	"log"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -97,7 +101,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerContactRoutes(api.Group("/contacts"), dataStore)
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
-	registerUploadRoutes(api.Group("/upload"), dataStore)
+	registerUploadRoutes(api.Group("/upload"), cfg, dataStore)
 	registerFileRoutes(api.Group("/files"), dataStore)
 	registerAdminRoutes(api.Group("/admin"), cfg, dataStore)
 	registerAIRoutes(api.Group("/ai"), cfg, dataStore)
@@ -598,7 +602,121 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 	return result
 }
 
-func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+type CloudinaryResponse struct {
+	SecureURL string `json:"secure_url"`
+	PublicID  string `json:"public_id"`
+	Error     *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+func uploadToCloudinary(cloudName, apiKey, apiSecret, uploadPreset, kind, filename string, content []byte) (string, string, error) {
+	resourceType := "raw"
+	if kind == "image" {
+		resourceType = "image"
+	} else if kind == "video" || kind == "audio" {
+		resourceType = "video"
+	}
+
+	uploadURL := fmt.Sprintf("https://api.cloudinary.com/v1_1/%s/%s/upload", cloudName, resourceType)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	if uploadPreset != "" {
+		if err := writer.WriteField("upload_preset", uploadPreset); err != nil {
+			return "", "", err
+		}
+	}
+
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := io.Copy(part, bytes.NewReader(content)); err != nil {
+		return "", "", err
+	}
+
+	if err := writer.Close(); err != nil {
+		return "", "", err
+	}
+
+	req, err := http.NewRequest("POST", uploadURL, body)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.SetBasicAuth(apiKey, apiSecret)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		var errResponse CloudinaryResponse
+		_ = json.Unmarshal(respBytes, &errResponse)
+		if errResponse.Error != nil {
+			return "", "", fmt.Errorf("cloudinary upload failed (status %d): %s", resp.StatusCode, errResponse.Error.Message)
+		}
+		return "", "", fmt.Errorf("cloudinary upload failed with status %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var uploadResult CloudinaryResponse
+	if err := json.Unmarshal(respBytes, &uploadResult); err != nil {
+		return "", "", err
+	}
+
+	if uploadResult.SecureURL == "" {
+		return "", "", fmt.Errorf("cloudinary response missing secure_url")
+	}
+
+	return uploadResult.SecureURL, uploadResult.PublicID, nil
+}
+
+func deleteFromCloudinary(cloudName, apiKey, apiSecret, kind, publicID string) error {
+	resourceType := "raw"
+	if kind == "image" {
+		resourceType = "image"
+	} else if kind == "video" || kind == "audio" {
+		resourceType = "video"
+	}
+
+	destroyURL := fmt.Sprintf("https://api.cloudinary.com/v1_1/%s/%s/destroy", cloudName, resourceType)
+	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+
+	signStr := fmt.Sprintf("public_id=%s&timestamp=%s%s", publicID, timestamp, apiSecret)
+	hash := sha1.New()
+	hash.Write([]byte(signStr))
+	signature := hex.EncodeToString(hash.Sum(nil))
+
+	data := url.Values{}
+	data.Set("public_id", publicID)
+	data.Set("timestamp", timestamp)
+	data.Set("api_key", apiKey)
+	data.Set("signature", signature)
+
+	resp, err := http.PostForm(destroyURL, data)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("cloudinary destroy failed (status %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
 	const maxUploadBytes int64 = 10 << 20
 	group.POST("", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
@@ -646,6 +764,56 @@ func registerUploadRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 		} else if strings.HasPrefix(contentType, "audio/") {
 			kind = "audio"
 		}
+
+		if cfg.CloudinaryCloudName != "" && cfg.CloudinaryAPIKey != "" && cfg.CloudinaryAPISecret != "" {
+			cloudinaryURL, cloudinaryPublicID, err := uploadToCloudinary(
+				cfg.CloudinaryCloudName,
+				cfg.CloudinaryAPIKey,
+				cfg.CloudinaryAPISecret,
+				cfg.CloudinaryUploadPreset,
+				kind,
+				file.Filename,
+				content,
+			)
+			if err != nil {
+				log.Printf("cloudinary upload failed user=%s name=%s size=%d: %v", authUser.Email, file.Filename, file.Size, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not upload file to cloud storage"})
+				return
+			}
+			_, err = dataStore.SaveCloudinaryAttachment(
+				authUser.Email,
+				file.Filename,
+				contentType,
+				kind,
+				int64(len(content)),
+				cloudinaryURL,
+				cloudinaryPublicID,
+			)
+			if err != nil {
+				log.Printf("save cloudinary attachment metadata failed user=%s name=%s: %v", authUser.Email, file.Filename, err)
+				go func() {
+					if delErr := deleteFromCloudinary(cfg.CloudinaryCloudName, cfg.CloudinaryAPIKey, cfg.CloudinaryAPISecret, kind, cloudinaryPublicID); delErr != nil {
+						log.Printf("failed to clean up orphaned Cloudinary asset %s: %v", cloudinaryPublicID, delErr)
+					}
+				}()
+				if strings.Contains(strings.ToLower(err.Error()), "user not found") {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "login expired. Please sign in again"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save file metadata"})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"name": file.Filename,
+				"type": contentType,
+				"kind": kind,
+				"url":  cloudinaryURL,
+			})
+			return
+		}
+
+		// Fallback to local DB storage
 		attachment, err := dataStore.SaveAttachment(authUser.Email, file.Filename, contentType, kind, content)
 		if err != nil {
 			log.Printf("save attachment failed user=%s name=%s size=%d: %v", authUser.Email, file.Filename, file.Size, err)
@@ -679,6 +847,10 @@ func registerFileRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 		attachment, err := dataStore.AttachmentByID(authUser.Email, c.Param("id"))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+			return
+		}
+		if attachment.CloudinaryURL != "" {
+			c.Redirect(http.StatusFound, attachment.CloudinaryURL)
 			return
 		}
 		c.Header("Cache-Control", "private, max-age=300")

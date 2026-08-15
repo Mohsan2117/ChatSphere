@@ -87,14 +87,16 @@ type Report struct {
 }
 
 type Attachment struct {
-	ID          string    `json:"id"`
-	OwnerID     string    `json:"ownerId"`
-	Name        string    `json:"name"`
-	ContentType string    `json:"contentType"`
-	Kind        string    `json:"kind"`
-	SizeBytes   int64     `json:"sizeBytes"`
-	Content     []byte    `json:"-"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID                 string    `json:"id"`
+	OwnerID            string    `json:"ownerId"`
+	Name               string    `json:"name"`
+	ContentType        string    `json:"contentType"`
+	Kind               string    `json:"kind"`
+	SizeBytes          int64     `json:"sizeBytes"`
+	Content            []byte    `json:"-"`
+	CloudinaryURL      string    `json:"cloudinaryUrl,omitempty"`
+	CloudinaryPublicID string    `json:"cloudinaryPublicId,omitempty"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 func New(path string, databaseURL string) (*Store, error) {
@@ -796,6 +798,49 @@ func (s *Store) SaveAttachment(ownerEmail, name, contentType, kind string, conte
 	return attachment, err
 }
 
+func (s *Store) SaveCloudinaryAttachment(ownerEmail, name, contentType, kind string, sizeBytes int64, cloudinaryURL, cloudinaryPublicID string) (Attachment, error) {
+	if s.db == nil && s.my == nil {
+		return Attachment{}, errors.New("database is not configured")
+	}
+	owner, err := s.UserByEmail(ownerEmail)
+	if err != nil {
+		return Attachment{}, err
+	}
+	attachment := Attachment{
+		ID:                 randomID(),
+		OwnerID:            owner.ID,
+		Name:               strings.TrimSpace(name),
+		ContentType:        strings.TrimSpace(contentType),
+		Kind:               strings.TrimSpace(kind),
+		SizeBytes:          sizeBytes,
+		Content:            []byte{},
+		CloudinaryURL:      cloudinaryURL,
+		CloudinaryPublicID: cloudinaryPublicID,
+		CreatedAt:          time.Now().UTC(),
+	}
+	if attachment.Name == "" {
+		attachment.Name = "attachment"
+	}
+	if attachment.ContentType == "" {
+		attachment.ContentType = "application/octet-stream"
+	}
+	if attachment.Kind == "" {
+		attachment.Kind = "file"
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			insert into attachments (id, owner_id, name, content_type, kind, size_bytes, content, cloudinary_url, cloudinary_public_id, created_at)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		`, attachment.ID, attachment.OwnerID, attachment.Name, attachment.ContentType, attachment.Kind, attachment.SizeBytes, attachment.Content, attachment.CloudinaryURL, attachment.CloudinaryPublicID, attachment.CreatedAt)
+		return attachment, err
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		insert into attachments (id, owner_id, name, content_type, kind, size_bytes, content, cloudinary_url, cloudinary_public_id, created_at)
+		values (?,?,?,?,?,?,?,?,?,?)
+	`, attachment.ID, attachment.OwnerID, attachment.Name, attachment.ContentType, attachment.Kind, attachment.SizeBytes, attachment.Content, attachment.CloudinaryURL, attachment.CloudinaryPublicID, attachment.CreatedAt)
+	return attachment, err
+}
+
 func (s *Store) AttachmentByID(requesterEmail, id string) (Attachment, error) {
 	if s.db == nil && s.my == nil {
 		return Attachment{}, errors.New("database is not configured")
@@ -809,7 +854,7 @@ func (s *Store) AttachmentByID(requesterEmail, id string) (Attachment, error) {
 	var attachment Attachment
 	if s.db != nil {
 		err = s.db.QueryRow(context.Background(), `
-			select a.id, a.owner_id, a.name, a.content_type, a.kind, a.size_bytes, a.content, a.created_at
+			select a.id, a.owner_id, a.name, a.content_type, a.kind, a.size_bytes, a.content, coalesce(a.cloudinary_url, ''), coalesce(a.cloudinary_public_id, ''), a.created_at
 			from attachments a
 			where a.id = $1
 			  and (
@@ -820,11 +865,11 @@ func (s *Store) AttachmentByID(requesterEmail, id string) (Attachment, error) {
 					  and (m.sender_email = $4 or m.recipient_id = $2)
 				)
 			  )
-		`, id, requester.ID, reference, requester.Email).Scan(&attachment.ID, &attachment.OwnerID, &attachment.Name, &attachment.ContentType, &attachment.Kind, &attachment.SizeBytes, &attachment.Content, &attachment.CreatedAt)
+		`, id, requester.ID, reference, requester.Email).Scan(&attachment.ID, &attachment.OwnerID, &attachment.Name, &attachment.ContentType, &attachment.Kind, &attachment.SizeBytes, &attachment.Content, &attachment.CloudinaryURL, &attachment.CloudinaryPublicID, &attachment.CreatedAt)
 		return attachment, err
 	}
 	err = s.my.QueryRowContext(context.Background(), `
-		select a.id, a.owner_id, a.name, a.content_type, a.kind, a.size_bytes, a.content, a.created_at
+		select a.id, a.owner_id, a.name, a.content_type, a.kind, a.size_bytes, a.content, coalesce(a.cloudinary_url, ''), coalesce(a.cloudinary_public_id, ''), a.created_at
 		from attachments a
 		where a.id = ?
 		  and (
@@ -835,7 +880,7 @@ func (s *Store) AttachmentByID(requesterEmail, id string) (Attachment, error) {
 				  and (m.sender_email = ? or m.recipient_id = ?)
 			)
 		  )
-	`, id, requester.ID, reference, requester.Email, requester.ID).Scan(&attachment.ID, &attachment.OwnerID, &attachment.Name, &attachment.ContentType, &attachment.Kind, &attachment.SizeBytes, &attachment.Content, &attachment.CreatedAt)
+	`, id, requester.ID, reference, requester.Email, requester.ID).Scan(&attachment.ID, &attachment.OwnerID, &attachment.Name, &attachment.ContentType, &attachment.Kind, &attachment.SizeBytes, &attachment.Content, &attachment.CloudinaryURL, &attachment.CloudinaryPublicID, &attachment.CreatedAt)
 	return attachment, err
 }
 
@@ -1140,6 +1185,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column created_at datetime not null default current_timestamp`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column size_bytes bigint not null default 0`)
+		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_url text null`)
+		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_public_id varchar(255) null`)
 		_, _ = s.my.ExecContext(ctx, `
 			update app_users set
 				first_name = coalesce(first_name, ''),
@@ -1258,6 +1305,8 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists created_at timestamptz not null default now()`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists updated_at timestamptz not null default now()`)
 	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists size_bytes bigint not null default 0`)
+	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists cloudinary_url text`)
+	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists cloudinary_public_id text`)
 	_, _ = s.db.Exec(ctx, `
 		update app_users set
 			first_name = coalesce(first_name, ''),

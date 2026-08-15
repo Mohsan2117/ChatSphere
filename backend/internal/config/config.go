@@ -33,6 +33,11 @@ type Config struct {
 	GeminiMaxOutputTokens          int
 	GeminiTimeoutSeconds           int
 	TrustedProxies                 string
+
+	CloudinaryCloudName    string
+	CloudinaryAPIKey       string
+	CloudinaryAPISecret    string
+	CloudinaryUploadPreset string
 }
 
 func Load() Config {
@@ -65,6 +70,11 @@ func Load() Config {
 		GeminiMaxOutputTokens:          envInt("GEMINI_MAX_OUTPUT_TOKENS", 500),
 		GeminiTimeoutSeconds:           envInt("GEMINI_TIMEOUT_SECONDS", 30),
 		TrustedProxies:                 os.Getenv("TRUSTED_PROXIES"),
+
+		CloudinaryCloudName:    os.Getenv("CLOUDINARY_CLOUD_NAME"),
+		CloudinaryAPIKey:       os.Getenv("CLOUDINARY_API_KEY"),
+		CloudinaryAPISecret:    os.Getenv("CLOUDINARY_API_SECRET"),
+		CloudinaryUploadPreset: os.Getenv("CLOUDINARY_UPLOAD_PRESET"),
 	}
 }
 

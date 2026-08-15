@@ -14,6 +14,7 @@ func main() {
 	cfg := config.Load()
 	logBrevoConfig(cfg)
 	logGeminiConfig(cfg)
+	logCloudinaryConfig(cfg)
 
 	dataStore, err := store.New(cfg.DataPath, cfg.DatabaseURL)
 	if err != nil {
@@ -60,6 +61,16 @@ func logGeminiConfig(cfg config.Config) {
 
 	if cfg.GeminiAPIKey == "" {
 		log.Printf("[gemini] WARNING: GEMINI_API_KEY is not set. The AI assistant endpoint will return 503.")
+	}
+}
+
+// logCloudinaryConfig prints the status of Cloudinary configuration variables at startup.
+func logCloudinaryConfig(cfg config.Config) {
+	log.Printf("[cloudinary] startup config: CLOUDINARY_CLOUD_NAME present=%v CLOUDINARY_API_KEY present=%v CLOUDINARY_API_SECRET present=%v CLOUDINARY_UPLOAD_PRESET present=%v",
+		cfg.CloudinaryCloudName != "", cfg.CloudinaryAPIKey != "", cfg.CloudinaryAPISecret != "", cfg.CloudinaryUploadPreset != "")
+
+	if cfg.CloudinaryCloudName == "" || cfg.CloudinaryAPIKey == "" || cfg.CloudinaryAPISecret == "" {
+		log.Printf("[cloudinary] WARNING: Cloudinary credentials are not fully configured. Media uploads will fall back to local database storage.")
 	}
 }
 
