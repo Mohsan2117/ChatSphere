@@ -27,7 +27,8 @@ import {
   Phone,
   Video,
   Play,
-  Pause
+  Pause,
+  Radio
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
@@ -266,6 +267,7 @@ export function AppShell() {
     userIsNearBottomRef.current = nearBottom;
   };
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"chats" | "status" | "groups" | "calls">("chats");
   const [aiMessages, setAiMessages] = useState<AIMessage[]>([
     {
       id: "welcome",
@@ -2881,7 +2883,7 @@ export function AppShell() {
         {workspaceMode !== "ai" ? (
         <aside className={`h-full lg:h-screen min-h-0 overflow-y-auto border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
           <header className="border-b border-[#e5e9f0] px-5 py-5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="hidden lg:flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere</p>
                 <h1 className="mt-2 text-2xl font-black tracking-normal">{workspaceTitle}</h1>
@@ -2899,7 +2901,7 @@ export function AppShell() {
                 )}
               </button>
             </div>
-            <div className="mt-5 grid grid-cols-3 gap-2">
+            <div className="mt-5 hidden lg:grid grid-cols-3 gap-2">
               {[
                 ["Me", "0"],
                 ["Open", String(inboxChats.length)],
@@ -2927,7 +2929,7 @@ export function AppShell() {
             </label>
           </header>
 
-          <div className="px-3 py-4">
+          <div className="px-3 py-4 pb-24 lg:pb-4">
             <div className="mb-3 flex items-center justify-between px-2">
               <h2 className="text-sm font-black">
                 {workspaceMode === "files" ? "Shared files" : workspaceMode === "contacts" ? "All contacts" : "Open conversations"}
@@ -3356,12 +3358,57 @@ export function AppShell() {
       {(!isMobileAIChatOpen && !isMobileDrawerOpen && workspaceMode !== "ai") ? (
         <button
           aria-label="Open AI Assistant"
-          className="cs-press fixed bottom-24 right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_12px_32px_rgba(124,58,237,.45)] transition hover:scale-105 hover:shadow-[0_16px_40px_rgba(124,58,237,.55)] lg:hidden sm:bottom-28 sm:right-6"
+          className="cs-press fixed bottom-[5.5rem] right-4 z-50 grid h-14 w-14 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_12px_32px_rgba(124,58,237,.45)] transition hover:scale-105 hover:shadow-[0_16px_40px_rgba(124,58,237,.55)] lg:hidden sm:right-6"
           onClick={() => setIsMobileAIChatOpen(true)}
           type="button"
         >
           <Bot size={26} />
         </button>
+      ) : null}
+
+      {/* Mobile bottom navigation */}
+      {!selectedChat && !isMobileAIChatOpen && workspaceMode !== "ai" ? (
+        <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-[#e5e9f0] bg-white lg:hidden">
+          {([
+            { key: "chats" as const, label: "Chats", icon: MessageCircle },
+            { key: "status" as const, label: "Status", icon: Radio },
+            { key: "groups" as const, label: "Groups", icon: Users },
+            { key: "calls" as const, label: "Calls", icon: Phone },
+          ]).map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-1 text-xs font-semibold transition-colors ${
+                mobileTab === key
+                  ? "text-[#00a884]"
+                  : "text-[#94a3b8] hover:text-[#64748b]"
+              }`}
+              onClick={() => setMobileTab(key)}
+              type="button"
+            >
+              <Icon size={22} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
+      {/* Mobile placeholder screens for non-chats tabs */}
+      {!selectedChat && mobileTab !== "chats" && workspaceMode !== "ai" ? (
+        <div className="fixed inset-0 top-16 bottom-16 z-30 flex flex-col items-center justify-center bg-white px-6 lg:hidden">
+          <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-[#f7f9fb] text-[#94a3b8]">
+            {mobileTab === "status" ? <Radio size={36} /> : mobileTab === "groups" ? <Users size={36} /> : <Phone size={36} />}
+          </div>
+          <h2 className="mt-6 text-2xl font-black tracking-normal text-[#18212f]">
+            {mobileTab === "status" ? "Status" : mobileTab === "groups" ? "Groups" : "Calls"}
+          </h2>
+          <p className="mt-3 text-center text-base leading-7 text-[#64748b]">
+            {mobileTab === "status"
+              ? "Status updates from your contacts will appear here."
+              : mobileTab === "groups"
+                ? "Group conversations will appear here."
+                : "Your call history will appear here."}
+          </p>
+        </div>
       ) : null}
 
       {/* Mobile & tablet AI chat overlay */}
