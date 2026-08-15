@@ -3047,7 +3047,7 @@ export function AppShell() {
       </div>
 
       <section
-        className={`grid flex-1 min-h-0 ${
+        className={`grid h-full flex-1 min-h-0 ${
           workspaceMode === "ai"
             ? "lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[270px_minmax(0,1fr)]"
             : "lg:grid-cols-[250px_350px_minmax(0,1fr)] xl:grid-cols-[270px_390px_minmax(0,1fr)]"
@@ -3101,7 +3101,7 @@ export function AppShell() {
         </aside>
 
         {workspaceMode !== "ai" ? (
-        <aside className={`flex flex-col h-full lg:h-screen min-h-0 lg:overflow-hidden border-r border-[#dce1e8] bg-white ${selectedChat || selectedGroupId ? "hidden lg:block" : "block"}`}>
+        <aside className={`flex h-full min-h-0 flex-col overflow-hidden border-r border-[#dce1e8] bg-white ${selectedChat || selectedGroupId ? "hidden lg:flex" : "flex"}`}>
           {mobileTab === "calls" ? (
             <>
               <header className="border-b border-[#e5e9f0] px-5 py-5">
@@ -3439,7 +3439,7 @@ export function AppShell() {
           </>
           )}
           {/* Desktop tab bar */}
-          <div className="mt-auto hidden lg:flex shrink-0 items-center justify-around border-t border-[#e5e9f0] bg-white px-2 py-2">
+          <div className="hidden shrink-0 items-center justify-around border-t border-[#e5e9f0] bg-white px-2 py-2 lg:flex">
             {([
               { key: "chats" as const, label: "Chats", icon: MessageCircle },
               { key: "status" as const, label: "Status", icon: Radio },
