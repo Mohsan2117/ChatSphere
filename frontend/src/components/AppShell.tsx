@@ -2950,7 +2950,7 @@ export function AppShell() {
         </aside>
 
         {workspaceMode !== "ai" ? (
-        <aside className={`flex flex-col h-full lg:h-screen min-h-0 border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+        <aside className={`flex flex-col h-full lg:h-screen min-h-0 lg:overflow-hidden border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
           {mobileTab === "calls" ? (
             <>
               <header className="border-b border-[#e5e9f0] px-5 py-5">
@@ -2967,7 +2967,7 @@ export function AppShell() {
                   />
                 </label>
               </header>
-              <div className="flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
                 <div className="mb-3 flex items-center justify-between px-2">
                   <h2 className="text-sm font-black">Recent</h2>
                 </div>
@@ -3105,7 +3105,7 @@ export function AppShell() {
             </label>
           </header>
 
-          <div className="flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
             <div className="mb-3 flex items-center justify-between px-2">
               <h2 className="text-sm font-black">
                 {workspaceMode === "files" ? "Shared files" : workspaceMode === "contacts" ? "All contacts" : "Open conversations"}
