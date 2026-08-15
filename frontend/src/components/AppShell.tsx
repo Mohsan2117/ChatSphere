@@ -85,6 +85,41 @@ type AdminReport = {
   createdAt?: string;
 };
 
+type CallHistoryEntry = {
+  id: string;
+  otherUser: { id: string; name: string; avatarUrl: string };
+  direction: "incoming" | "outgoing";
+  callType: "audio" | "video";
+  status: "ringing" | "answered" | "missed" | "rejected" | "ended";
+  startedAt: string;
+  answeredAt?: string;
+  endedAt?: string;
+  durationSeconds: number;
+};
+
+function formatCallDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function formatCallTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } else if (diffDays === 1) {
+    return "Yesterday";
+  } else if (diffDays < 7) {
+    return date.toLocaleDateString([], { weekday: "long" });
+  } else {
+    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+}
+
 export function AppShell() {
   const [isAuthed, setIsAuthed] = useState(false);
   const [authStep, setAuthStep] = useState<AuthStep>("signup");
@@ -268,6 +303,40 @@ export function AppShell() {
   };
   const [isMobileAIChatOpen, setIsMobileAIChatOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<"chats" | "status" | "groups" | "calls">("chats");
+  const [callHistory, setCallHistory] = useState<CallHistoryEntry[]>([]);
+  const [isCallHistoryLoading, setIsCallHistoryLoading] = useState(false);
+  const [callHistorySearch, setCallHistorySearch] = useState("");
+
+  const fetchCallHistory = useCallback(async () => {
+    if (!authToken) return;
+    setIsCallHistoryLoading(true);
+    try {
+      const res = await fetch(`${apiUrl()}/api/v1/calls/history?limit=50`, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      if (!res.ok) throw new Error("Failed to fetch call history");
+      const data = await res.json();
+      setCallHistory(data.calls || []);
+    } catch (err) {
+      console.error("Failed to fetch call history:", err);
+    } finally {
+      setIsCallHistoryLoading(false);
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    if (mobileTab === "calls") {
+      fetchCallHistory();
+    }
+  }, [mobileTab, fetchCallHistory]);
+
+  useEffect(() => {
+    if ((callState === "ended" || callState === "rejected") && mobileTab === "calls") {
+      const timer = setTimeout(() => fetchCallHistory(), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [callState, mobileTab, fetchCallHistory]);
+
   const [aiMessages, setAiMessages] = useState<AIMessage[]>([
     {
       id: "welcome",
@@ -2881,7 +2950,114 @@ export function AppShell() {
         </aside>
 
         {workspaceMode !== "ai" ? (
-        <aside className={`h-full lg:h-screen min-h-0 overflow-y-auto border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+        <aside className={`flex flex-col h-full lg:h-screen min-h-0 border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+          {mobileTab === "calls" ? (
+            <>
+              <header className="border-b border-[#e5e9f0] px-5 py-5">
+                <div className="hidden lg:flex items-center justify-between gap-3">
+                  <h1 className="text-2xl font-black tracking-normal">Calls</h1>
+                </div>
+                <label className="mt-5 lg:mt-3 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b]">
+                  <Search size={19} />
+                  <input
+                    className="w-full bg-transparent text-sm outline-none focus-visible:!outline-none placeholder:text-[#94a3b8]"
+                    onChange={(e) => setCallHistorySearch(e.target.value)}
+                    placeholder="Search calls"
+                    value={callHistorySearch}
+                  />
+                </label>
+              </header>
+              <div className="flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
+                <div className="mb-3 flex items-center justify-between px-2">
+                  <h2 className="text-sm font-black">Recent</h2>
+                </div>
+                {isCallHistoryLoading ? (
+                  <div className="space-y-3">
+                    {[1,2,3,4,5].map(i => (
+                      <div key={i} className="flex items-center gap-3 rounded-2xl p-3">
+                        <div className="cs-skeleton h-12 w-12 rounded-2xl" />
+                        <div className="flex-1 space-y-2">
+                          <div className="cs-skeleton h-4 w-32" />
+                          <div className="cs-skeleton h-3 w-24" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : callHistory.filter(c => !callHistorySearch.trim() || c.otherUser.name.toLowerCase().includes(callHistorySearch.toLowerCase())).length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
+                      <Phone size={24} />
+                    </div>
+                    <h2 className="mt-5 text-base font-black">{callHistorySearch.trim() ? "No matching calls" : "No calls yet"}</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#64748b]">{callHistorySearch.trim() ? "Try a different search term." : "Your call history will appear here after you make or receive calls."}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {callHistory
+                      .filter(c => !callHistorySearch.trim() || c.otherUser.name.toLowerCase().includes(callHistorySearch.toLowerCase()))
+                      .map(call => {
+                        const isMissed = call.status === "missed" || call.status === "rejected";
+                        const directionIcon = call.direction === "outgoing" ? "↗" : "↙";
+                        return (
+                          <div
+                            key={call.id}
+                            className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-[#f8fafc]"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                const chatSeed = directoryChats.find(c => c.id === call.otherUser.id);
+                                if (chatSeed) selectChat(chatSeed);
+                              }
+                            }}
+                            onClick={() => {
+                              const chatSeed = directoryChats.find(c => c.id === call.otherUser.id);
+                              if (chatSeed) selectChat(chatSeed);
+                            }}
+                            role="button"
+                            tabIndex={0}
+                          >
+                            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]">
+                              {call.otherUser.avatarUrl ? (
+                                <img alt={call.otherUser.name} className="h-full w-full object-cover" src={call.otherUser.avatarUrl} />
+                              ) : (
+                                chatInitials(call.otherUser.name)
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className={`truncate text-sm font-bold ${isMissed ? "text-[#ef4444]" : "text-[#18212f]"}`}>{call.otherUser.name}</div>
+                              <div className={`mt-0.5 flex items-center gap-1 text-xs ${isMissed ? "text-[#ef4444]" : "text-[#64748b]"}`}>
+                                <span>{directionIcon}</span>
+                                <span className="capitalize">{call.direction}</span>
+                                <span>·</span>
+                                {call.callType === "video" ? <Video size={12} /> : <Phone size={12} />}
+                                {call.status === "ended" && call.durationSeconds > 0 ? (
+                                  <><span>·</span><span>{formatCallDuration(call.durationSeconds)}</span></>
+                                ) : (
+                                  <><span>·</span><span className="capitalize">{call.status}</span></>
+                                )}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-[#94a3b8]">{formatCallTime(call.startedAt)}</div>
+                            </div>
+                            <button
+                              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#00a884] hover:bg-[#e7f8f2] transition"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const chatSeed = directoryChats.find(c => c.id === call.otherUser.id);
+                                if (chatSeed) startCall(chatSeed, call.callType);
+                              }}
+                              type="button"
+                            >
+                              {call.callType === "video" ? <Video size={20} /> : <Phone size={20} />}
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
           <header className="border-b border-[#e5e9f0] px-5 py-5">
             <div className="hidden lg:flex items-center justify-between gap-3">
               <div>
@@ -2929,7 +3105,7 @@ export function AppShell() {
             </label>
           </header>
 
-          <div className="px-3 py-4 pb-24 lg:pb-4">
+          <div className="flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
             <div className="mb-3 flex items-center justify-between px-2">
               <h2 className="text-sm font-black">
                 {workspaceMode === "files" ? "Shared files" : workspaceMode === "contacts" ? "All contacts" : "Open conversations"}
@@ -2946,7 +3122,7 @@ export function AppShell() {
                       onClick={() => chat && selectChat(chat)}
                       type="button"
                     >
-                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70]">
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e7f8f2] text-[#00a884]">
                         <FileText size={20} />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -3089,6 +3265,31 @@ export function AppShell() {
                 <p className="mt-2 text-sm leading-6 text-[#64748b]">Registered users will appear here after database search is connected.</p>
               </div>
             )}
+          </div>
+          </>
+          )}
+          {/* Desktop tab bar */}
+          <div className="mt-auto hidden lg:flex shrink-0 items-center justify-around border-t border-[#e5e9f0] bg-white px-2 py-2">
+            {([
+              { key: "chats" as const, label: "Chats", icon: MessageCircle },
+              { key: "status" as const, label: "Status", icon: Radio },
+              { key: "groups" as const, label: "Groups", icon: Users },
+              { key: "calls" as const, label: "Calls", icon: Phone },
+            ]).map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                className={`flex flex-col items-center justify-center gap-0.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                  mobileTab === key
+                    ? "text-[#00a884]"
+                    : "text-[#94a3b8] hover:text-[#64748b]"
+                }`}
+                onClick={() => setMobileTab(key)}
+                type="button"
+              >
+                <Icon size={20} />
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
         </aside>
         ) : null}
@@ -3339,6 +3540,38 @@ export function AppShell() {
                 )}
               </footer>
             </>
+          ) : mobileTab === "calls" ? (
+            <div className="flex flex-1 items-center justify-center px-6">
+              <div className="cs-fade-up max-w-lg text-center">
+                <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-white text-[#00a884] shadow-sm">
+                  <Phone size={36} />
+                </div>
+                <h2 className="mt-6 text-3xl font-black tracking-normal">Start a call</h2>
+                <p className="mt-3 text-base leading-7 text-[#64748b]">Select a contact from your call history or chat list to start a voice or video call.</p>
+                <div className="mt-8 flex items-center justify-center gap-4">
+                  <button
+                    className="flex items-center gap-2 rounded-xl bg-[#e7f8f2] px-5 py-3 text-sm font-bold text-[#008f70] transition hover:bg-[#d1f0e5]"
+                    onClick={() => { setMobileTab("chats"); }}
+                    type="button"
+                  >
+                    <Phone size={18} />
+                    <span>Voice call</span>
+                  </button>
+                  <button
+                    className="flex items-center gap-2 rounded-xl bg-[#e7f8f2] px-5 py-3 text-sm font-bold text-[#008f70] transition hover:bg-[#d1f0e5]"
+                    onClick={() => { setMobileTab("chats"); }}
+                    type="button"
+                  >
+                    <Video size={18} />
+                    <span>Video call</span>
+                  </button>
+                </div>
+                <p className="mt-10 flex items-center justify-center gap-2 text-xs text-[#94a3b8]">
+                  <ShieldCheck size={14} />
+                  <span>Your calls are peer-to-peer encrypted</span>
+                </p>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-1 items-center justify-center px-6">
             <div className="cs-fade-up max-w-lg text-center">
@@ -3394,21 +3627,105 @@ export function AppShell() {
 
       {/* Mobile placeholder screens for non-chats tabs */}
       {!selectedChat && mobileTab !== "chats" && workspaceMode !== "ai" ? (
-        <div className="fixed inset-0 top-16 bottom-16 z-30 flex flex-col items-center justify-center bg-white px-6 lg:hidden">
-          <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-[#f7f9fb] text-[#94a3b8]">
-            {mobileTab === "status" ? <Radio size={36} /> : mobileTab === "groups" ? <Users size={36} /> : <Phone size={36} />}
+        mobileTab === "calls" ? (
+          <div className="fixed inset-0 top-16 bottom-16 z-30 flex flex-col bg-white lg:hidden">
+            <div className="border-b border-[#e5e9f0] px-4 py-3">
+              <h2 className="text-lg font-black">Calls</h2>
+              <label className="mt-2 flex h-10 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b]">
+                <Search size={17} />
+                <input
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
+                  onChange={(e) => setCallHistorySearch(e.target.value)}
+                  placeholder="Search calls"
+                  value={callHistorySearch}
+                />
+              </label>
+            </div>
+            <div className="flex-1 overflow-y-auto px-3 py-3">
+              <div className="mb-2 px-2 text-xs font-bold text-[#94a3b8]">Recent</div>
+              {isCallHistoryLoading ? (
+                <div className="space-y-3">
+                  {[1,2,3].map(i => (
+                    <div key={i} className="flex items-center gap-3 rounded-2xl p-3">
+                      <div className="cs-skeleton h-11 w-11 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <div className="cs-skeleton h-4 w-28" />
+                        <div className="cs-skeleton h-3 w-20" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : callHistory.filter(c => !callHistorySearch.trim() || c.otherUser.name.toLowerCase().includes(callHistorySearch.toLowerCase())).length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="grid h-16 w-16 place-items-center rounded-full bg-[#f7f9fb] text-[#94a3b8]">
+                    <Phone size={28} />
+                  </div>
+                  <p className="mt-4 text-sm font-bold text-[#18212f]">{callHistorySearch.trim() ? "No matching calls" : "No calls yet"}</p>
+                  <p className="mt-1 text-xs text-[#94a3b8]">{callHistorySearch.trim() ? "Try a different name." : "Start a conversation and make a call."}</p>
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  {callHistory
+                    .filter(c => !callHistorySearch.trim() || c.otherUser.name.toLowerCase().includes(callHistorySearch.toLowerCase()))
+                    .map(call => {
+                      const isMissed = call.status === "missed" || call.status === "rejected";
+                      const directionIcon = call.direction === "outgoing" ? "↗" : "↙";
+                      return (
+                        <div key={call.id} className="flex items-center gap-3 rounded-2xl p-3">
+                          <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
+                            {call.otherUser.avatarUrl ? (
+                              <img alt={call.otherUser.name} className="h-full w-full object-cover" src={call.otherUser.avatarUrl} />
+                            ) : (
+                              chatInitials(call.otherUser.name)
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className={`truncate text-sm font-bold ${isMissed ? "text-[#ef4444]" : "text-[#18212f]"}`}>{call.otherUser.name}</div>
+                            <div className={`mt-0.5 flex items-center gap-1 text-xs ${isMissed ? "text-[#ef4444]" : "text-[#64748b]"}`}>
+                              <span>{directionIcon}</span>
+                              {call.callType === "video" ? <Video size={11} /> : <Phone size={11} />}
+                              <span>·</span>
+                              {call.status === "ended" && call.durationSeconds > 0 ? (
+                                <span>{formatCallDuration(call.durationSeconds)}</span>
+                              ) : (
+                                <span className="capitalize">{call.status}</span>
+                              )}
+                              <span>·</span>
+                              <span>{formatCallTime(call.startedAt)}</span>
+                            </div>
+                          </div>
+                          <button
+                            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#00a884] hover:bg-[#e7f8f2] transition"
+                            onClick={() => {
+                              const chatSeed = directoryChats.find(c => c.id === call.otherUser.id);
+                              if (chatSeed) startCall(chatSeed, call.callType);
+                            }}
+                            type="button"
+                          >
+                            {call.callType === "video" ? <Video size={18} /> : <Phone size={18} />}
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
           </div>
-          <h2 className="mt-6 text-2xl font-black tracking-normal text-[#18212f]">
-            {mobileTab === "status" ? "Status" : mobileTab === "groups" ? "Groups" : "Calls"}
-          </h2>
-          <p className="mt-3 text-center text-base leading-7 text-[#64748b]">
-            {mobileTab === "status"
-              ? "Status updates from your contacts will appear here."
-              : mobileTab === "groups"
-                ? "Group conversations will appear here."
-                : "Your call history will appear here."}
-          </p>
-        </div>
+        ) : (
+          <div className="fixed inset-0 top-16 bottom-16 z-30 flex flex-col items-center justify-center bg-white px-6 lg:hidden">
+            <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-[#f7f9fb] text-[#94a3b8]">
+              {mobileTab === "status" ? <Radio size={36} /> : <Users size={36} />}
+            </div>
+            <h2 className="mt-6 text-2xl font-black tracking-normal text-[#18212f]">
+              {mobileTab === "status" ? "Status" : "Groups"}
+            </h2>
+            <p className="mt-3 text-center text-base leading-7 text-[#64748b]">
+              {mobileTab === "status"
+                ? "Status updates from your contacts will appear here."
+                : "Group conversations will appear here."}
+            </p>
+          </div>
+        )
       ) : null}
 
       {/* Mobile & tablet AI chat overlay */}

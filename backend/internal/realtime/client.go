@@ -151,6 +151,7 @@ func (c *Client) readPump() {
 			var callPayload struct {
 				CallID   string `json:"callId"`
 				IsInvite bool   `json:"isInvite"`
+				CallType string `json:"callType"`
 			}
 			if err := json.Unmarshal(event.Payload, &callPayload); err != nil || callPayload.CallID == "" {
 				continue
@@ -199,6 +200,16 @@ func (c *Client) readPump() {
 
 					c.hub.AddCall(callID, c.userID, recipientID)
 					c.hub.Broadcast(event)
+
+					if c.store != nil {
+						go func() {
+							ct := callPayload.CallType
+							if ct == "" {
+								ct = "audio"
+							}
+							_ = c.store.CreateCallHistory(callID, c.userID, recipientID, ct)
+						}()
+					}
 				} else {
 					// WebRTC connection offer between active participants in an ongoing call.
 					if _, ok := session.Participants[c.userID]; !ok {
@@ -385,6 +396,19 @@ func (c *Client) readPump() {
 
 				// Forward reject to target
 				c.hub.Broadcast(event)
+				if c.store != nil {
+					go func(cid, rejectingUserID, targetUserID string) {
+						history, err := c.store.GetCallHistoryByID(cid)
+						if err != nil {
+							return
+						}
+						isInitialPair := (history.CallerID == rejectingUserID && history.RecipientID == targetUserID) ||
+							(history.CallerID == targetUserID && history.RecipientID == rejectingUserID)
+						if isInitialPair && history.Status == "ringing" {
+							_ = c.store.UpdateCallHistoryStatus(cid, "rejected")
+						}
+					}(callID, c.userID, targetID)
+				}
 
 				// If the rejecting user was already an active participant, clean them up
 				if _, isActive := session.Participants[c.userID]; isActive {
@@ -396,9 +420,21 @@ func (c *Client) readPump() {
 
 			} else if event.Type == "call_end" {
 				// User hangs up/leaves call
-				events, _ := c.hub.LeaveCall(callID, c.userID)
+				events, callEnded := c.hub.LeaveCall(callID, c.userID)
 				for _, ev := range events {
 					c.hub.Broadcast(ev)
+				}
+				if c.store != nil && callEnded {
+					go func(cid string) {
+						history, err := c.store.GetCallHistoryByID(cid)
+						if err == nil {
+							if history.Status == "ringing" {
+								_ = c.store.UpdateCallHistoryStatus(cid, "missed")
+							} else if history.Status == "answered" {
+								_ = c.store.UpdateCallHistoryStatus(cid, "ended")
+							}
+						}
+					}(callID)
 				}
 
 			} else {
@@ -426,6 +462,9 @@ func (c *Client) readPump() {
 				}
 
 				c.hub.Broadcast(event)
+				if event.Type == "call_answer" && c.store != nil {
+					_ = c.store.UpdateCallHistoryStatus(callID, "answered")
+				}
 			}
 		}
 	}

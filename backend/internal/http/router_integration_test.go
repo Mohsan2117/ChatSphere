@@ -73,6 +73,69 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	}, http.StatusInternalServerError)
 }
 
+func TestCallHistoryEndpoint(t *testing.T) {
+	cfg := config.Config{
+		Port:           "0",
+		FrontendOrigin: "http://localhost:3000",
+		DataPath:       t.TempDir() + "/data.json",
+	}
+	dataStore, err := store.New(cfg.DataPath, "")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	hub := realtime.NewHub()
+	go hub.Run()
+	router := NewRouter(cfg, hub, dataStore)
+	suffix := time.Now().UTC().Format("20060102150405")
+
+	ali := createTestUser(t, router, "ali-calls-"+suffix+"@example.com", "Ali", "Caller")
+	hamza := createTestUser(t, router, "hamza-calls-"+suffix+"@example.com", "Hamza", "Receiver")
+
+	if err := dataStore.CreateCallHistory("call-test-1", ali.ID, hamza.ID, "video"); err != nil {
+		t.Fatalf("create call history: %v", err)
+	}
+	if err := dataStore.UpdateCallHistoryStatus("call-test-1", "answered"); err != nil {
+		t.Fatalf("answer call history: %v", err)
+	}
+	if err := dataStore.UpdateCallHistoryStatus("call-test-1", "ended"); err != nil {
+		t.Fatalf("end call history: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/calls/history", nil)
+	req.Header.Set("Authorization", "Bearer "+ali.Token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/calls/history: status %d body %s", resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		Calls []struct {
+			ID        string `json:"id"`
+			Direction string `json:"direction"`
+			CallType  string `json:"callType"`
+			Status    string `json:"status"`
+			OtherUser struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"otherUser"`
+		} `json:"calls"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode call history response: %v", err)
+	}
+	if len(payload.Calls) != 1 {
+		t.Fatalf("call history count = %d, want 1", len(payload.Calls))
+	}
+	call := payload.Calls[0]
+	if call.ID != "call-test-1" || call.Direction != "outgoing" || call.CallType != "video" || call.Status != "ended" {
+		t.Fatalf("unexpected call summary: %+v", call)
+	}
+	if call.OtherUser.ID != hamza.ID || call.OtherUser.Name != "Hamza Receiver" {
+		t.Fatalf("unexpected other user: %+v", call.OtherUser)
+	}
+}
+
 type testUser struct {
 	ID    string
 	Email string

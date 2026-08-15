@@ -110,6 +110,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerContactRoutes(api.Group("/contacts"), dataStore)
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
+	registerCallRoutes(api.Group("/calls"), dataStore)
 	registerUploadRoutes(api.Group("/upload"), cfg, dataStore)
 	registerFileRoutes(api.Group("/files"), dataStore)
 	registerAdminRoutes(api.Group("/admin"), cfg, dataStore)
@@ -374,6 +375,66 @@ func registerGroupRoutes(group *gin.RouterGroup) {
 	group.PATCH("/:id", accepted("rename group"))
 	group.POST("/:id/members", accepted("invite group member"))
 	group.DELETE("/:id/members/:userId", accepted("remove group member"))
+}
+
+func registerCallRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	group.GET("/history", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		history, err := dataStore.GetCallHistory(authUser.ID, queryInt(c, "limit", 50))
+		if err != nil {
+			log.Printf("load call history failed user=%s: %v", authUser.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load call history"})
+			return
+		}
+
+		results := make([]gin.H, 0, len(history))
+		for _, call := range history {
+			otherUserID := call.CallerID
+			direction := "incoming"
+			if call.CallerID == authUser.ID {
+				otherUserID = call.RecipientID
+				direction = "outgoing"
+			}
+
+			otherUser := gin.H{
+				"id":        otherUserID,
+				"name":      "Unknown user",
+				"avatarUrl": "",
+			}
+			if user, err := dataStore.UserByID(otherUserID); err == nil {
+				name := strings.TrimSpace(user.FirstName + " " + user.LastName)
+				if name == "" {
+					name = user.Email
+				}
+				otherUser = gin.H{
+					"id":        user.ID,
+					"name":      name,
+					"avatarUrl": user.AvatarURL,
+				}
+			}
+
+			callType := call.CallType
+			if callType != "video" {
+				callType = "audio"
+			}
+
+			results = append(results, gin.H{
+				"id":              call.ID,
+				"otherUser":       otherUser,
+				"direction":       direction,
+				"callType":        callType,
+				"status":          call.Status,
+				"startedAt":       call.StartedAt,
+				"answeredAt":      call.AnsweredAt,
+				"endedAt":         call.EndedAt,
+				"durationSeconds": call.DurationSeconds,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"calls": results})
+	})
 }
 
 func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *realtime.Hub) {

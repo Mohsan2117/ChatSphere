@@ -36,8 +36,9 @@ type messageRows interface {
 }
 
 type dataFile struct {
-	Users   []User                   `json:"users"`
-	AIUsage map[string]map[string]int `json:"aiUsage,omitempty"`
+	Users       []User                    `json:"users"`
+	AIUsage     map[string]map[string]int `json:"aiUsage,omitempty"`
+	CallHistory []CallHistory             `json:"callHistory,omitempty"`
 }
 
 type User struct {
@@ -65,6 +66,18 @@ type Message struct {
 	AttachmentURL  string     `json:"attachmentUrl,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	ReadAt         *time.Time `json:"readAt,omitempty"`
+}
+
+type CallHistory struct {
+	ID              string     `json:"id"`
+	CallerID        string     `json:"callerId"`
+	RecipientID     string     `json:"recipientId"`
+	CallType        string     `json:"callType"`
+	Status          string     `json:"status"`
+	StartedAt       time.Time  `json:"startedAt"`
+	AnsweredAt      *time.Time `json:"answeredAt,omitempty"`
+	EndedAt         *time.Time `json:"endedAt,omitempty"`
+	DurationSeconds int        `json:"durationSeconds"`
 }
 
 type UserBlock struct {
@@ -1163,6 +1176,18 @@ func (s *Store) migrate(ctx context.Context) error {
 				request_count bigint not null default 0,
 				primary key (user_id, usage_date)
 			)`,
+			`
+			create table if not exists call_history (
+				id varchar(255) primary key,
+				caller_id varchar(64) not null,
+				recipient_id varchar(64) not null,
+				call_type varchar(16) not null default 'audio',
+				status varchar(16) not null default 'ringing',
+				started_at datetime not null default current_timestamp,
+				answered_at datetime,
+				ended_at datetime,
+				duration_seconds int not null default 0
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -1191,6 +1216,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column size_bytes bigint not null default 0`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_url text null`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_public_id varchar(255) null`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column caller_id varchar(64) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column recipient_id varchar(64) not null default ''`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column call_type varchar(16) not null default 'audio'`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column status varchar(16) not null default 'ringing'`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column started_at datetime not null default current_timestamp`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column answered_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column ended_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table call_history add column duration_seconds int not null default 0`)
 		_, _ = s.my.ExecContext(ctx, `
 			update app_users set
 				first_name = coalesce(first_name, ''),
@@ -1222,6 +1255,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_messages_conversation_created on messages (conversation_id, created_at, seq)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
+		_, _ = s.my.ExecContext(ctx, `create index idx_call_history_caller on call_history(caller_id)`)
+		_, _ = s.my.ExecContext(ctx, `create index idx_call_history_recipient on call_history(recipient_id)`)
 		return nil
 	}
 	_, err := s.db.Exec(ctx, `
@@ -1285,6 +1320,19 @@ func (s *Store) migrate(ctx context.Context) error {
 			request_count bigint not null default 0,
 			primary key (user_id, usage_date)
 		);
+		create table if not exists call_history (
+			id text primary key,
+			caller_id text not null,
+			recipient_id text not null,
+			call_type text not null default 'audio',
+			status text not null default 'ringing',
+			started_at timestamptz not null default now(),
+			answered_at timestamptz,
+			ended_at timestamptz,
+			duration_seconds integer not null default 0
+		);
+		create index if not exists idx_call_history_caller on call_history(caller_id);
+		create index if not exists idx_call_history_recipient on call_history(recipient_id);
 	`)
 	if err != nil {
 		return err
@@ -1311,6 +1359,14 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists size_bytes bigint not null default 0`)
 	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists cloudinary_url text`)
 	_, _ = s.db.Exec(ctx, `alter table attachments add column if not exists cloudinary_public_id text`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists caller_id text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists recipient_id text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists call_type text not null default 'audio'`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists status text not null default 'ringing'`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists started_at timestamptz not null default now()`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists answered_at timestamptz`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists ended_at timestamptz`)
+	_, _ = s.db.Exec(ctx, `alter table call_history add column if not exists duration_seconds integer not null default 0`)
 	_, _ = s.db.Exec(ctx, `
 		update app_users set
 			first_name = coalesce(first_name, ''),
@@ -1705,4 +1761,220 @@ func randomID() string {
 		return time.Now().UTC().Format("20060102150405.000000000")
 	}
 	return hex.EncodeToString(bytes[:])
+}
+
+func (s *Store) CreateCallHistory(id, callerID, recipientID, callType string) error {
+	id = strings.TrimSpace(id)
+	callerID = strings.TrimSpace(callerID)
+	recipientID = strings.TrimSpace(recipientID)
+	if id == "" || callerID == "" || recipientID == "" || callerID == recipientID {
+		return errors.New("invalid call history")
+	}
+	if callType != "video" {
+		callType = "audio"
+	}
+
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `
+			INSERT INTO call_history (id, caller_id, recipient_id, call_type, status, started_at)
+			VALUES ($1, $2, $3, $4, 'ringing', NOW())
+			ON CONFLICT (id) DO NOTHING
+		`, id, callerID, recipientID, callType)
+		return err
+	}
+	if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `
+			INSERT INTO call_history (id, caller_id, recipient_id, call_type, status, started_at)
+			VALUES (?, ?, ?, ?, 'ringing', UTC_TIMESTAMP())
+			ON DUPLICATE KEY UPDATE id = id
+		`, id, callerID, recipientID, callType)
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, call := range s.data.CallHistory {
+		if call.ID == id {
+			return nil
+		}
+	}
+
+	s.data.CallHistory = append(s.data.CallHistory, CallHistory{
+		ID:          id,
+		CallerID:    callerID,
+		RecipientID: recipientID,
+		CallType:    callType,
+		Status:      "ringing",
+		StartedAt:   time.Now().UTC(),
+	})
+	return s.saveLocked()
+}
+
+func (s *Store) UpdateCallHistoryStatus(id, status string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("call history id is required")
+	}
+	switch status {
+	case "answered", "ended", "rejected", "missed":
+	default:
+		return errors.New("invalid call history status")
+	}
+
+	if s.db != nil {
+		if status == "answered" {
+			_, err := s.db.Exec(context.Background(), `
+				UPDATE call_history
+				SET status = $2, answered_at = COALESCE(answered_at, NOW())
+				WHERE id = $1 AND status = 'ringing'
+			`, id, status)
+			return err
+		} else if status == "ended" || status == "rejected" || status == "missed" {
+			_, err := s.db.Exec(context.Background(), `
+				UPDATE call_history 
+				SET status = $2, 
+				    ended_at = COALESCE(ended_at, NOW()),
+				    duration_seconds = CASE WHEN answered_at IS NOT NULL AND $2 = 'ended' THEN GREATEST(EXTRACT(EPOCH FROM (COALESCE(ended_at, NOW()) - answered_at))::INTEGER, 0) ELSE duration_seconds END
+				WHERE id = $1 AND status <> $2
+			`, id, status)
+			return err
+		}
+	}
+	if s.my != nil {
+		if status == "answered" {
+			_, err := s.my.ExecContext(context.Background(), `
+				UPDATE call_history
+				SET status = ?, answered_at = COALESCE(answered_at, UTC_TIMESTAMP())
+				WHERE id = ? AND status = 'ringing'
+			`, status, id)
+			return err
+		} else if status == "ended" || status == "rejected" || status == "missed" {
+			_, err := s.my.ExecContext(context.Background(), `
+				UPDATE call_history 
+				SET status = ?, 
+				    ended_at = COALESCE(ended_at, UTC_TIMESTAMP()),
+				    duration_seconds = CASE WHEN answered_at IS NOT NULL AND ? = 'ended' THEN GREATEST(TIMESTAMPDIFF(SECOND, answered_at, COALESCE(ended_at, UTC_TIMESTAMP())), 0) ELSE duration_seconds END
+				WHERE id = ? AND status <> ?
+			`, status, status, id, status)
+			return err
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.data.CallHistory {
+		if s.data.CallHistory[i].ID == id {
+			s.data.CallHistory[i].Status = status
+			now := time.Now().UTC()
+			if status == "answered" {
+				s.data.CallHistory[i].AnsweredAt = &now
+			} else if status == "ended" || status == "rejected" || status == "missed" {
+				s.data.CallHistory[i].EndedAt = &now
+				if status == "ended" && s.data.CallHistory[i].AnsweredAt != nil {
+					s.data.CallHistory[i].DurationSeconds = int(now.Sub(*s.data.CallHistory[i].AnsweredAt).Seconds())
+				}
+			}
+			return s.saveLocked()
+		}
+	}
+	return errors.New("call history not found")
+}
+
+func (s *Store) GetCallHistory(userID string, limit int) ([]CallHistory, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `
+			SELECT id, caller_id, recipient_id, call_type, status, started_at, answered_at, ended_at, duration_seconds 
+			FROM call_history 
+			WHERE caller_id = $1 OR recipient_id = $1 
+			ORDER BY started_at DESC LIMIT $2
+		`, userID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var histories []CallHistory
+		for rows.Next() {
+			var h CallHistory
+			if err := rows.Scan(&h.ID, &h.CallerID, &h.RecipientID, &h.CallType, &h.Status, &h.StartedAt, &h.AnsweredAt, &h.EndedAt, &h.DurationSeconds); err != nil {
+				return nil, err
+			}
+			histories = append(histories, h)
+		}
+		return histories, nil
+	}
+
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `
+			SELECT id, caller_id, recipient_id, call_type, status, started_at, answered_at, ended_at, duration_seconds 
+			FROM call_history 
+			WHERE caller_id = ? OR recipient_id = ? 
+			ORDER BY started_at DESC LIMIT ?
+		`, userID, userID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var histories []CallHistory
+		for rows.Next() {
+			var h CallHistory
+			if err := rows.Scan(&h.ID, &h.CallerID, &h.RecipientID, &h.CallType, &h.Status, &h.StartedAt, &h.AnsweredAt, &h.EndedAt, &h.DurationSeconds); err != nil {
+				return nil, err
+			}
+			histories = append(histories, h)
+		}
+		return histories, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var histories []CallHistory
+	for i := len(s.data.CallHistory) - 1; i >= 0; i-- {
+		h := s.data.CallHistory[i]
+		if h.CallerID == userID || h.RecipientID == userID {
+			histories = append(histories, h)
+			if len(histories) >= limit {
+				break
+			}
+		}
+	}
+	if histories == nil {
+		histories = []CallHistory{}
+	}
+	return histories, nil
+}
+
+func (s *Store) GetCallHistoryByID(id string) (CallHistory, error) {
+	if s.db != nil {
+		var h CallHistory
+		err := s.db.QueryRow(context.Background(), `
+			SELECT id, caller_id, recipient_id, call_type, status, started_at, answered_at, ended_at, duration_seconds 
+			FROM call_history 
+			WHERE id = $1
+		`, id).Scan(&h.ID, &h.CallerID, &h.RecipientID, &h.CallType, &h.Status, &h.StartedAt, &h.AnsweredAt, &h.EndedAt, &h.DurationSeconds)
+		return h, err
+	}
+	if s.my != nil {
+		var h CallHistory
+		err := s.my.QueryRowContext(context.Background(), `
+			SELECT id, caller_id, recipient_id, call_type, status, started_at, answered_at, ended_at, duration_seconds 
+			FROM call_history 
+			WHERE id = ?
+		`, id).Scan(&h.ID, &h.CallerID, &h.RecipientID, &h.CallType, &h.Status, &h.StartedAt, &h.AnsweredAt, &h.EndedAt, &h.DurationSeconds)
+		return h, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, h := range s.data.CallHistory {
+		if h.ID == id {
+			return h, nil
+		}
+	}
+	return CallHistory{}, errors.New("call history not found")
 }
