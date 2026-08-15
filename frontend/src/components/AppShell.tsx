@@ -4097,14 +4097,38 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
     return next < 0 || next >= current.group.length ? current : { ...current, index: next };
   });
 
-  const renderGroup = (group: StatusEntry[]) => {
+  const renderGroup = (group: StatusEntry[], compact = false) => {
     const first = group[0];
     const unseen = group.some((status) => !status.viewed);
+    const mediaSource = first.type === "image" || first.type === "video" ? attachmentSource(first.mediaUrl || "", authToken) : "";
     return (
-      <button className="flex w-full items-center gap-3 border-b border-[#edf1f5] px-4 py-3 text-left transition hover:bg-[#f8fafc]" key={first.userId} onClick={() => openGroup(group)} type="button">
-        <StatusAvatar ring={unseen ? "unseen" : "viewed"} user={first.user} />
-        <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-black text-[#18212f]">{first.user.name}</strong><span className="mt-1 block text-xs text-[#64748b]">{statusRelativeTime(first.createdAt)}{group.length > 1 ? ` · ${group.length} updates` : ""}</span></span>
-        <ChevronRight className="text-[#94a3b8]" size={18} />
+      <button className={compact
+        ? "flex w-[76px] shrink-0 flex-col items-center gap-2 text-center"
+        : "flex h-auto w-[76px] shrink-0 flex-col items-center gap-2 text-center lg:relative lg:h-[230px] lg:w-[132px] lg:overflow-hidden lg:rounded-2xl lg:border lg:border-[#dce1e8] lg:bg-[#e7f8f2] lg:text-left lg:shadow-sm lg:transition lg:hover:-translate-y-0.5 lg:hover:shadow-md"}
+        key={first.userId} onClick={() => openGroup(group)} type="button">
+        {compact ? (
+          <>
+            <StatusAvatar ring={unseen ? "unseen" : "viewed"} size="h-[72px] w-[72px]" user={first.user} />
+            <span className="w-full truncate text-xs font-bold text-[#334155]">{first.user.name}</span>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col items-center gap-2 lg:hidden">
+              <StatusAvatar ring={unseen ? "unseen" : "viewed"} size="h-[72px] w-[72px]" user={first.user} />
+              <span className="w-full truncate text-xs font-bold text-[#334155]">{first.user.name}</span>
+            </div>
+            <div className="relative hidden h-full flex-col items-center justify-between p-3 lg:flex">
+              {mediaSource ? (
+                first.type === "video" ? <video aria-hidden className="absolute inset-0 h-full w-full object-cover" muted playsInline src={mediaSource} /> : <img alt="" className="absolute inset-0 h-full w-full object-cover" src={mediaSource} />
+              ) : <div className="absolute inset-0" style={{ backgroundColor: first.background || "#e7f8f2" }} />}
+              <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/75" />
+              <div className="relative flex h-full w-full flex-col items-center justify-between">
+                <StatusAvatar ring={unseen ? "unseen" : "viewed"} size="h-11 w-11" user={first.user} />
+                <span className="w-full truncate text-center text-sm font-black text-white">{first.user.name}</span>
+              </div>
+            </div>
+          </>
+        )}
       </button>
     );
   };
@@ -4126,8 +4150,8 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
         </section>
         {error ? <div className="mx-4 mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div> : null}
         {isLoading ? <div className="space-y-3 px-4 py-5">{[1, 2, 3].map((item) => <div className="flex items-center gap-3" key={item}><div className="cs-skeleton h-14 w-14 rounded-full" /><div className="cs-skeleton h-4 w-40" /></div>)}</div> : null}
-        {!isLoading && recentGroups.length ? <section><h2 className="px-4 pb-2 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Recent updates</h2>{recentGroups.map(renderGroup)}</section> : null}
-        {!isLoading && viewedGroups.length ? <section><h2 className="px-4 pb-2 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Viewed updates</h2>{viewedGroups.map(renderGroup)}</section> : null}
+        {!isLoading && recentGroups.length ? <section><h2 className="px-4 pb-3 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Recent updates</h2><div className="flex gap-3 overflow-x-auto px-4 pb-4">{recentGroups.map((group) => renderGroup(group))}</div></section> : null}
+        {!isLoading && viewedGroups.length ? <section><h2 className="px-4 pb-3 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Viewed updates</h2><div className="flex gap-4 overflow-x-auto px-4 pb-4">{viewedGroups.map((group) => renderGroup(group, true))}</div></section> : null}
         {!isLoading && !recentGroups.length && !viewedGroups.length ? <div className="px-6 py-16 text-center"><Radio className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-base font-black text-[#18212f]">No recent updates</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Share a photo, video, or thought with your contacts.</p></div> : null}
       </div>
 
