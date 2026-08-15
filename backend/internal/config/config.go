@@ -38,6 +38,12 @@ type Config struct {
 	CloudinaryAPIKey       string
 	CloudinaryAPISecret    string
 	CloudinaryUploadPreset string
+
+	MaxUploadSizeMB             int
+	ImageOptimizeThresholdBytes int64
+	VideoOptimizeThresholdBytes int64
+	ImageMaxDimension           int
+	VideoMaxDimension           int
 }
 
 func Load() Config {
@@ -75,7 +81,25 @@ func Load() Config {
 		CloudinaryAPIKey:       os.Getenv("CLOUDINARY_API_KEY"),
 		CloudinaryAPISecret:    os.Getenv("CLOUDINARY_API_SECRET"),
 		CloudinaryUploadPreset: os.Getenv("CLOUDINARY_UPLOAD_PRESET"),
+
+		MaxUploadSizeMB:             envInt("MAX_UPLOAD_SIZE_MB", 50),
+		ImageOptimizeThresholdBytes: envInt64("IMAGE_OPTIMIZE_THRESHOLD_BYTES", 2097152),
+		VideoOptimizeThresholdBytes: envInt64("VIDEO_OPTIMIZE_THRESHOLD_BYTES", 10485760),
+		ImageMaxDimension:           envInt("IMAGE_MAX_DIMENSION", 1920),
+		VideoMaxDimension:           envInt("VIDEO_MAX_DIMENSION", 1280),
 	}
+}
+
+func envInt64(key string, fallback int64) int64 {
+	valStr := os.Getenv(key)
+	if valStr == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(valStr, 10, 64)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func envInt(key string, fallback int) int {

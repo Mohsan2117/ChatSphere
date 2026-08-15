@@ -610,7 +610,7 @@ type CloudinaryResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func uploadToCloudinary(cloudName, apiKey, apiSecret, uploadPreset, kind, filename string, content []byte) (string, string, error) {
+func uploadToCloudinary(cloudName, apiKey, apiSecret, uploadPreset, kind, filename string, fileReader io.Reader) (string, string, error) {
 	resourceType := "raw"
 	if kind == "image" {
 		resourceType = "image"
@@ -633,7 +633,7 @@ func uploadToCloudinary(cloudName, apiKey, apiSecret, uploadPreset, kind, filena
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := io.Copy(part, bytes.NewReader(content)); err != nil {
+	if _, err := io.Copy(part, fileReader); err != nil {
 		return "", "", err
 	}
 
@@ -716,8 +716,43 @@ func deleteFromCloudinary(cloudName, apiKey, apiSecret, kind, publicID string) e
 	return nil
 }
 
+func optimizeCloudinaryURL(rawURL string, kind string, size int64, cfg config.Config) string {
+	// Only optimize images and videos
+	if kind != "image" && kind != "video" {
+		return rawURL
+	}
+	if !strings.Contains(rawURL, "cloudinary.com") {
+		return rawURL
+	}
+
+	// Check if file is large enough to warrant optimization
+	isLarge := false
+	var transformStr string
+	if kind == "image" && size > cfg.ImageOptimizeThresholdBytes {
+		isLarge = true
+		transformStr = fmt.Sprintf("f_auto,q_auto,c_limit,w_%d,h_%d", cfg.ImageMaxDimension, cfg.ImageMaxDimension)
+	} else if kind == "video" && size > cfg.VideoOptimizeThresholdBytes {
+		isLarge = true
+		transformStr = fmt.Sprintf("f_auto,q_auto,c_limit,w_%d,h_%d", cfg.VideoMaxDimension, cfg.VideoMaxDimension)
+	}
+
+	if !isLarge {
+		return rawURL
+	}
+
+	// Insert transformation string right after "/upload/" in the Cloudinary URL
+	// A typical URL is: https://res.cloudinary.com/<cloud>/<resource_type>/upload/v<version>/<public_id>
+	const uploadMarker = "/upload/"
+	idx := strings.Index(rawURL, uploadMarker)
+	if idx == -1 {
+		return rawURL
+	}
+
+	insertIdx := idx + len(uploadMarker)
+	return rawURL[:insertIdx] + transformStr + "/" + rawURL[insertIdx:]
+}
+
 func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
-	const maxUploadBytes int64 = 10 << 20
 	group.POST("", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -728,25 +763,20 @@ func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 			return
 		}
+
+		maxUploadBytes := int64(cfg.MaxUploadSizeMB) << 20
 		if file.Size > maxUploadBytes {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be 10 MB or smaller"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("file must be %d MB or smaller", cfg.MaxUploadSizeMB)})
 			return
 		}
+
 		source, err := file.Open()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read file"})
 			return
 		}
 		defer source.Close()
-		content, err := io.ReadAll(io.LimitReader(source, maxUploadBytes+1))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read file"})
-			return
-		}
-		if int64(len(content)) > maxUploadBytes {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "file must be 10 MB or smaller"})
-			return
-		}
+
 		contentType := file.Header.Get("Content-Type")
 		if contentType == "" || contentType == "application/octet-stream" {
 			if inferred := mime.TypeByExtension(strings.ToLower(filepath.Ext(file.Filename))); inferred != "" {
@@ -766,6 +796,8 @@ func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *
 		}
 
 		if cfg.CloudinaryCloudName != "" && cfg.CloudinaryAPIKey != "" && cfg.CloudinaryAPISecret != "" {
+			// Streaming directly from file without buffering into []byte first
+			uploadReader := io.LimitReader(source, maxUploadBytes)
 			cloudinaryURL, cloudinaryPublicID, err := uploadToCloudinary(
 				cfg.CloudinaryCloudName,
 				cfg.CloudinaryAPIKey,
@@ -773,19 +805,23 @@ func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *
 				cfg.CloudinaryUploadPreset,
 				kind,
 				file.Filename,
-				content,
+				uploadReader,
 			)
 			if err != nil {
 				log.Printf("cloudinary upload failed user=%s name=%s size=%d: %v", authUser.Email, file.Filename, file.Size, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "could not upload file to cloud storage"})
 				return
 			}
+
+			// Apply Cloudinary Dynamic URL transformations for optimization on delivery if size exceeds threshold
+			cloudinaryURL = optimizeCloudinaryURL(cloudinaryURL, kind, file.Size, cfg)
+
 			_, err = dataStore.SaveCloudinaryAttachment(
 				authUser.Email,
 				file.Filename,
 				contentType,
 				kind,
-				int64(len(content)),
+				file.Size,
 				cloudinaryURL,
 				cloudinaryPublicID,
 			)
@@ -814,6 +850,16 @@ func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *
 		}
 
 		// Fallback to local DB storage
+		content, err := io.ReadAll(io.LimitReader(source, maxUploadBytes+1))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read file"})
+			return
+		}
+		if int64(len(content)) > maxUploadBytes {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("file must be %d MB or smaller", cfg.MaxUploadSizeMB)})
+			return
+		}
+
 		attachment, err := dataStore.SaveAttachment(authUser.Email, file.Filename, contentType, kind, content)
 		if err != nil {
 			log.Printf("save attachment failed user=%s name=%s size=%d: %v", authUser.Email, file.Filename, file.Size, err)
@@ -824,6 +870,7 @@ func registerUploadRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save file"})
 			return
 		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"name": file.Filename,
 			"type": contentType,

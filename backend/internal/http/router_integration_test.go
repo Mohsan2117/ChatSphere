@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -210,4 +211,118 @@ func TestVoiceMessageUpload(t *testing.T) {
 			"url":  uploadResp.URL,
 		},
 	}, http.StatusOK)
+}
+
+func TestOptimizeCloudinaryURL(t *testing.T) {
+	cfg := config.Config{
+		MaxUploadSizeMB:             50,
+		ImageOptimizeThresholdBytes: 2097152,  // 2 MB
+		VideoOptimizeThresholdBytes: 10485760, // 10 MB
+		ImageMaxDimension:           1920,
+		VideoMaxDimension:           1280,
+	}
+
+	tests := []struct {
+		name        string
+		rawURL      string
+		kind        string
+		size        int64
+		expectedURL string
+	}{
+		{
+			name:        "Image below threshold -> unchanged",
+			rawURL:      "https://res.cloudinary.com/demo/image/upload/v12345/sample.jpg",
+			kind:        "image",
+			size:        1 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/image/upload/v12345/sample.jpg",
+		},
+		{
+			name:        "Image above threshold -> optimized with c_limit and 1920 dimension",
+			rawURL:      "https://res.cloudinary.com/demo/image/upload/v12345/sample.jpg",
+			kind:        "image",
+			size:        3 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/image/upload/f_auto,q_auto,c_limit,w_1920,h_1920/v12345/sample.jpg",
+		},
+		{
+			name:        "Video below threshold -> unchanged",
+			rawURL:      "https://res.cloudinary.com/demo/video/upload/v12345/sample.mp4",
+			kind:        "video",
+			size:        5 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/video/upload/v12345/sample.mp4",
+		},
+		{
+			name:        "Video above threshold -> optimized with c_limit and 1280 dimension",
+			rawURL:      "https://res.cloudinary.com/demo/video/upload/v12345/sample.mp4",
+			kind:        "video",
+			size:        15 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/video/upload/f_auto,q_auto,c_limit,w_1280,h_1280/v12345/sample.mp4",
+		},
+		{
+			name:        "Audio -> unchanged even if large",
+			rawURL:      "https://res.cloudinary.com/demo/video/upload/v12345/sample.mp3",
+			kind:        "audio",
+			size:        25 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/video/upload/v12345/sample.mp3",
+		},
+		{
+			name:        "Generic file -> unchanged even if large",
+			rawURL:      "https://res.cloudinary.com/demo/raw/upload/v12345/sample.pdf",
+			kind:        "file",
+			size:        25 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/raw/upload/v12345/sample.pdf",
+		},
+		{
+			name:        "Invalid Cloudinary URL -> unchanged",
+			rawURL:      "https://res.cloudinary.com/demo/image/download/v12345/sample.jpg",
+			kind:        "image",
+			size:        3 * 1024 * 1024,
+			expectedURL: "https://res.cloudinary.com/demo/image/download/v12345/sample.jpg",
+		},
+		{
+			name:        "Non-Cloudinary URL -> unchanged",
+			rawURL:      "https://example.com/files/sample.jpg",
+			kind:        "image",
+			size:        3 * 1024 * 1024,
+			expectedURL: "https://example.com/files/sample.jpg",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := optimizeCloudinaryURL(tc.rawURL, tc.kind, tc.size, cfg)
+			if actual != tc.expectedURL {
+				t.Errorf("expected URL:\n%s\ngot:\n%s", tc.expectedURL, actual)
+			}
+			// Verify that no cropping transforms (c_crop, c_fill, c_fill_pad) are introduced
+			if strings.Contains(actual, "c_crop") || strings.Contains(actual, "c_fill") || strings.Contains(actual, "c_fill_pad") {
+				t.Errorf("illegal crop transformation introduced in: %s", actual)
+			}
+		})
+	}
+}
+
+func TestConfigDefaults(t *testing.T) {
+	// Unset environment variables to ensure we check defaults
+	os.Unsetenv("MAX_UPLOAD_SIZE_MB")
+	os.Unsetenv("IMAGE_OPTIMIZE_THRESHOLD_BYTES")
+	os.Unsetenv("VIDEO_OPTIMIZE_THRESHOLD_BYTES")
+	os.Unsetenv("IMAGE_MAX_DIMENSION")
+	os.Unsetenv("VIDEO_MAX_DIMENSION")
+
+	cfg := config.Load()
+	if cfg.MaxUploadSizeMB != 50 {
+		t.Errorf("expected default MaxUploadSizeMB to be 50, got %d", cfg.MaxUploadSizeMB)
+	}
+	if cfg.ImageOptimizeThresholdBytes != 2097152 {
+		t.Errorf("expected default ImageOptimizeThresholdBytes to be 2097152, got %d", cfg.ImageOptimizeThresholdBytes)
+	}
+	if cfg.VideoOptimizeThresholdBytes != 10485760 {
+		t.Errorf("expected default VideoOptimizeThresholdBytes to be 10485760, got %d", cfg.VideoOptimizeThresholdBytes)
+	}
+	if cfg.ImageMaxDimension != 1920 {
+		t.Errorf("expected default ImageMaxDimension to be 1920, got %d", cfg.ImageMaxDimension)
+	}
+	if cfg.VideoMaxDimension != 1280 {
+		t.Errorf("expected default VideoMaxDimension to be 1280, got %d", cfg.VideoMaxDimension)
+	}
 }
