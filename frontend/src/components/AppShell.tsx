@@ -2948,9 +2948,6 @@ export function AppShell() {
             {isMobileDrawerOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
           <span className="text-base font-black tracking-tight">ChatSphere</span>
-          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-white/10 text-[#00a884]">
-            {workspaceTitle}
-          </span>
         </div>
         <button
           className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-white/10 text-xs font-black text-[#00a884] hover:bg-white/20"
