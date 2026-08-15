@@ -36,11 +36,14 @@ type messageRows interface {
 }
 
 type dataFile struct {
-	Users       []User                    `json:"users"`
-	AIUsage     map[string]map[string]int `json:"aiUsage,omitempty"`
-	CallHistory []CallHistory             `json:"callHistory,omitempty"`
-	Statuses    []Status                  `json:"statuses,omitempty"`
-	StatusViews []StatusView              `json:"statusViews,omitempty"`
+	Users         []User                    `json:"users"`
+	AIUsage       map[string]map[string]int `json:"aiUsage,omitempty"`
+	CallHistory   []CallHistory             `json:"callHistory,omitempty"`
+	Statuses      []Status                  `json:"statuses,omitempty"`
+	StatusViews   []StatusView              `json:"statusViews,omitempty"`
+	Groups        []Group                   `json:"groups,omitempty"`
+	GroupMembers  []GroupMember             `json:"groupMembers,omitempty"`
+	GroupMessages []GroupMessage            `json:"groupMessages,omitempty"`
 }
 
 type User struct {
@@ -109,6 +112,52 @@ type StatusWithUser struct {
 type StatusViewer struct {
 	User     User      `json:"user"`
 	ViewedAt time.Time `json:"viewedAt"`
+}
+
+type Group struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	AvatarURL string    `json:"avatarUrl,omitempty"`
+	OwnerID   string    `json:"ownerId"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type GroupMember struct {
+	GroupID  string    `json:"groupId"`
+	UserID   string    `json:"userId"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joinedAt"`
+}
+
+type GroupMessage struct {
+	ID             string    `json:"id"`
+	GroupID        string    `json:"groupId"`
+	SenderID       string    `json:"senderId"`
+	SenderEmail    string    `json:"senderEmail"`
+	Body           string    `json:"body"`
+	AttachmentName string    `json:"attachmentName,omitempty"`
+	AttachmentType string    `json:"attachmentType,omitempty"`
+	AttachmentKind string    `json:"attachmentKind,omitempty"`
+	AttachmentURL  string    `json:"attachmentUrl,omitempty"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+type GroupMemberView struct {
+	GroupMember
+	User User `json:"user"`
+}
+
+type GroupSummary struct {
+	Group
+	Role          string        `json:"role"`
+	MemberCount   int           `json:"memberCount"`
+	LatestMessage *GroupMessage `json:"latestMessage,omitempty"`
+}
+
+type GroupDetails struct {
+	GroupSummary
+	Members []GroupMemberView `json:"members"`
 }
 
 type UserBlock struct {
@@ -1239,6 +1288,36 @@ func (s *Store) migrate(ctx context.Context) error {
 				viewed_at datetime not null default current_timestamp,
 				primary key (status_id, viewer_id)
 			)`,
+			`
+			create table if not exists groups (
+				id varchar(64) primary key,
+				name varchar(255) not null,
+				avatar_url mediumtext not null,
+				owner_id varchar(64) not null,
+				created_at datetime not null default current_timestamp,
+				updated_at datetime not null default current_timestamp
+			)`,
+			`
+			create table if not exists group_members (
+				group_id varchar(64) not null,
+				user_id varchar(64) not null,
+				role varchar(16) not null default 'member',
+				joined_at datetime not null default current_timestamp,
+				primary key (group_id, user_id)
+			)`,
+			`
+			create table if not exists group_messages (
+				id varchar(64) primary key,
+				group_id varchar(64) not null,
+				sender_id varchar(64) not null,
+				sender_email varchar(255) not null,
+				body text not null,
+				attachment_name text not null,
+				attachment_type text not null,
+				attachment_kind varchar(32) not null,
+				attachment_url mediumtext not null,
+				created_at datetime not null default current_timestamp
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -1402,6 +1481,34 @@ func (s *Store) migrate(ctx context.Context) error {
 			viewed_at timestamptz not null default now(),
 			primary key (status_id, viewer_id)
 		);
+		create table if not exists groups (
+			id text primary key,
+			name text not null,
+			avatar_url text not null default '',
+			owner_id text not null,
+			created_at timestamptz not null default now(),
+			updated_at timestamptz not null default now()
+		);
+		create table if not exists group_members (
+			group_id text not null,
+			user_id text not null,
+			role text not null default 'member',
+			joined_at timestamptz not null default now(),
+			primary key (group_id, user_id)
+		);
+		create table if not exists group_messages (
+			id text primary key,
+			group_id text not null,
+			sender_id text not null,
+			sender_email text not null,
+			body text not null default '',
+			attachment_name text not null default '',
+			attachment_type text not null default '',
+			attachment_kind text not null default '',
+			attachment_url text not null default '',
+			created_at timestamptz not null default now()
+		);
+		create index if not exists group_messages_group_created on group_messages(group_id, created_at);
 	`)
 	if err != nil {
 		return err
@@ -2301,4 +2408,538 @@ func (s *Store) DeleteStatus(statusID, ownerID string) error {
 		}
 	}
 	return errors.New("status not found")
+}
+
+func uniqueIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	result := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func (s *Store) CreateGroup(name, avatarURL, ownerID string, memberIDs []string) (GroupDetails, error) {
+	name = strings.TrimSpace(name)
+	ownerID = strings.TrimSpace(ownerID)
+	if name == "" {
+		return GroupDetails{}, errors.New("group name is required")
+	}
+	if _, err := s.UserByID(ownerID); err != nil {
+		return GroupDetails{}, errors.New("owner not found")
+	}
+	memberIDs = uniqueIDs(append([]string{ownerID}, memberIDs...))
+	for _, id := range memberIDs {
+		if _, err := s.UserByID(id); err != nil {
+			return GroupDetails{}, fmt.Errorf("user %s not found", id)
+		}
+	}
+	now := time.Now().UTC()
+	group := Group{ID: randomID(), Name: name, AvatarURL: strings.TrimSpace(avatarURL), OwnerID: ownerID, CreatedAt: now, UpdatedAt: now}
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `insert into groups (id,name,avatar_url,owner_id,created_at,updated_at) values ($1,$2,$3,$4,$5,$6)`, group.ID, group.Name, group.AvatarURL, group.OwnerID, group.CreatedAt, group.UpdatedAt)
+		if err != nil {
+			return GroupDetails{}, err
+		}
+		for _, id := range memberIDs {
+			role := "member"
+			if id == ownerID {
+				role = "owner"
+			}
+			if _, err := s.db.Exec(context.Background(), `insert into group_members (group_id,user_id,role,joined_at) values ($1,$2,$3,$4)`, group.ID, id, role, now); err != nil {
+				return GroupDetails{}, err
+			}
+		}
+	} else if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `insert into groups (id,name,avatar_url,owner_id,created_at,updated_at) values (?,?,?,?,?,?)`, group.ID, group.Name, group.AvatarURL, group.OwnerID, group.CreatedAt, group.UpdatedAt)
+		if err != nil {
+			return GroupDetails{}, err
+		}
+		for _, id := range memberIDs {
+			role := "member"
+			if id == ownerID {
+				role = "owner"
+			}
+			if _, err := s.my.ExecContext(context.Background(), `insert into group_members (group_id,user_id,role,joined_at) values (?,?,?,?)`, group.ID, id, role, now); err != nil {
+				return GroupDetails{}, err
+			}
+		}
+	} else {
+		s.mu.Lock()
+		s.data.Groups = append(s.data.Groups, group)
+		for _, id := range memberIDs {
+			role := "member"
+			if id == ownerID {
+				role = "owner"
+			}
+			s.data.GroupMembers = append(s.data.GroupMembers, GroupMember{GroupID: group.ID, UserID: id, Role: role, JoinedAt: now})
+		}
+		if err := s.saveLocked(); err != nil {
+			s.mu.Unlock()
+			return GroupDetails{}, err
+		}
+		s.mu.Unlock()
+	}
+	return s.GetGroupDetails(group.ID, ownerID)
+}
+
+func (s *Store) groupRole(groupID, userID string) (string, error) {
+	if s.db != nil {
+		var role string
+		err := s.db.QueryRow(context.Background(), `select role from group_members where group_id=$1 and user_id=$2`, groupID, userID).Scan(&role)
+		return role, err
+	}
+	if s.my != nil {
+		var role string
+		err := s.my.QueryRowContext(context.Background(), `select role from group_members where group_id=? and user_id=?`, groupID, userID).Scan(&role)
+		return role, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, member := range s.data.GroupMembers {
+		if member.GroupID == groupID && member.UserID == userID {
+			return member.Role, nil
+		}
+	}
+	return "", errors.New("group membership not found")
+}
+
+func (s *Store) groupByID(groupID string) (Group, error) {
+	if s.db != nil {
+		var group Group
+		err := s.db.QueryRow(context.Background(), `select id,name,avatar_url,owner_id,created_at,updated_at from groups where id=$1`, groupID).Scan(&group.ID, &group.Name, &group.AvatarURL, &group.OwnerID, &group.CreatedAt, &group.UpdatedAt)
+		return group, err
+	}
+	if s.my != nil {
+		var group Group
+		err := s.my.QueryRowContext(context.Background(), `select id,name,avatar_url,owner_id,created_at,updated_at from groups where id=?`, groupID).Scan(&group.ID, &group.Name, &group.AvatarURL, &group.OwnerID, &group.CreatedAt, &group.UpdatedAt)
+		return group, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, group := range s.data.Groups {
+		if group.ID == groupID {
+			return group, nil
+		}
+	}
+	return Group{}, errors.New("group not found")
+}
+
+func (s *Store) groupLatestMessage(groupID string) (*GroupMessage, error) {
+	if s.db != nil {
+		var message GroupMessage
+		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=$1 order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &message, nil
+	}
+	if s.my != nil {
+		var message GroupMessage
+		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &message, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var latest *GroupMessage
+	for i := range s.data.GroupMessages {
+		message := s.data.GroupMessages[i]
+		if message.GroupID == groupID && (latest == nil || message.CreatedAt.After(latest.CreatedAt)) {
+			copy := message
+			latest = &copy
+		}
+	}
+	return latest, nil
+}
+
+func (s *Store) ListGroups(userID string) ([]GroupSummary, error) {
+	var summaries []GroupSummary
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `select g.id,g.name,g.avatar_url,g.owner_id,g.created_at,g.updated_at,gm.role,count(gm2.user_id) from groups g join group_members gm on gm.group_id=g.id left join group_members gm2 on gm2.group_id=g.id where gm.user_id=$1 group by g.id,g.name,g.avatar_url,g.owner_id,g.created_at,g.updated_at,gm.role order by g.updated_at desc`, userID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var summary GroupSummary
+			if err := rows.Scan(&summary.ID, &summary.Name, &summary.AvatarURL, &summary.OwnerID, &summary.CreatedAt, &summary.UpdatedAt, &summary.Role, &summary.MemberCount); err != nil {
+				return nil, err
+			}
+			summary.LatestMessage, err = s.groupLatestMessage(summary.ID)
+			if err != nil {
+				return nil, err
+			}
+			summaries = append(summaries, summary)
+		}
+		return summaries, rows.Err()
+	}
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `select g.id,g.name,g.avatar_url,g.owner_id,g.created_at,g.updated_at,gm.role,count(gm2.user_id) from groups g join group_members gm on gm.group_id=g.id left join group_members gm2 on gm2.group_id=g.id where gm.user_id=? group by g.id,g.name,g.avatar_url,g.owner_id,g.created_at,g.updated_at,gm.role order by g.updated_at desc`, userID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var summary GroupSummary
+			if err := rows.Scan(&summary.ID, &summary.Name, &summary.AvatarURL, &summary.OwnerID, &summary.CreatedAt, &summary.UpdatedAt, &summary.Role, &summary.MemberCount); err != nil {
+				return nil, err
+			}
+			summary.LatestMessage, err = s.groupLatestMessage(summary.ID)
+			if err != nil {
+				return nil, err
+			}
+			summaries = append(summaries, summary)
+		}
+		return summaries, rows.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, group := range s.data.Groups {
+		for _, member := range s.data.GroupMembers {
+			if member.GroupID == group.ID && member.UserID == userID {
+				count := 0
+				for _, candidate := range s.data.GroupMembers {
+					if candidate.GroupID == group.ID {
+						count++
+					}
+				}
+				var latest *GroupMessage
+				for i := range s.data.GroupMessages {
+					message := s.data.GroupMessages[i]
+					if message.GroupID == group.ID && (latest == nil || message.CreatedAt.After(latest.CreatedAt)) {
+						copy := message
+						latest = &copy
+					}
+				}
+				summaries = append(summaries, GroupSummary{Group: group, Role: member.Role, MemberCount: count, LatestMessage: latest})
+				break
+			}
+		}
+	}
+	return summaries, nil
+}
+
+func (s *Store) GetGroupDetails(groupID, userID string) (GroupDetails, error) {
+	role, err := s.groupRole(groupID, userID)
+	if err != nil {
+		return GroupDetails{}, errors.New("group membership required")
+	}
+	group, err := s.groupByID(groupID)
+	if err != nil {
+		return GroupDetails{}, err
+	}
+	details := GroupDetails{GroupSummary: GroupSummary{Group: group, Role: role}, Members: []GroupMemberView{}}
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `select gm.group_id,gm.user_id,gm.role,gm.joined_at,u.id,u.email,u.first_name,u.last_name,u.password_hash,coalesce(u.avatar_url,''),u.blocked,u.created_at,u.updated_at from group_members gm join app_users u on u.id=gm.user_id where gm.group_id=$1 order by case gm.role when 'owner' then 0 when 'admin' then 1 else 2 end,gm.joined_at`, groupID)
+		if err != nil {
+			return GroupDetails{}, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var member GroupMemberView
+			if err := rows.Scan(&member.GroupID, &member.UserID, &member.Role, &member.JoinedAt, &member.User.ID, &member.User.Email, &member.User.FirstName, &member.User.LastName, &member.User.PasswordHash, &member.User.AvatarURL, &member.User.Blocked, &member.User.CreatedAt, &member.User.UpdatedAt); err != nil {
+				return GroupDetails{}, err
+			}
+			details.Members = append(details.Members, member)
+		}
+		if err := rows.Err(); err != nil {
+			return GroupDetails{}, err
+		}
+	} else if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `select gm.group_id,gm.user_id,gm.role,gm.joined_at,u.id,u.email,u.first_name,u.last_name,u.password_hash,coalesce(u.avatar_url,''),u.blocked,u.created_at,u.updated_at from group_members gm join app_users u on u.id=gm.user_id where gm.group_id=? order by gm.role,gm.joined_at`, groupID)
+		if err != nil {
+			return GroupDetails{}, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var member GroupMemberView
+			if err := rows.Scan(&member.GroupID, &member.UserID, &member.Role, &member.JoinedAt, &member.User.ID, &member.User.Email, &member.User.FirstName, &member.User.LastName, &member.User.PasswordHash, &member.User.AvatarURL, &member.User.Blocked, &member.User.CreatedAt, &member.User.UpdatedAt); err != nil {
+				return GroupDetails{}, err
+			}
+			details.Members = append(details.Members, member)
+		}
+		if err := rows.Err(); err != nil {
+			return GroupDetails{}, err
+		}
+	} else {
+		s.mu.Lock()
+		for _, member := range s.data.GroupMembers {
+			if member.GroupID == groupID {
+				for _, user := range s.data.Users {
+					if user.ID == member.UserID {
+						details.Members = append(details.Members, GroupMemberView{GroupMember: member, User: user})
+						break
+					}
+				}
+			}
+		}
+		s.mu.Unlock()
+	}
+	details.MemberCount = len(details.Members)
+	details.LatestMessage, err = s.groupLatestMessage(groupID)
+	return details, err
+}
+
+func (s *Store) UpdateGroup(groupID, userID, name, avatarURL string) error {
+	role, err := s.groupRole(groupID, userID)
+	if err != nil || (role != "owner" && role != "admin") {
+		return errors.New("group admin permission required")
+	}
+	name = strings.TrimSpace(name)
+	avatarURL = strings.TrimSpace(avatarURL)
+	if name == "" {
+		return errors.New("group name is required")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `update groups set name=$1,avatar_url=$2,updated_at=now() where id=$3`, name, avatarURL, groupID)
+		return err
+	}
+	if s.my != nil {
+		_, err = s.my.ExecContext(context.Background(), `update groups set name=?,avatar_url=?,updated_at=utc_timestamp() where id=?`, name, avatarURL, groupID)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.data.Groups {
+		if s.data.Groups[i].ID == groupID {
+			s.data.Groups[i].Name = name
+			s.data.Groups[i].AvatarURL = avatarURL
+			s.data.Groups[i].UpdatedAt = time.Now().UTC()
+			return s.saveLocked()
+		}
+	}
+	return errors.New("group not found")
+}
+
+func (s *Store) AddGroupMembers(groupID, actorID string, memberIDs []string) error {
+	role, err := s.groupRole(groupID, actorID)
+	if err != nil || (role != "owner" && role != "admin") {
+		return errors.New("group admin permission required")
+	}
+	memberIDs = uniqueIDs(memberIDs)
+	for _, id := range memberIDs {
+		if _, err := s.UserByID(id); err != nil {
+			return fmt.Errorf("user %s not found", id)
+		}
+	}
+	now := time.Now().UTC()
+	if s.db != nil {
+		for _, id := range memberIDs {
+			_, err = s.db.Exec(context.Background(), `insert into group_members (group_id,user_id,role,joined_at) values ($1,$2,'member',$3) on conflict (group_id,user_id) do nothing`, groupID, id, now)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if s.my != nil {
+		for _, id := range memberIDs {
+			_, err = s.my.ExecContext(context.Background(), `insert ignore into group_members (group_id,user_id,role,joined_at) values (?,?, 'member',?)`, groupID, id, now)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range memberIDs {
+		exists := false
+		for _, member := range s.data.GroupMembers {
+			if member.GroupID == groupID && member.UserID == id {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			s.data.GroupMembers = append(s.data.GroupMembers, GroupMember{GroupID: groupID, UserID: id, Role: "member", JoinedAt: now})
+		}
+	}
+	return s.saveLocked()
+}
+
+func (s *Store) RemoveGroupMember(groupID, actorID, memberID string) error {
+	actorRole, err := s.groupRole(groupID, actorID)
+	if err != nil {
+		return errors.New("group membership required")
+	}
+	targetRole, err := s.groupRole(groupID, memberID)
+	if err != nil {
+		return errors.New("member not found")
+	}
+	if memberID == actorID {
+		if targetRole == "owner" {
+			return errors.New("owner cannot leave the group")
+		}
+	} else if actorRole != "owner" && (actorRole != "admin" || targetRole != "member") {
+		return errors.New("cannot remove this member")
+	}
+	if targetRole == "owner" {
+		return errors.New("owner cannot be removed")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `delete from group_members where group_id=$1 and user_id=$2`, groupID, memberID)
+		return err
+	}
+	if s.my != nil {
+		_, err = s.my.ExecContext(context.Background(), `delete from group_members where group_id=? and user_id=?`, groupID, memberID)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, member := range s.data.GroupMembers {
+		if member.GroupID == groupID && member.UserID == memberID {
+			s.data.GroupMembers = append(s.data.GroupMembers[:i], s.data.GroupMembers[i+1:]...)
+			return s.saveLocked()
+		}
+	}
+	return errors.New("member not found")
+}
+
+func (s *Store) SetGroupAdmin(groupID, actorID, memberID string, promote bool) error {
+	role, err := s.groupRole(groupID, actorID)
+	if err != nil || role != "owner" {
+		return errors.New("owner permission required")
+	}
+	targetRole, err := s.groupRole(groupID, memberID)
+	if err != nil {
+		return errors.New("member not found")
+	}
+	if targetRole == "owner" {
+		return errors.New("owner role cannot change")
+	}
+	next := "member"
+	if promote {
+		next = "admin"
+	}
+	if targetRole != "admin" && targetRole != "member" {
+		return errors.New("invalid member role")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `update group_members set role=$1 where group_id=$2 and user_id=$3`, next, groupID, memberID)
+		return err
+	}
+	if s.my != nil {
+		_, err = s.my.ExecContext(context.Background(), `update group_members set role=? where group_id=? and user_id=?`, next, groupID, memberID)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.data.GroupMembers {
+		if s.data.GroupMembers[i].GroupID == groupID && s.data.GroupMembers[i].UserID == memberID {
+			s.data.GroupMembers[i].Role = next
+			return s.saveLocked()
+		}
+	}
+	return errors.New("member not found")
+}
+
+func (s *Store) SaveGroupMessage(clientMessageID, groupID, senderID, body, attachmentName, attachmentType, attachmentKind, attachmentURL string) (GroupMessage, error) {
+	if _, err := s.groupRole(groupID, senderID); err != nil {
+		return GroupMessage{}, errors.New("group membership required")
+	}
+	sender, err := s.UserByID(senderID)
+	if err != nil {
+		return GroupMessage{}, err
+	}
+	message := GroupMessage{ID: strings.TrimSpace(clientMessageID), GroupID: groupID, SenderID: senderID, SenderEmail: sender.Email, Body: strings.TrimSpace(body), AttachmentName: strings.TrimSpace(attachmentName), AttachmentType: strings.TrimSpace(attachmentType), AttachmentKind: strings.TrimSpace(attachmentKind), AttachmentURL: strings.TrimSpace(attachmentURL), CreatedAt: time.Now().UTC()}
+	if message.ID == "" {
+		message.ID = randomID()
+	}
+	if message.Body == "" && message.AttachmentName == "" {
+		return GroupMessage{}, errors.New("message is empty")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `insert into group_messages (id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, message.ID, message.GroupID, message.SenderID, message.SenderEmail, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+		return message, err
+	}
+	if s.my != nil {
+		_, err = s.my.ExecContext(context.Background(), `insert into group_messages (id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at) values (?,?,?,?,?,?,?,?,?,?)`, message.ID, message.GroupID, message.SenderID, message.SenderEmail, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+		return message, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.data.GroupMessages {
+		if existing.ID == message.ID {
+			return existing, nil
+		}
+	}
+	s.data.GroupMessages = append(s.data.GroupMessages, message)
+	for i := range s.data.Groups {
+		if s.data.Groups[i].ID == groupID {
+			s.data.Groups[i].UpdatedAt = message.CreatedAt
+		}
+	}
+	return message, s.saveLocked()
+}
+
+func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMessage, error) {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return nil, errors.New("group membership required")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=$1 order by created_at desc,id desc limit $2`, groupID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var result []GroupMessage
+		for rows.Next() {
+			var message GroupMessage
+			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt); err != nil {
+				return nil, err
+			}
+			result = append(result, message)
+		}
+		reverseGroupMessages(result)
+		return result, rows.Err()
+	}
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? order by created_at desc,id desc limit ?`, groupID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var result []GroupMessage
+		for rows.Next() {
+			var message GroupMessage
+			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt); err != nil {
+				return nil, err
+			}
+			result = append(result, message)
+		}
+		reverseGroupMessages(result)
+		return result, rows.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []GroupMessage
+	for i := len(s.data.GroupMessages) - 1; i >= 0 && len(result) < limit; i-- {
+		if s.data.GroupMessages[i].GroupID == groupID {
+			result = append(result, s.data.GroupMessages[i])
+		}
+	}
+	return result, nil
+}
+
+func reverseGroupMessages(messages []GroupMessage) {
+	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
+		messages[left], messages[right] = messages[right], messages[left]
+	}
 }

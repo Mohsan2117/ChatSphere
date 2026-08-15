@@ -147,6 +147,40 @@ func (c *Client) readPump() {
 				Type:    "message_sent",
 				Payload: ackPayload,
 			}
+		case "group_message_send":
+			var msgPayload struct {
+				ClientMessageID string `json:"client_message_id"`
+				GroupID         string `json:"groupId"`
+				Body            string `json:"body"`
+				Attachment      struct {
+					Name string `json:"name"`
+					Type string `json:"type"`
+					Kind string `json:"kind"`
+					URL  string `json:"url"`
+				} `json:"attachment"`
+			}
+			if err := json.Unmarshal(event.Payload, &msgPayload); err != nil || strings.TrimSpace(msgPayload.GroupID) == "" {
+				continue
+			}
+			message, err := c.store.SaveGroupMessage(msgPayload.ClientMessageID, msgPayload.GroupID, c.userID, msgPayload.Body, msgPayload.Attachment.Name, msgPayload.Attachment.Type, msgPayload.Attachment.Kind, msgPayload.Attachment.URL)
+			if err != nil {
+				errPayload, _ := json.Marshal(map[string]any{"client_message_id": msgPayload.ClientMessageID, "error": err.Error(), "status": "failed"})
+				c.send <- Event{Type: "group_message_sent", Payload: errPayload}
+				continue
+			}
+			details, err := c.store.GetGroupDetails(msgPayload.GroupID, c.userID)
+			if err != nil {
+				continue
+			}
+			targets := make([]string, 0, len(details.Members))
+			for _, member := range details.Members {
+				targets = append(targets, member.UserID)
+			}
+			if payload, marshalErr := json.Marshal(mapPublicGroupMessage(message)); marshalErr == nil {
+				c.hub.Broadcast(Event{Type: "group.message", ConversationID: message.GroupID, UserID: c.userID, TargetUserIDs: targets, Payload: payload})
+			}
+			ackPayload, _ := json.Marshal(map[string]any{"client_message_id": msgPayload.ClientMessageID, "message_id": message.ID, "status": "sent"})
+			c.send <- Event{Type: "group_message_sent", Payload: ackPayload}
 		case "call_offer", "call_answer", "call_ice_candidate", "call_reject", "call_end", "call_camera_toggle", "call_join":
 			var callPayload struct {
 				CallID   string `json:"callId"`
@@ -516,6 +550,18 @@ func mapPublicMessage(message store.Message, viewerEmail string) map[string]any 
 			"kind": message.AttachmentKind,
 			"url":  message.AttachmentURL,
 		}
+	}
+	return result
+}
+
+func mapPublicGroupMessage(message store.GroupMessage) map[string]any {
+	result := map[string]any{
+		"id": message.ID, "groupId": message.GroupID, "senderId": message.SenderID,
+		"senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt,
+		"time": message.CreatedAt.Format("3:04 PM"),
+	}
+	if message.AttachmentName != "" {
+		result["attachment"] = map[string]string{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}
 	}
 	return result
 }

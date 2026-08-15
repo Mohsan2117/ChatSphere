@@ -108,7 +108,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerUserRoutes(api.Group("/users"), dataStore, hub)
 	registerProfileRoutes(api.Group("/profile"), dataStore)
 	registerContactRoutes(api.Group("/contacts"), dataStore)
-	registerGroupRoutes(api.Group("/groups"))
+	registerGroupRoutes(api.Group("/groups"), dataStore, hub)
 	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
 	registerCallRoutes(api.Group("/calls"), dataStore)
 	registerStatusRoutes(api.Group("/statuses"), dataStore)
@@ -370,12 +370,210 @@ func registerContactRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 	})
 }
 
-func registerGroupRoutes(group *gin.RouterGroup) {
-	group.POST("", accepted("create group"))
-	group.GET("", accepted("list groups"))
-	group.PATCH("/:id", accepted("rename group"))
-	group.POST("/:id/members", accepted("invite group member"))
-	group.DELETE("/:id/members/:userId", accepted("remove group member"))
+func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *realtime.Hub) {
+	group.GET("", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		groups, err := dataStore.ListGroups(authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load groups"})
+			return
+		}
+		result := make([]gin.H, 0, len(groups))
+		for _, item := range groups {
+			result = append(result, publicGroupSummary(item))
+		}
+		c.JSON(http.StatusOK, gin.H{"groups": result})
+	})
+	group.POST("", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Name      string   `json:"name"`
+			AvatarURL string   `json:"avatarUrl"`
+			MemberIDs []string `json:"memberIds"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		created, err := dataStore.CreateGroup(body.Name, body.AvatarURL, authUser.ID, body.MemberIDs)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"group": publicGroupDetails(created)})
+	})
+	group.GET("/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		details, err := dataStore.GetGroupDetails(c.Param("id"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"group": publicGroupDetails(details)})
+	})
+	group.PATCH("/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Name      string `json:"name"`
+			AvatarURL string `json:"avatarUrl"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		if err := dataStore.UpdateGroup(c.Param("id"), authUser.ID, body.Name, body.AvatarURL); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+	})
+	group.POST("/:id/members", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			UserIDs []string `json:"userIds"`
+			UserID  string   `json:"userId"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		body.UserIDs = append(body.UserIDs, body.UserID)
+		if err := dataStore.AddGroupMembers(c.Param("id"), authUser.ID, body.UserIDs); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "members-added"})
+	})
+	group.DELETE("/:id/members/:userId", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.RemoveGroupMember(c.Param("id"), authUser.ID, c.Param("userId")); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "member-removed"})
+	})
+	group.POST("/:id/admins/:userId", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.SetGroupAdmin(c.Param("id"), authUser.ID, c.Param("userId"), true); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "admin-promoted"})
+	})
+	group.DELETE("/:id/admins/:userId", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.SetGroupAdmin(c.Param("id"), authUser.ID, c.Param("userId"), false); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "admin-demoted"})
+	})
+	group.GET("/:id/messages", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		messages, err := dataStore.ListGroupMessages(c.Param("id"), authUser.ID, queryInt(c, "limit", 50))
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		result := make([]gin.H, 0, len(messages))
+		for _, message := range messages {
+			result = append(result, publicGroupMessage(message))
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": result})
+	})
+	group.POST("/:id/messages", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			ID         string `json:"id"`
+			Body       string `json:"body"`
+			Attachment struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+				Kind string `json:"kind"`
+				URL  string `json:"url"`
+			} `json:"attachment"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		message, err := dataStore.SaveGroupMessage(body.ID, c.Param("id"), authUser.ID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		details, err := dataStore.GetGroupDetails(c.Param("id"), authUser.ID)
+		if err == nil {
+			targets := make([]string, 0, len(details.Members))
+			for _, member := range details.Members {
+				targets = append(targets, member.UserID)
+			}
+			if payload, marshalErr := json.Marshal(publicGroupMessage(message)); marshalErr == nil {
+				hub.Broadcast(realtime.Event{Type: "group.message", ConversationID: message.GroupID, UserID: authUser.ID, TargetUserIDs: targets, Payload: payload})
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
+	})
+}
+
+func publicGroupSummary(group store.GroupSummary) gin.H {
+	result := gin.H{"id": group.ID, "name": group.Name, "avatarUrl": group.AvatarURL, "ownerId": group.OwnerID, "role": group.Role, "memberCount": group.MemberCount, "createdAt": group.CreatedAt, "updatedAt": group.UpdatedAt}
+	if group.LatestMessage != nil {
+		result["latestMessage"] = publicGroupMessage(*group.LatestMessage)
+	}
+	return result
+}
+
+func publicGroupDetails(group store.GroupDetails) gin.H {
+	result := publicGroupSummary(group.GroupSummary)
+	members := make([]gin.H, 0, len(group.Members))
+	for _, member := range group.Members {
+		name := strings.TrimSpace(member.User.FirstName + " " + member.User.LastName)
+		if name == "" {
+			name = member.User.Email
+		}
+		members = append(members, gin.H{"id": member.UserID, "name": name, "email": member.User.Email, "avatarUrl": member.User.AvatarURL, "role": member.Role, "joinedAt": member.JoinedAt})
+	}
+	result["members"] = members
+	return result
+}
+
+func publicGroupMessage(message store.GroupMessage) gin.H {
+	result := gin.H{"id": message.ID, "groupId": message.GroupID, "senderId": message.SenderID, "senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt, "time": message.CreatedAt.Format("3:04 PM")}
+	if message.AttachmentName != "" {
+		result["attachment"] = gin.H{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}
+	}
+	return result
 }
 
 func registerCallRoutes(group *gin.RouterGroup, dataStore *store.Store) {

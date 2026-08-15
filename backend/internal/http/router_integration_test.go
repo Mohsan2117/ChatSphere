@@ -191,6 +191,70 @@ func TestStatusLifecycle(t *testing.T) {
 	postJSON(t, router, http.MethodDelete, "/api/v1/statuses/"+statusID, ali.Token, map[string]any{}, http.StatusOK)
 }
 
+func TestGroupsLifecycleAndAuthorization(t *testing.T) {
+	cfg := config.Config{Port: "0", FrontendOrigin: "http://localhost:3000", DataPath: t.TempDir() + "/data.json"}
+	dataStore, err := store.New(cfg.DataPath, "")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	hub := realtime.NewHub()
+	go hub.Run()
+	router := NewRouter(cfg, hub, dataStore)
+	suffix := time.Now().UTC().Format("20060102150405")
+	owner := createTestUser(t, router, "owner-group-"+suffix+"@example.com", "Owner", "Group")
+	member := createTestUser(t, router, "member-group-"+suffix+"@example.com", "Member", "Group")
+	outsider := createTestUser(t, router, "outsider-group-"+suffix+"@example.com", "Outside", "Group")
+
+	var created struct {
+		Group struct {
+			ID          string `json:"id"`
+			Role        string `json:"role"`
+			MemberCount int    `json:"memberCount"`
+		} `json:"group"`
+	}
+	content, _ := json.Marshal(map[string]any{"name": "Project Group", "memberIds": []string{member.ID}})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/groups", bytes.NewReader(content))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+owner.Token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("create group: %d %s", resp.Code, resp.Body.String())
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode group: %v", err)
+	}
+	if created.Group.ID == "" || created.Group.Role != "owner" || created.Group.MemberCount != 2 {
+		t.Fatalf("unexpected created group: %+v", created.Group)
+	}
+	groupID := created.Group.ID
+
+	getGroup := func(user testUser, path string, want int) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+user.Token)
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		if resp.Code != want {
+			t.Fatalf("GET %s as %s: status %d want %d body %s", path, user.Email, resp.Code, want, resp.Body.String())
+		}
+		return resp.Body.String()
+	}
+	getGroup(owner, "/api/v1/groups", http.StatusOK)
+	getGroup(member, "/api/v1/groups/"+groupID, http.StatusOK)
+	getGroup(outsider, "/api/v1/groups/"+groupID, http.StatusForbidden)
+
+	postJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/members", member.Token, map[string]any{"userIds": []string{outsider.ID}}, http.StatusForbidden)
+	postJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/members", owner.Token, map[string]any{"userIds": []string{outsider.ID}}, http.StatusOK)
+	postJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/admins/"+member.ID, owner.Token, map[string]any{}, http.StatusOK)
+	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/admins/"+member.ID, member.Token, map[string]any{}, http.StatusForbidden)
+	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/admins/"+member.ID, owner.Token, map[string]any{}, http.StatusOK)
+	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/members/"+owner.ID, member.Token, map[string]any{}, http.StatusForbidden)
+	postJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", owner.Token, map[string]any{"body": "Welcome to the group"}, http.StatusOK)
+	getGroup(member, "/api/v1/groups/"+groupID+"/messages", http.StatusOK)
+	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/members/"+outsider.ID, owner.Token, map[string]any{}, http.StatusOK)
+	getGroup(outsider, "/api/v1/groups/"+groupID+"/messages", http.StatusForbidden)
+}
+
 type testUser struct {
 	ID    string
 	Email string

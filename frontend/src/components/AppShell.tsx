@@ -103,6 +103,43 @@ type CallHistoryEntry = {
   durationSeconds: number;
 };
 
+type GroupSummary = {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  ownerId: string;
+  role: "owner" | "admin" | "member";
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+  latestMessage?: GroupChatMessage;
+};
+
+type GroupMember = {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  role: "owner" | "admin" | "member";
+  joinedAt: string;
+};
+
+type GroupDetails = GroupSummary & { members: GroupMember[] };
+
+type GroupChatMessage = {
+  id: string;
+  groupId: string;
+  senderId: string;
+  senderEmail?: string;
+  body: string;
+  createdAt?: string;
+  time?: string;
+  mine?: boolean;
+  attachment?: NonNullable<ChatMessage["attachment"]>;
+};
+
+type GroupMessageStore = Record<string, GroupChatMessage[]>;
+
 type StatusEntry = {
   id: string;
   userId: string;
@@ -173,6 +210,13 @@ export function AppShell() {
   const [profileMessage, setProfileMessage] = useState("");
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [groups, setGroups] = useState<GroupSummary[]>([]);
+  const [groupMessages, setGroupMessages] = useState<GroupMessageStore>({});
+  const [selectedGroupDetails, setSelectedGroupDetails] = useState<GroupDetails | null>(null);
+  const [isGroupsLoading, setIsGroupsLoading] = useState(false);
+  const [groupsError, setGroupsError] = useState("");
+  const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
   const [chatSearch, setChatSearch] = useState("");
   const [drafts, setDrafts] = useState<ChatDraftStore>({});
   const [isEmojiOpen, setIsEmojiOpen] = useState(false);
@@ -333,6 +377,26 @@ export function AppShell() {
   const [callHistory, setCallHistory] = useState<CallHistoryEntry[]>([]);
   const [isCallHistoryLoading, setIsCallHistoryLoading] = useState(false);
   const [callHistorySearch, setCallHistorySearch] = useState("");
+
+  const fetchGroups = useCallback(async () => {
+    if (!authToken) return;
+    setIsGroupsLoading(true);
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/groups`, { headers: authHeaders(authToken) });
+      if (!response.ok) throw new Error("Could not load groups");
+      const data = await response.json();
+      setGroups(Array.isArray(data.groups) ? data.groups : []);
+      setGroupsError("");
+    } catch (error) {
+      setGroupsError(error instanceof Error ? error.message : "Could not load groups");
+    } finally {
+      setIsGroupsLoading(false);
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    if (mobileTab === "groups") fetchGroups();
+  }, [fetchGroups, mobileTab]);
 
   const fetchCallHistory = useCallback(async () => {
     if (!authToken) return;
@@ -520,6 +584,8 @@ export function AppShell() {
     if (!isAuthed) return;
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
+    setSelectedGroupId("");
+    setSelectedGroupDetails(null);
     setChatSearch("");
     setWorkspaceMode("inbox");
     setIsMobileAIChatOpen(false);
@@ -580,6 +646,32 @@ export function AppShell() {
       cancelled = true;
     };
   }, [authToken, isAuthed, selectedChatId]);
+
+  useEffect(() => {
+    if (!isAuthed || !authToken || !selectedGroupId) return;
+    let cancelled = false;
+    const headers = authHeaders(authToken);
+    Promise.all([
+      fetch(`${apiUrl()}/api/v1/groups/${selectedGroupId}`, { headers }),
+      fetch(`${apiUrl()}/api/v1/groups/${selectedGroupId}/messages?limit=100`, { headers })
+    ])
+      .then(async ([detailsResponse, messagesResponse]) => {
+        if (!detailsResponse.ok || !messagesResponse.ok) throw new Error("Group could not be loaded");
+        return { details: await detailsResponse.json(), messages: await messagesResponse.json() };
+      })
+      .then(({ details, messages }) => {
+        if (cancelled) return;
+        setSelectedGroupDetails(details.group ?? null);
+        const loaded: GroupChatMessage[] = Array.isArray(messages.messages)
+          ? messages.messages.map((message: GroupChatMessage) => ({ ...message, mine: message.senderId === currentUserId }))
+          : [];
+        setGroupMessages((current) => ({ ...current, [selectedGroupId]: loaded }));
+      })
+      .catch((error) => {
+        if (!cancelled) setGroupsError(error instanceof Error ? error.message : "Could not load group");
+      });
+    return () => { cancelled = true; };
+  }, [authToken, currentUserId, isAuthed, selectedGroupId]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -731,6 +823,18 @@ export function AppShell() {
           if (userId === selectedChatIdRef.current) {
             setTypingUser(null);
           }
+          return;
+        }
+        const groupPayload = data.payload as unknown as GroupChatMessage;
+        if (data.type === "group.message" && groupPayload?.id && groupPayload?.groupId) {
+          const payload = groupPayload;
+          const incoming: GroupChatMessage = { ...payload, mine: payload.senderId === currentUserId };
+          setGroupMessages((current) => {
+            const existing = current[payload.groupId] ?? [];
+            if (existing.some((message) => message.id === incoming.id)) return current;
+            return { ...current, [payload.groupId]: [...existing, incoming] };
+          });
+          setGroups((current) => current.map((group) => group.id === payload.groupId ? { ...group, latestMessage: incoming, updatedAt: incoming.createdAt ?? group.updatedAt } : group));
           return;
         }
         if (data.type !== "chat.message" || !data.payload) return;
@@ -1045,6 +1149,8 @@ export function AppShell() {
       const user = data.user ?? {};
       const token = data.token ?? "";
       setChatMessages({});
+      setGroupMessages({});
+      setGroups([]);
       setDrafts({});
       setDirectoryChats([]);
       setSelectedChatId("");
@@ -2136,6 +2242,8 @@ export function AppShell() {
     }
     setSelectedChatId(chat.id);
     setSelectedChatSnapshot(chat);
+    setSelectedGroupId("");
+    setSelectedGroupDetails(null);
     setIsChatMenuOpen(false);
     setTypingUser(null);
     isTypingRef.current = false;
@@ -2143,6 +2251,21 @@ export function AppShell() {
       window.clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
     }
+  }
+
+  function selectGroup(groupId: string) {
+    setSelectedChatId("");
+    setSelectedChatSnapshot(null);
+    setSelectedGroupId(groupId);
+    setSelectedGroupDetails(null);
+    setIsGroupInfoOpen(false);
+    setMobileTab("groups");
+  }
+
+  function closeCurrentGroup() {
+    setSelectedGroupId("");
+    setSelectedGroupDetails(null);
+    setIsGroupInfoOpen(false);
   }
 
   function toggleChatSearch() {
@@ -2245,6 +2368,8 @@ export function AppShell() {
     }
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
+    setSelectedGroupId("");
+    setSelectedGroupDetails(null);
     setIsChatSearchOpen(false);
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
@@ -2977,7 +3102,7 @@ export function AppShell() {
         </aside>
 
         {workspaceMode !== "ai" ? (
-        <aside className={`flex flex-col h-full lg:h-screen min-h-0 lg:overflow-hidden border-r border-[#dce1e8] bg-white ${selectedChat ? "hidden lg:block" : "block"}`}>
+        <aside className={`flex flex-col h-full lg:h-screen min-h-0 lg:overflow-hidden border-r border-[#dce1e8] bg-white ${selectedChat || selectedGroupId ? "hidden lg:block" : "block"}`}>
           {mobileTab === "calls" ? (
             <>
               <header className="border-b border-[#e5e9f0] px-5 py-5">
@@ -3083,6 +3208,18 @@ export function AppShell() {
                 )}
               </div>
             </>
+          ) : mobileTab === "groups" ? (
+            <GroupListPanel
+              authToken={authToken}
+              currentUserId={currentUserId}
+              groups={groups}
+              users={directoryChats}
+              isLoading={isGroupsLoading}
+              error={groupsError}
+              onSelect={selectGroup}
+              onRefresh={fetchGroups}
+              className="hidden lg:flex"
+            />
           ) : mobileTab === "status" ? (
             <StatusPanel
               authToken={authToken}
@@ -3328,7 +3465,7 @@ export function AppShell() {
         </aside>
         ) : null}
 
-        <section className={`h-full lg:h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
+        <section className={`h-full lg:h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || selectedGroupId || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
           {workspaceMode === "ai" ? (
             <AIChat
               apiUrl={apiUrl()}
@@ -3341,6 +3478,19 @@ export function AppShell() {
               setIsLoading={setIsAiLoading}
               error={aiError}
               setError={setAiError}
+            />
+          ) : selectedGroupId ? (
+            <GroupChatPanel
+              authToken={authToken}
+              currentUserId={currentUserId}
+              currentUserName={`${firstName} ${lastName}`.trim() || email}
+              details={selectedGroupDetails}
+              messages={groupMessages[selectedGroupId] ?? []}
+              users={directoryChats}
+              onBack={closeCurrentGroup}
+              onRefresh={async () => { await fetchGroups(); if (selectedGroupId) { const response = await fetch(`${apiUrl()}/api/v1/groups/${selectedGroupId}`, { headers: authHeaders(authToken) }); if (response.ok) { const data = await response.json(); setSelectedGroupDetails(data.group ?? null); } } }}
+              onMessage={(message) => setGroupMessages((current) => { const existing = current[selectedGroupId] ?? []; return existing.some((item) => item.id === message.id) ? current : { ...current, [selectedGroupId]: [...existing, message] }; })}
+              onLeave={() => { closeCurrentGroup(); fetchGroups(); }}
             />
           ) : selectedChat ? (
             <>
@@ -3634,7 +3784,7 @@ export function AppShell() {
       ) : null}
 
       {/* Mobile bottom navigation */}
-      {!selectedChat && !isMobileAIChatOpen && workspaceMode !== "ai" ? (
+      {!selectedChat && !selectedGroupId && !isMobileAIChatOpen && workspaceMode !== "ai" ? (
         <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t border-[#e5e9f0] bg-white lg:hidden">
           {([
             { key: "chats" as const, label: "Chats", icon: MessageCircle },
@@ -3660,7 +3810,7 @@ export function AppShell() {
       ) : null}
 
       {/* Mobile placeholder screens for non-chats tabs */}
-      {!selectedChat && mobileTab !== "chats" && workspaceMode !== "ai" ? (
+      {!selectedChat && !selectedGroupId && mobileTab !== "chats" && workspaceMode !== "ai" ? (
         mobileTab === "calls" ? (
           <div className="fixed inset-0 top-16 bottom-16 z-30 flex flex-col bg-white lg:hidden">
             <div className="border-b border-[#e5e9f0] px-4 py-3">
@@ -3745,6 +3895,18 @@ export function AppShell() {
               )}
             </div>
           </div>
+        ) : mobileTab === "groups" ? (
+          <GroupListPanel
+            authToken={authToken}
+            currentUserId={currentUserId}
+            groups={groups}
+            users={directoryChats}
+            isLoading={isGroupsLoading}
+            error={groupsError}
+            onSelect={selectGroup}
+            onRefresh={fetchGroups}
+            className="fixed inset-0 top-16 bottom-16 z-30 flex lg:hidden"
+          />
         ) : mobileTab === "status" ? (
           <StatusPanel
             authToken={authToken}
@@ -3965,6 +4127,15 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]) {
     }
     return (first.localSeq ?? 0) - (second.localSeq ?? 0);
   });
+}
+
+function formatGroupTime(dateStr: string): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString() === new Date().toLocaleDateString()
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function statusRelativeTime(value: string): string {
@@ -4217,6 +4388,112 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
       </div> : null}
     </div>
   );
+}
+
+type GroupListPanelProps = {
+  authToken: string;
+  currentUserId: string;
+  groups: GroupSummary[];
+  users: ChatSeed[];
+  isLoading: boolean;
+  error: string;
+  className?: string;
+  onSelect: (groupId: string) => void;
+  onRefresh: () => Promise<void>;
+};
+
+function GroupAvatar({ name, avatarUrl, className = "h-12 w-12" }: { name: string; avatarUrl?: string; className?: string }) {
+  return <div className={`${className} grid shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]`}>{avatarUrl ? <img alt={name} className="h-full w-full object-cover" src={avatarUrl} /> : chatInitials(name)}</div>;
+}
+
+function GroupListPanel({ authToken, currentUserId, groups, users, isLoading, error, className = "", onSelect, onRefresh }: GroupListPanelProps) {
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [search, setSearch] = useState("");
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const availableUsers = users.filter((user) => user.id !== currentUserId && `${user.name} ${user.preview}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const resetCreate = () => { setIsCreateOpen(false); setName(""); setSearch(""); setSelectedMembers([]); setAvatarFile(null); setAvatarPreview(""); setCreateError(""); };
+  const createGroup = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim() || !selectedMembers.length) { setCreateError("Add at least one member and a group name."); return; }
+    setIsCreating(true); setCreateError("");
+    try {
+      let avatarUrl = "";
+      if (avatarFile) {
+        const form = new FormData(); form.append("file", avatarFile);
+        const upload = await fetch(`${apiUrl()}/api/v1/upload`, { method: "POST", headers: authHeaders(authToken), body: form });
+        const uploadData = await upload.json();
+        if (!upload.ok || !uploadData.url) throw new Error(uploadData.error || "Could not upload group avatar");
+        avatarUrl = uploadData.url;
+      }
+      const response = await fetch(`${apiUrl()}/api/v1/groups`, { method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), avatarUrl, memberIds: selectedMembers }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not create group");
+      resetCreate(); await onRefresh(); onSelect(data.group?.id);
+    } catch (error) { setCreateError(error instanceof Error ? error.message : "Could not create group"); } finally { setIsCreating(false); }
+  };
+
+  return <div className={`${className} min-h-0 flex-1 flex-col bg-white`}>
+    <header className="flex items-center justify-between border-b border-[#e5e9f0] px-5 py-4"><div><p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Community</p><h1 className="mt-1 text-2xl font-black">Groups</h1></div><button aria-label="Create group" className="grid h-10 w-10 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70] hover:bg-[#d1f0e5]" onClick={() => setIsCreateOpen(true)} title="Create group" type="button"><Plus size={20} /></button></header>
+    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      {error ? <div className="mb-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div> : null}
+      {isLoading ? <div className="space-y-3">{[1, 2, 3].map((item) => <div className="flex items-center gap-3 p-3" key={item}><div className="cs-skeleton h-12 w-12 rounded-2xl" /><div className="cs-skeleton h-4 w-36" /></div>)}</div> : groups.length ? groups.map((group) => <button className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-[#f8fafc]" key={group.id} onClick={() => onSelect(group.id)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><strong className="truncate text-sm font-black">{group.name}</strong><span className="text-[11px] font-bold text-[#94a3b8]">{group.latestMessage?.createdAt ? formatGroupTime(group.latestMessage.createdAt) : "new"}</span></span><span className="mt-1 block truncate text-sm text-[#64748b]">{group.latestMessage?.body || group.latestMessage?.attachment?.name || `${group.memberCount} members`}</span></span></button>) : <div className="mt-16 rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]"><Users size={24} /></div><h2 className="mt-5 text-base font-black">No groups yet</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Create a group and start chatting with multiple people.</p><button className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#00a884] px-4 py-2.5 text-sm font-black text-white" onClick={() => setIsCreateOpen(true)} type="button"><Plus size={16} />Create Group</button></div>}
+    </div>
+    {isCreateOpen ? <div className="fixed inset-0 z-[70] grid place-items-center bg-[#0f172a]/45 px-4"><form className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onSubmit={createGroup}><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">New group</p><h2 className="mt-1 text-xl font-black">Create Group</h2></div><button aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={resetCreate} type="button"><X size={18} /></button></div><label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[#cbd5e1] p-3"><div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-[#e7f8f2] text-[#008f70]">{avatarPreview ? <img alt="Group avatar preview" className="h-full w-full object-cover" src={avatarPreview} /> : <Upload size={20} />}</div><span className="text-sm font-bold text-[#64748b]">Add group photo (optional)</span><input accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setAvatarFile(file); setAvatarPreview(URL.createObjectURL(file)); } }} type="file" /></label><input autoFocus className="mt-4 h-11 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} placeholder="Group name" value={name} /><div className="mt-5 flex flex-wrap gap-2">{selectedMembers.map((id) => { const user = users.find((item) => item.id === id); return user ? <button className="rounded-full bg-[#e7f8f2] px-3 py-1.5 text-xs font-black text-[#008f70]" key={id} onClick={() => setSelectedMembers((current) => current.filter((item) => item !== id))} type="button">{user.name} <X className="ml-1 inline" size={12} /></button> : null; })}</div><label className="mt-4 flex h-10 items-center gap-2 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 text-[#64748b]"><Search size={16} /><input className="w-full bg-transparent text-sm outline-none" onChange={(event) => setSearch(event.target.value)} placeholder="Search members" value={search} /></label><div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-[#edf1f5]">{availableUsers.map((user) => <button className={`flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-[#f8fafc] ${selectedMembers.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelectedMembers((current) => current.includes(user.id) ? current.filter((item) => item !== user.id) : [...current, user.id])} type="button"><GroupAvatar avatarUrl={user.avatarUrl} name={user.name} className="h-9 w-9 rounded-xl text-xs" /><span className="min-w-0 flex-1 truncate text-sm font-bold">{user.name}</span>{selectedMembers.includes(user.id) ? <Check size={16} className="text-[#00a884]" /> : null}</button>)}</div>{createError ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{createError}</p> : null}<button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:opacity-50" disabled={isCreating} type="submit">{isCreating ? "Creating..." : "Create Group"}<Plus size={17} /></button></form></div> : null}
+  </div>;
+}
+
+type GroupChatPanelProps = {
+  authToken: string;
+  currentUserId: string;
+  currentUserName: string;
+  details: GroupDetails | null;
+  messages: GroupChatMessage[];
+  users: ChatSeed[];
+  onBack: () => void;
+  onRefresh: () => Promise<void>;
+  onMessage: (message: GroupChatMessage) => void;
+  onLeave: () => void;
+};
+
+function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, users, onBack, onRefresh, onMessage, onLeave }: GroupChatPanelProps) {
+  const [draft, setDraft] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const [infoError, setInfoError] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const group = details;
+  const canManage = group?.role === "owner" || group?.role === "admin";
+
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages.length]);
+  const chooseFile = (next: File | undefined) => { if (!next) return; setFile(next); setFilePreview(next.type.startsWith("image/") ? URL.createObjectURL(next) : ""); };
+  const upload = async (next: File) => { const form = new FormData(); form.append("file", next); const response = await fetch(`${apiUrl()}/api/v1/upload`, { method: "POST", headers: authHeaders(authToken), body: form }); const data = await response.json(); if (!response.ok || !data.url) throw new Error(data.error || "Could not upload attachment"); return { name: next.name, type: next.type, kind: next.type.startsWith("image/") ? "image" : next.type.startsWith("video/") ? "video" : next.type.startsWith("audio/") ? "audio" : "file", url: data.url } as NonNullable<ChatMessage["attachment"]>; };
+  const send = async (event?: FormEvent) => { event?.preventDefault(); if ((!draft.trim() && !file) || !group || isSending) return; setIsSending(true); try { const attachment = file ? await upload(file) : undefined; const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages`, { method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body: draft.trim(), attachment }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send group message"); onMessage({ ...data.message, mine: true }); setDraft(""); setFile(null); setFilePreview(""); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not send message"); } finally { setIsSending(false); } };
+  const startRecording = async () => { if (!navigator.mediaDevices?.getUserMedia) return; const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); const recorder = new MediaRecorder(stream); chunksRef.current = []; recorder.ondataavailable = (event) => chunksRef.current.push(event.data); recorder.onstop = () => { stream.getTracks().forEach((track) => track.stop()); const voice = new File([new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })], `voice-${Date.now()}.webm`, { type: recorder.mimeType || "audio/webm" }); setFile(voice); setFilePreview(""); setIsRecording(false); }; recorderRef.current = recorder; recorder.start(); setIsRecording(true); };
+  const stopRecording = () => recorderRef.current?.stop();
+  const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
+
+  if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="mx-auto max-w-3xl space-y-3">{messages.map((message) => <div className={`flex ${message.mine ? "justify-end" : "justify-start"}`} key={message.id}><div className={`max-w-[78%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>{!message.mine ? <div className="mb-1 text-xs font-black text-[#008f70]">{group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member"}</div> : null}{message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}{message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}<div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{formatGroupTime(message.createdAt || "")}</div></div></div>)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={send}>{file ? <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">{filePreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={filePreview} /> : <span>{file.name}</span>}<button className="text-[#64748b]" onClick={() => { setFile(null); setFilePreview(""); }} type="button">Remove</button></div> : null}<div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2"><label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white"><Paperclip size={20} /><input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value=""; }} type="file" /></label>{isRecording ? <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={stopRecording} type="button"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop</button> : <input className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Write a group message" value={draft} />}{!draft.trim() && !file && !isRecording ? <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={startRecording} type="button"><Mic size={20} /></button> : null}<button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!draft.trim() && !file)} type="submit"><Send size={17} /></button></div></form>{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+}
+
+function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
+  const [name, setName] = useState(details.name);
+  const [selected, setSelected] = useState<string[]>([]);
+  const memberIDs = new Set(details.members.map((member) => member.id));
+  const candidates = users.filter((user) => user.id !== currentUserId && !memberIDs.has(user.id));
+  const update = async (action: () => Promise<void>) => { try { await action(); } catch (error) { window.alert(error instanceof Error ? error.message : "Group action failed"); } };
+  return <div className="fixed inset-0 z-[60] flex justify-end bg-[#0f172a]/35"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">Group info</p><h2 className="mt-1 text-xl font-black">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-black">{details.memberCount} members</div><div className="text-sm text-[#64748b]">You are {details.role}</div></div></div>{canManage ? <><label className="mt-5 block text-sm font-bold text-[#334155]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#e7f8f2] px-3 py-2 text-sm font-black text-[#008f70]" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Members</h3><div className="mt-2 divide-y divide-[#edf1f5]">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><GroupAvatar avatarUrl={member.avatarUrl} name={member.name} className="h-10 w-10 rounded-xl text-xs" /><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{member.name}</div><div className="text-xs capitalize text-[#64748b]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-black text-[#008f70]" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-black text-red-600" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-[#edf1f5]">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc] ${selected.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#00a884]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-[#00a884] px-3 py-2 text-sm font-black text-white disabled:opacity-50" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl bg-red-50 px-3 py-2.5 text-sm font-black text-red-700" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs leading-5 text-[#64748b]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
 }
 
 
