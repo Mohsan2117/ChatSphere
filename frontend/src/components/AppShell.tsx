@@ -28,7 +28,13 @@ import {
   Video,
   Play,
   Pause,
-  Radio
+  Radio,
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Plus,
+  Trash2
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
@@ -95,6 +101,27 @@ type CallHistoryEntry = {
   answeredAt?: string;
   endedAt?: string;
   durationSeconds: number;
+};
+
+type StatusEntry = {
+  id: string;
+  userId: string;
+  type: "text" | "image" | "video";
+  textContent?: string;
+  mediaUrl?: string;
+  caption?: string;
+  background?: string;
+  createdAt: string;
+  expiresAt: string;
+  viewed: boolean;
+  user: { id: string; name: string; avatarUrl?: string };
+};
+
+type StatusPanelProps = {
+  authToken: string;
+  currentUserId: string;
+  currentUser: { name: string; avatarUrl?: string };
+  className?: string;
 };
 
 function formatCallDuration(seconds: number): string {
@@ -3056,6 +3083,13 @@ export function AppShell() {
                 )}
               </div>
             </>
+          ) : mobileTab === "status" ? (
+            <StatusPanel
+              authToken={authToken}
+              currentUserId={currentUserId}
+              currentUser={{ name: `${firstName} ${lastName}`.trim() || "You", avatarUrl: avatarPreview }}
+              className="hidden lg:flex"
+            />
           ) : (
             <>
           <header className="border-b border-[#e5e9f0] px-5 py-5">
@@ -3711,18 +3745,23 @@ export function AppShell() {
               )}
             </div>
           </div>
+        ) : mobileTab === "status" ? (
+          <StatusPanel
+            authToken={authToken}
+            currentUserId={currentUserId}
+            currentUser={{ name: `${firstName} ${lastName}`.trim() || "You", avatarUrl: avatarPreview }}
+            className="fixed inset-0 top-16 bottom-16 z-30 flex lg:hidden"
+          />
         ) : (
           <div className="fixed inset-0 top-16 bottom-16 z-30 flex flex-col items-center justify-center bg-white px-6 lg:hidden">
             <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[#dce1e8] bg-[#f7f9fb] text-[#94a3b8]">
-              {mobileTab === "status" ? <Radio size={36} /> : <Users size={36} />}
+              <Users size={36} />
             </div>
             <h2 className="mt-6 text-2xl font-black tracking-normal text-[#18212f]">
-              {mobileTab === "status" ? "Status" : "Groups"}
+              Groups
             </h2>
             <p className="mt-3 text-center text-base leading-7 text-[#64748b]">
-              {mobileTab === "status"
-                ? "Status updates from your contacts will appear here."
-                : "Group conversations will appear here."}
+              Group conversations will appear here.
             </p>
           </div>
         )
@@ -3926,6 +3965,188 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]) {
     }
     return (first.localSeq ?? 0) - (second.localSeq ?? 0);
   });
+}
+
+function statusRelativeTime(value: string): string {
+  const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  return "Yesterday";
+}
+
+function StatusAvatar({ user, ring = "none", size = "h-14 w-14" }: { user: { name: string; avatarUrl?: string }; ring?: "unseen" | "viewed" | "none"; size?: string }) {
+  return (
+    <div className={`${size} shrink-0 rounded-full p-[2px] ${ring === "unseen" ? "bg-[#00a884]" : ring === "viewed" ? "bg-[#cbd5e1]" : "bg-transparent"}`}>
+      <div className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-sm font-black text-[#008f70]">
+        {user.avatarUrl ? <img alt={user.name} className="h-full w-full object-cover" src={user.avatarUrl} /> : chatInitials(user.name)}
+      </div>
+    </div>
+  );
+}
+
+function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: StatusPanelProps) {
+  const [statuses, setStatuses] = useState<StatusEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
+  const [composerType, setComposerType] = useState<"text" | "image" | "video">("text");
+  const [composerText, setComposerText] = useState("");
+  const [composerCaption, setComposerCaption] = useState("");
+  const [composerBackground, setComposerBackground] = useState("#e7f8f2");
+  const [composerFile, setComposerFile] = useState<File | null>(null);
+  const [composerPreview, setComposerPreview] = useState("");
+  const [isPosting, setIsPosting] = useState(false);
+  const [viewer, setViewer] = useState<{ group: StatusEntry[]; index: number } | null>(null);
+  const [viewerPaused, setViewerPaused] = useState(false);
+  const [viewerList, setViewerList] = useState<{ user: { name: string; avatarUrl?: string }; viewedAt: string }[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const loadStatuses = useCallback(async () => {
+    if (!authToken) return;
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/statuses?limit=200`, { headers: authHeaders(authToken) });
+      if (!response.ok) throw new Error("Could not load statuses");
+      const data = await response.json();
+      setStatuses(Array.isArray(data.statuses) ? data.statuses : []);
+      setError("");
+    } catch (loadError) {
+      console.error("Failed to fetch statuses", loadError);
+      setError("Could not load status updates.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [authToken]);
+
+  useEffect(() => { loadStatuses(); }, [loadStatuses]);
+
+  const groups = useMemo(() => {
+    const grouped = new Map<string, StatusEntry[]>();
+    statuses.forEach((status) => grouped.set(status.userId, [...(grouped.get(status.userId) ?? []), status]));
+    return Array.from(grouped.values()).sort((a, b) => Date.parse(b[0].createdAt) - Date.parse(a[0].createdAt));
+  }, [statuses]);
+  const myStatuses = groups.find((group) => group[0]?.userId === currentUserId) ?? [];
+  const otherGroups = groups.filter((group) => group[0]?.userId !== currentUserId);
+  const recentGroups = otherGroups.filter((group) => group.some((status) => !status.viewed));
+  const viewedGroups = otherGroups.filter((group) => group.every((status) => status.viewed));
+  const currentStatus = viewer ? viewer.group[viewer.index] : null;
+
+  useEffect(() => {
+    if (!currentStatus || currentStatus.userId === currentUserId) return;
+    fetch(`${apiUrl()}/api/v1/statuses/${currentStatus.id}/view`, { method: "POST", headers: authHeaders(authToken) }).catch(() => undefined);
+    setStatuses((existing) => existing.map((status) => status.id === currentStatus.id ? { ...status, viewed: true } : status));
+  }, [authToken, currentStatus, currentUserId]);
+
+  useEffect(() => {
+    if (!currentStatus || currentStatus.type === "video" || viewerPaused) return;
+    const timer = window.setTimeout(() => {
+      setViewer((current) => current && current.index < current.group.length - 1 ? { ...current, index: current.index + 1 } : null);
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [currentStatus, viewerPaused]);
+
+  const closeComposer = () => {
+    setIsComposerOpen(false); setComposerFile(null); setComposerPreview(""); setComposerText(""); setComposerCaption("");
+  };
+  const chooseStatusFile = (file: File | undefined) => {
+    if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
+    setComposerType(file.type.startsWith("video/") ? "video" : "image");
+    setComposerFile(file); setComposerPreview(URL.createObjectURL(file));
+  };
+  const postStatus = async (event: FormEvent) => {
+    event.preventDefault();
+    if (composerType === "text" && !composerText.trim()) return;
+    if (composerType !== "text" && !composerFile) return;
+    setIsPosting(true); setError("");
+    try {
+      let mediaUrl = "";
+      if (composerFile) {
+        const form = new FormData(); form.append("file", composerFile);
+        const upload = await fetch(`${apiUrl()}/api/v1/upload`, { method: "POST", headers: authHeaders(authToken), body: form });
+        const uploadData = await upload.json();
+        if (!upload.ok || !uploadData.url) throw new Error(uploadData.error || "Could not upload status media");
+        mediaUrl = uploadData.url;
+      }
+      const response = await fetch(`${apiUrl()}/api/v1/statuses`, {
+        method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" },
+        body: JSON.stringify({ type: composerType, textContent: composerText, mediaUrl, caption: composerCaption, background: composerBackground })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not publish status");
+      closeComposer(); await loadStatuses();
+    } catch (postError) {
+      setError(postError instanceof Error ? postError.message : "Could not publish status.");
+    } finally { setIsPosting(false); }
+  };
+  const deleteStatus = async (status: StatusEntry) => {
+    if (!window.confirm("Delete this status update?")) return;
+    const response = await fetch(`${apiUrl()}/api/v1/statuses/${status.id}`, { method: "DELETE", headers: authHeaders(authToken) });
+    if (response.ok) { setViewer((current) => current && current.group.length === 1 ? null : current); await loadStatuses(); }
+  };
+  const showViewers = async (status: StatusEntry) => {
+    const response = await fetch(`${apiUrl()}/api/v1/statuses/${status.id}/viewers`, { headers: authHeaders(authToken) });
+    if (response.ok) { const data = await response.json(); setViewerList(data.viewers ?? []); }
+  };
+  const openGroup = (group: StatusEntry[]) => setViewer({ group, index: Math.max(0, group.findIndex((status) => !status.viewed)) });
+  const goViewer = (delta: number) => setViewer((current) => {
+    if (!current) return null;
+    const next = current.index + delta;
+    return next < 0 || next >= current.group.length ? current : { ...current, index: next };
+  });
+
+  const renderGroup = (group: StatusEntry[]) => {
+    const first = group[0];
+    const unseen = group.some((status) => !status.viewed);
+    return (
+      <button className="flex w-full items-center gap-3 border-b border-[#edf1f5] px-4 py-3 text-left transition hover:bg-[#f8fafc]" key={first.userId} onClick={() => openGroup(group)} type="button">
+        <StatusAvatar ring={unseen ? "unseen" : "viewed"} user={first.user} />
+        <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-black text-[#18212f]">{first.user.name}</strong><span className="mt-1 block text-xs text-[#64748b]">{statusRelativeTime(first.createdAt)}{group.length > 1 ? ` · ${group.length} updates` : ""}</span></span>
+        <ChevronRight className="text-[#94a3b8]" size={18} />
+      </button>
+    );
+  };
+
+  return (
+    <div className={`${className} min-h-0 flex-1 flex-col bg-white`}>
+      <header className="flex items-center justify-between border-b border-[#e5e9f0] px-5 py-4">
+        <div><p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Updates</p><h1 className="mt-1 text-2xl font-black text-[#18212f]">Status</h1></div>
+        <button aria-label="Add status update" className="grid h-10 w-10 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70] transition hover:bg-[#d1f0e5]" onClick={() => setIsComposerOpen(true)} title="Add status update" type="button"><Plus size={20} /></button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <section className="border-b border-[#e5e9f0] px-4 py-4">
+          <div className="flex items-center gap-3">
+            <button aria-label={myStatuses.length ? "Open my status" : "Add status update"} onClick={() => myStatuses.length ? openGroup(myStatuses) : setIsComposerOpen(true)} type="button"><StatusAvatar ring={myStatuses.length ? "unseen" : "none"} user={currentUser} size="h-14 w-14" /></button>
+            <button className="min-w-0 flex-1 text-left" onClick={() => myStatuses.length ? openGroup(myStatuses) : setIsComposerOpen(true)} type="button"><strong className="block text-sm font-black text-[#18212f]">{myStatuses.length ? "My status" : "Add status update"}</strong><span className="mt-1 block text-xs text-[#64748b]">{myStatuses.length ? `${myStatuses.length} active update${myStatuses.length === 1 ? "" : "s"}` : "Share with your contacts"}</span></button>
+            <button aria-label="Create status" className="grid h-10 w-10 place-items-center rounded-xl text-[#00a884] hover:bg-[#e7f8f2]" onClick={() => setIsComposerOpen(true)} type="button"><Camera size={20} /></button>
+          </div>
+          {myStatuses.length ? <button className="mt-3 text-xs font-black text-[#008f70]" onClick={() => setIsComposerOpen(true)} type="button">Add another update</button> : null}
+        </section>
+        {error ? <div className="mx-4 mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div> : null}
+        {isLoading ? <div className="space-y-3 px-4 py-5">{[1, 2, 3].map((item) => <div className="flex items-center gap-3" key={item}><div className="cs-skeleton h-14 w-14 rounded-full" /><div className="cs-skeleton h-4 w-40" /></div>)}</div> : null}
+        {!isLoading && recentGroups.length ? <section><h2 className="px-4 pb-2 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Recent updates</h2>{recentGroups.map(renderGroup)}</section> : null}
+        {!isLoading && viewedGroups.length ? <section><h2 className="px-4 pb-2 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Viewed updates</h2>{viewedGroups.map(renderGroup)}</section> : null}
+        {!isLoading && !recentGroups.length && !viewedGroups.length ? <div className="px-6 py-16 text-center"><Radio className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-base font-black text-[#18212f]">No recent updates</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Share a photo, video, or thought with your contacts.</p></div> : null}
+      </div>
+
+      {isComposerOpen ? <div className="fixed inset-0 z-[70] grid place-items-center bg-[#0f172a]/50 px-4"><form className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onSubmit={postStatus}>
+        <div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">New update</p><h2 className="mt-1 text-xl font-black">Create status</h2></div><button aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={closeComposer} type="button"><X size={18} /></button></div>
+        <div className="mt-5 grid grid-cols-3 gap-2"><button className={`rounded-xl border px-3 py-2 text-sm font-black ${composerType === "text" ? "border-[#00a884] bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] text-[#64748b]"}`} onClick={() => { setComposerType("text"); setComposerFile(null); setComposerPreview(""); }} type="button">Text</button><button className={`rounded-xl border px-3 py-2 text-sm font-black ${composerType === "image" ? "border-[#00a884] bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] text-[#64748b]"}`} onClick={() => { setComposerType("image"); fileInputRef.current?.click(); }} type="button">Image</button><button className={`rounded-xl border px-3 py-2 text-sm font-black ${composerType === "video" ? "border-[#00a884] bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] text-[#64748b]"}`} onClick={() => { setComposerType("video"); fileInputRef.current?.click(); }} type="button">Video</button></div>
+        <input className="hidden" accept="image/*,video/*" onChange={(event) => chooseStatusFile(event.target.files?.[0])} ref={fileInputRef} type="file" />
+        {composerType === "text" ? <><textarea autoFocus className="mt-4 min-h-36 w-full resize-none rounded-xl border border-[#dce1e8] bg-[#f8fafc] p-4 text-base outline-none focus:border-[#00a884]" maxLength={2000} onChange={(event) => setComposerText(event.target.value)} placeholder="Share an update..." value={composerText} /><div className="mt-3 flex gap-2">{["#e7f8f2", "#dbeafe", "#fef3c7", "#fce7f3", "#e2e8f0"].map((color) => <button aria-label={`Use ${color} background`} className={`h-8 w-8 rounded-full border-2 ${composerBackground === color ? "border-[#18212f]" : "border-white shadow"}`} key={color} onClick={() => setComposerBackground(color)} style={{ backgroundColor: color }} type="button" />)}</div></> : <>{composerPreview ? <div className="mt-4 overflow-hidden rounded-xl bg-[#f8fafc]">{composerType === "video" ? <video className="max-h-72 w-full object-contain" controls src={composerPreview} /> : <img alt="Status preview" className="max-h-72 w-full object-contain" src={composerPreview} />}</div> : <button className="mt-4 flex h-32 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#cbd5e1] text-sm font-black text-[#64748b]" onClick={() => fileInputRef.current?.click()} type="button"><Image size={22} />Choose media</button>}<input className="mt-3 h-11 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" maxLength={500} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Add a caption (optional)" value={composerCaption} /></>}
+        <button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:opacity-50" disabled={isPosting || (composerType === "text" ? !composerText.trim() : !composerFile)} type="submit">{isPosting ? "Posting..." : "Share status"}<Send size={16} /></button>
+      </form></div> : null}
+
+      {viewer && currentStatus ? <div className="fixed inset-0 z-[80] flex flex-col bg-[#07130f] text-white" onMouseEnter={() => setViewerPaused(true)} onMouseLeave={() => setViewerPaused(false)} onTouchStart={() => setViewerPaused(true)}>
+        <div className="flex gap-1 px-4 pt-3">{viewer.group.map((status, index) => <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/30" key={status.id}><div className={`h-full bg-white ${index < viewer.index ? "w-full" : index === viewer.index ? "w-1/2" : "w-0"}`} /></div>)}</div>
+        <div className="flex items-center gap-3 px-4 py-4"><StatusAvatar ring="none" size="h-10 w-10" user={currentStatus.user} /><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{currentStatus.user.name}</div><div className="text-xs text-white/70">{statusRelativeTime(currentStatus.createdAt)}</div></div>{currentStatus.userId === currentUserId ? <><button aria-label="Show viewers" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => showViewers(currentStatus)} type="button"><Eye size={18} /></button><button aria-label="Delete status" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => deleteStatus(currentStatus)} type="button"><Trash2 size={18} /></button></> : null}<button aria-label="Close status viewer" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => setViewer(null)} type="button"><X size={20} /></button></div>
+        <div className="relative flex min-h-0 flex-1 items-center justify-center px-8"><button aria-label="Previous status" className="absolute left-2 z-10 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === 0} onClick={() => goViewer(-1)} type="button"><ChevronLeft size={30} /></button><div className="max-h-full max-w-2xl text-center">{currentStatus.type === "text" ? <div className="flex min-h-[45vh] min-w-[min(80vw,34rem)] items-center justify-center rounded-2xl p-10 text-2xl font-black" style={{ backgroundColor: currentStatus.background || "#e7f8f2", color: "#18212f" }}>{currentStatus.textContent}</div> : currentStatus.type === "video" ? <video autoPlay className="max-h-[68vh] max-w-full rounded-2xl" controls onEnded={() => goViewer(1)} src={attachmentSource(currentStatus.mediaUrl || "", authToken)} /> : <img alt={currentStatus.caption || "Status update"} className="max-h-[68vh] max-w-full rounded-2xl object-contain" src={attachmentSource(currentStatus.mediaUrl || "", authToken)} />}{currentStatus.caption ? <p className="mt-4 text-sm text-white/90">{currentStatus.caption}</p> : null}</div><button aria-label="Next status" className="absolute right-2 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === viewer.group.length - 1} onClick={() => goViewer(1)} type="button"><ChevronRight size={30} /></button></div>
+        {viewerList ? <div className="absolute bottom-4 left-1/2 max-h-48 w-[min(90vw,24rem)] -translate-x-1/2 overflow-y-auto rounded-xl bg-white p-3 text-[#18212f] shadow-xl"><div className="mb-2 flex items-center justify-between text-sm font-black">Viewed by <button aria-label="Close viewer list" onClick={() => setViewerList(null)} type="button"><X size={16} /></button></div>{viewerList.length ? viewerList.map((item) => <div className="flex items-center gap-2 border-t border-[#edf1f5] py-2" key={`${item.user.name}-${item.viewedAt}`}><StatusAvatar size="h-7 w-7" user={item.user} /><span className="text-xs font-bold">{item.user.name}</span></div>) : <p className="text-xs text-[#64748b]">No views yet.</p>}</div> : null}
+      </div> : null}
+    </div>
+  );
 }
 
 

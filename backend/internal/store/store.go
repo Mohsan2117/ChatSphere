@@ -39,6 +39,8 @@ type dataFile struct {
 	Users       []User                    `json:"users"`
 	AIUsage     map[string]map[string]int `json:"aiUsage,omitempty"`
 	CallHistory []CallHistory             `json:"callHistory,omitempty"`
+	Statuses    []Status                  `json:"statuses,omitempty"`
+	StatusViews []StatusView              `json:"statusViews,omitempty"`
 }
 
 type User struct {
@@ -78,6 +80,35 @@ type CallHistory struct {
 	AnsweredAt      *time.Time `json:"answeredAt,omitempty"`
 	EndedAt         *time.Time `json:"endedAt,omitempty"`
 	DurationSeconds int        `json:"durationSeconds"`
+}
+
+type Status struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"userId"`
+	Type       string    `json:"type"`
+	Text       string    `json:"textContent,omitempty"`
+	MediaURL   string    `json:"mediaUrl,omitempty"`
+	Caption    string    `json:"caption,omitempty"`
+	Background string    `json:"background,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+}
+
+type StatusView struct {
+	StatusID string    `json:"statusId"`
+	ViewerID string    `json:"viewerId"`
+	ViewedAt time.Time `json:"viewedAt"`
+}
+
+type StatusWithUser struct {
+	Status
+	User     User
+	IsViewed bool
+}
+
+type StatusViewer struct {
+	User     User      `json:"user"`
+	ViewedAt time.Time `json:"viewedAt"`
 }
 
 type UserBlock struct {
@@ -1188,6 +1219,26 @@ func (s *Store) migrate(ctx context.Context) error {
 				ended_at datetime,
 				duration_seconds int not null default 0
 			)`,
+			`
+			create table if not exists statuses (
+				id varchar(64) primary key,
+				user_id varchar(64) not null,
+				type varchar(16) not null,
+				text_content text not null,
+				media_url mediumtext not null,
+				caption text not null,
+				background varchar(32) not null,
+				created_at datetime not null default current_timestamp,
+				expires_at datetime not null,
+				index statuses_user_expiry (user_id, expires_at)
+			)`,
+			`
+			create table if not exists status_views (
+				status_id varchar(64) not null,
+				viewer_id varchar(64) not null,
+				viewed_at datetime not null default current_timestamp,
+				primary key (status_id, viewer_id)
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -1333,6 +1384,24 @@ func (s *Store) migrate(ctx context.Context) error {
 		);
 		create index if not exists idx_call_history_caller on call_history(caller_id);
 		create index if not exists idx_call_history_recipient on call_history(recipient_id);
+		create table if not exists statuses (
+			id text primary key,
+			user_id text not null,
+			type text not null,
+			text_content text not null default '',
+			media_url text not null default '',
+			caption text not null default '',
+			background text not null default '',
+			created_at timestamptz not null default now(),
+			expires_at timestamptz not null
+		);
+		create index if not exists statuses_user_expiry on statuses(user_id, expires_at);
+		create table if not exists status_views (
+			status_id text not null,
+			viewer_id text not null,
+			viewed_at timestamptz not null default now(),
+			primary key (status_id, viewer_id)
+		);
 	`)
 	if err != nil {
 		return err
@@ -1977,4 +2046,259 @@ func (s *Store) GetCallHistoryByID(id string) (CallHistory, error) {
 		}
 	}
 	return CallHistory{}, errors.New("call history not found")
+}
+
+func (s *Store) CreateStatus(userID, statusType, textContent, mediaURL, caption, background string) (Status, error) {
+	now := time.Now().UTC()
+	status := Status{
+		ID: randomID(), UserID: userID, Type: statusType, Text: textContent,
+		MediaURL: mediaURL, Caption: caption, Background: background,
+		CreatedAt: now, ExpiresAt: now.Add(24 * time.Hour),
+	}
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `
+			INSERT INTO statuses (id, user_id, type, text_content, media_url, caption, background, created_at, expires_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		`, status.ID, status.UserID, status.Type, status.Text, status.MediaURL, status.Caption, status.Background, status.CreatedAt, status.ExpiresAt)
+		return status, err
+	}
+	if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `
+			INSERT INTO statuses (id, user_id, type, text_content, media_url, caption, background, created_at, expires_at)
+			VALUES (?,?,?,?,?,?,?,?,?)
+		`, status.ID, status.UserID, status.Type, status.Text, status.MediaURL, status.Caption, status.Background, status.CreatedAt, status.ExpiresAt)
+		return status, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.userByIDLocked(userID); err != nil {
+		return Status{}, err
+	}
+	s.data.Statuses = append(s.data.Statuses, status)
+	return status, s.saveLocked()
+}
+
+func (s *Store) userByIDLocked(id string) (User, error) {
+	for _, user := range s.data.Users {
+		if user.ID == id {
+			return user, nil
+		}
+	}
+	return User{}, errors.New("user not found")
+}
+
+func scanStatusRows(rows messageRows) ([]StatusWithUser, error) {
+	var statuses []StatusWithUser
+	for rows.Next() {
+		var item StatusWithUser
+		if err := rows.Scan(&item.ID, &item.UserID, &item.Type, &item.Text, &item.MediaURL, &item.Caption, &item.Background, &item.CreatedAt, &item.ExpiresAt, &item.User.ID, &item.User.FirstName, &item.User.LastName, &item.User.Email, &item.User.AvatarURL, &item.IsViewed); err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, item)
+	}
+	if statuses == nil {
+		statuses = []StatusWithUser{}
+	}
+	return statuses, rows.Err()
+}
+
+func (s *Store) GetActiveStatuses(viewerID, ownerID string, limit int) ([]StatusWithUser, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	if s.db != nil {
+		query := `
+			SELECT s.id, s.user_id, s.type, s.text_content, s.media_url, s.caption, s.background, s.created_at, s.expires_at,
+				u.id, u.first_name, u.last_name, u.email, coalesce(u.avatar_url, ''),
+			       EXISTS (SELECT 1 FROM status_views sv WHERE sv.status_id = s.id AND sv.viewer_id = $1)
+			FROM statuses s JOIN app_users u ON u.id = s.user_id
+			WHERE s.expires_at > now()`
+		args := []any{viewerID}
+		if ownerID != "" {
+			query += " AND s.user_id = $2"
+			args = append(args, ownerID)
+		}
+		query += " ORDER BY s.created_at DESC LIMIT $" + fmt.Sprint(len(args)+1)
+		args = append(args, limit)
+		rows, err := s.db.Query(context.Background(), query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanStatusRows(rows)
+	}
+	if s.my != nil {
+		query := `
+			SELECT s.id, s.user_id, s.type, s.text_content, s.media_url, s.caption, s.background, s.created_at, s.expires_at,
+				u.id, u.first_name, u.last_name, u.email, coalesce(u.avatar_url, ''),
+			       EXISTS (SELECT 1 FROM status_views sv WHERE sv.status_id = s.id AND sv.viewer_id = ?)
+			FROM statuses s JOIN app_users u ON u.id = s.user_id
+			WHERE s.expires_at > UTC_TIMESTAMP()`
+		args := []any{viewerID}
+		if ownerID != "" {
+			query += " AND s.user_id = ?"
+			args = append(args, ownerID)
+		}
+		query += " ORDER BY s.created_at DESC LIMIT ?"
+		args = append(args, limit)
+		rows, err := s.my.QueryContext(context.Background(), query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanStatusRows(rows)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	var result []StatusWithUser
+	for i := len(s.data.Statuses) - 1; i >= 0 && len(result) < limit; i-- {
+		status := s.data.Statuses[i]
+		if !status.ExpiresAt.After(now) || (ownerID != "" && status.UserID != ownerID) {
+			continue
+		}
+		user, err := s.userByIDLocked(status.UserID)
+		if err != nil {
+			continue
+		}
+		viewed := false
+		for _, view := range s.data.StatusViews {
+			if view.StatusID == status.ID && view.ViewerID == viewerID {
+				viewed = true
+				break
+			}
+		}
+		result = append(result, StatusWithUser{Status: status, User: user, IsViewed: viewed})
+	}
+	if result == nil {
+		result = []StatusWithUser{}
+	}
+	return result, nil
+}
+
+func (s *Store) MarkStatusViewed(statusID, viewerID string) error {
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `INSERT INTO status_views (status_id, viewer_id) VALUES ($1,$2) ON CONFLICT (status_id, viewer_id) DO NOTHING`, statusID, viewerID)
+		return err
+	}
+	if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `INSERT IGNORE INTO status_views (status_id, viewer_id) VALUES (?,?)`, statusID, viewerID)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, status := range s.data.Statuses {
+		if status.ID == statusID && status.ExpiresAt.After(time.Now().UTC()) {
+			for _, view := range s.data.StatusViews {
+				if view.StatusID == statusID && view.ViewerID == viewerID {
+					return nil
+				}
+			}
+			s.data.StatusViews = append(s.data.StatusViews, StatusView{StatusID: statusID, ViewerID: viewerID, ViewedAt: time.Now().UTC()})
+			return s.saveLocked()
+		}
+	}
+	return errors.New("status not found")
+}
+
+func (s *Store) GetStatusViewers(statusID, ownerID string) ([]StatusViewer, error) {
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `
+			SELECT u.id, u.email, u.first_name, u.last_name, coalesce(u.avatar_url, ''), sv.viewed_at
+			FROM status_views sv JOIN statuses s ON s.id = sv.status_id JOIN app_users u ON u.id = sv.viewer_id
+			WHERE sv.status_id = $1 AND s.user_id = $2 ORDER BY sv.viewed_at DESC
+		`, statusID, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanStatusViewers(rows)
+	}
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `
+			SELECT u.id, u.email, u.first_name, u.last_name, coalesce(u.avatar_url, ''), sv.viewed_at
+			FROM status_views sv JOIN statuses s ON s.id = sv.status_id JOIN app_users u ON u.id = sv.viewer_id
+			WHERE sv.status_id = ? AND s.user_id = ? ORDER BY sv.viewed_at DESC
+		`, statusID, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanStatusViewers(rows)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []StatusViewer
+	for _, status := range s.data.Statuses {
+		if status.ID != statusID || status.UserID != ownerID {
+			continue
+		}
+		for _, view := range s.data.StatusViews {
+			if view.StatusID == statusID {
+				if user, err := s.userByIDLocked(view.ViewerID); err == nil {
+					result = append(result, StatusViewer{User: user, ViewedAt: view.ViewedAt})
+				}
+			}
+		}
+		break
+	}
+	if result == nil {
+		result = []StatusViewer{}
+	}
+	return result, nil
+}
+
+func scanStatusViewers(rows messageRows) ([]StatusViewer, error) {
+	var result []StatusViewer
+	for rows.Next() {
+		var viewer StatusViewer
+		if err := rows.Scan(&viewer.User.ID, &viewer.User.Email, &viewer.User.FirstName, &viewer.User.LastName, &viewer.User.AvatarURL, &viewer.ViewedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, viewer)
+	}
+	if result == nil {
+		result = []StatusViewer{}
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) DeleteStatus(statusID, ownerID string) error {
+	if s.db != nil {
+		result, err := s.db.Exec(context.Background(), `DELETE FROM statuses WHERE id = $1 AND user_id = $2`, statusID, ownerID)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errors.New("status not found")
+		}
+		return nil
+	}
+	if s.my != nil {
+		result, err := s.my.ExecContext(context.Background(), `DELETE FROM statuses WHERE id = ? AND user_id = ?`, statusID, ownerID)
+		if err != nil {
+			return err
+		}
+		count, _ := result.RowsAffected()
+		if count == 0 {
+			return errors.New("status not found")
+		}
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, status := range s.data.Statuses {
+		if status.ID == statusID && status.UserID == ownerID {
+			s.data.Statuses = append(s.data.Statuses[:i], s.data.Statuses[i+1:]...)
+			filtered := s.data.StatusViews[:0]
+			for _, view := range s.data.StatusViews {
+				if view.StatusID != statusID {
+					filtered = append(filtered, view)
+				}
+			}
+			s.data.StatusViews = filtered
+			return s.saveLocked()
+		}
+	}
+	return errors.New("status not found")
 }

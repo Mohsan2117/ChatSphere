@@ -136,6 +136,61 @@ func TestCallHistoryEndpoint(t *testing.T) {
 	}
 }
 
+func TestStatusLifecycle(t *testing.T) {
+	cfg := config.Config{Port: "0", FrontendOrigin: "http://localhost:3000", DataPath: t.TempDir() + "/data.json"}
+	dataStore, err := store.New(cfg.DataPath, "")
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+	hub := realtime.NewHub()
+	go hub.Run()
+	router := NewRouter(cfg, hub, dataStore)
+	suffix := time.Now().UTC().Format("20060102150405")
+	ali := createTestUser(t, router, "ali-status-"+suffix+"@example.com", "Ali", "Status")
+	hamza := createTestUser(t, router, "hamza-status-"+suffix+"@example.com", "Hamza", "Viewer")
+
+	postJSON(t, router, http.MethodPost, "/api/v1/statuses", ali.Token, map[string]any{
+		"type": "text", "textContent": "Hello from Status", "background": "#e7f8f2",
+	}, http.StatusOK)
+	var feed struct {
+		Statuses []struct {
+			ID, UserID, Type, TextContent string
+			Viewed                        bool
+		} `json:"statuses"`
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/statuses", nil)
+	req.Header.Set("Authorization", "Bearer "+hamza.Token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("GET statuses: status %d body %s", resp.Code, resp.Body.String())
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &feed); err != nil || len(feed.Statuses) != 1 {
+		t.Fatalf("unexpected status feed: %s", resp.Body.String())
+	}
+	statusID := feed.Statuses[0].ID
+	if feed.Statuses[0].UserID != ali.ID || feed.Statuses[0].Type != "text" || feed.Statuses[0].TextContent != "Hello from Status" || feed.Statuses[0].Viewed {
+		t.Fatalf("unexpected status: %+v", feed.Statuses[0])
+	}
+	postJSON(t, router, http.MethodPost, "/api/v1/statuses/"+statusID+"/view", hamza.Token, map[string]any{}, http.StatusOK)
+	postJSON(t, router, http.MethodPost, "/api/v1/statuses/"+statusID+"/view", hamza.Token, map[string]any{}, http.StatusOK)
+	viewersReq := httptest.NewRequest(http.MethodGet, "/api/v1/statuses/"+statusID+"/viewers", nil)
+	viewersReq.Header.Set("Authorization", "Bearer "+ali.Token)
+	viewersResp := httptest.NewRecorder()
+	router.ServeHTTP(viewersResp, viewersReq)
+	if viewersResp.Code != http.StatusOK || !strings.Contains(viewersResp.Body.String(), hamza.ID) {
+		t.Fatalf("unexpected viewers response: %d %s", viewersResp.Code, viewersResp.Body.String())
+	}
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/statuses/"+statusID, nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+hamza.Token)
+	deleteResp := httptest.NewRecorder()
+	router.ServeHTTP(deleteResp, deleteReq)
+	if deleteResp.Code != http.StatusNotFound {
+		t.Fatalf("non-owner delete status = %d, want 404", deleteResp.Code)
+	}
+	postJSON(t, router, http.MethodDelete, "/api/v1/statuses/"+statusID, ali.Token, map[string]any{}, http.StatusOK)
+}
+
 type testUser struct {
 	ID    string
 	Email string

@@ -111,6 +111,7 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	registerGroupRoutes(api.Group("/groups"))
 	registerMessageRoutes(api.Group("/messages"), dataStore, hub)
 	registerCallRoutes(api.Group("/calls"), dataStore)
+	registerStatusRoutes(api.Group("/statuses"), dataStore)
 	registerUploadRoutes(api.Group("/upload"), cfg, dataStore)
 	registerFileRoutes(api.Group("/files"), dataStore)
 	registerAdminRoutes(api.Group("/admin"), cfg, dataStore)
@@ -434,6 +435,143 @@ func registerCallRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"calls": results})
+	})
+}
+
+func registerStatusRoutes(group *gin.RouterGroup, dataStore *store.Store) {
+	publicStatus := func(item store.StatusWithUser) gin.H {
+		name := strings.TrimSpace(item.User.FirstName + " " + item.User.LastName)
+		if name == "" {
+			name = item.User.Email
+		}
+		return gin.H{
+			"id": item.ID, "userId": item.UserID, "type": item.Type,
+			"textContent": item.Text, "mediaUrl": item.MediaURL, "caption": item.Caption,
+			"background": item.Background, "createdAt": item.CreatedAt, "expiresAt": item.ExpiresAt,
+			"viewed": item.IsViewed,
+			"user":   gin.H{"id": item.User.ID, "name": name, "avatarUrl": item.User.AvatarURL},
+		}
+	}
+	publicStoredStatus := func(status store.Status, user store.User) gin.H {
+		name := strings.TrimSpace(user.FirstName + " " + user.LastName)
+		if name == "" {
+			name = user.Email
+		}
+		return gin.H{
+			"id": status.ID, "userId": status.UserID, "type": status.Type,
+			"textContent": status.Text, "mediaUrl": status.MediaURL, "caption": status.Caption,
+			"background": status.Background, "createdAt": status.CreatedAt, "expiresAt": status.ExpiresAt,
+			"viewed": false,
+			"user":   gin.H{"id": user.ID, "name": name, "avatarUrl": user.AvatarURL},
+		}
+	}
+	list := func(c *gin.Context, ownerID string) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		statuses, err := dataStore.GetActiveStatuses(authUser.ID, ownerID, queryInt(c, "limit", 200))
+		if err != nil {
+			log.Printf("load statuses failed user=%s: %v", authUser.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load statuses"})
+			return
+		}
+		result := make([]gin.H, 0, len(statuses))
+		for _, item := range statuses {
+			result = append(result, publicStatus(item))
+		}
+		c.JSON(http.StatusOK, gin.H{"statuses": result})
+	}
+	group.GET("", func(c *gin.Context) { list(c, "") })
+	group.GET("/user/:id", func(c *gin.Context) { list(c, c.Param("id")) })
+	group.POST("", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Type       string `json:"type"`
+			Text       string `json:"textContent"`
+			MediaURL   string `json:"mediaUrl"`
+			Caption    string `json:"caption"`
+			Background string `json:"background"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		body.Type = strings.ToLower(strings.TrimSpace(body.Type))
+		body.Text, body.MediaURL, body.Caption, body.Background = strings.TrimSpace(body.Text), strings.TrimSpace(body.MediaURL), strings.TrimSpace(body.Caption), strings.TrimSpace(body.Background)
+		if body.Type != "text" && body.Type != "image" && body.Type != "video" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "status type must be text, image, or video"})
+			return
+		}
+		if body.Type == "text" && body.Text == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "text content is required"})
+			return
+		}
+		if body.Type != "text" && body.MediaURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "media is required"})
+			return
+		}
+		if len([]rune(body.Text)) > 2000 || len([]rune(body.Caption)) > 500 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "status text is too long"})
+			return
+		}
+		status, err := dataStore.CreateStatus(authUser.ID, body.Type, body.Text, body.MediaURL, body.Caption, body.Background)
+		if err != nil {
+			log.Printf("create status failed user=%s: %v", authUser.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create status"})
+			return
+		}
+		user, err := dataStore.UserByID(authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load status owner"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": publicStoredStatus(status, user)})
+	})
+	group.POST("/:id/view", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.MarkStatusViewed(c.Param("id"), authUser.ID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "status not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "viewed"})
+	})
+	group.GET("/:id/viewers", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		viewers, err := dataStore.GetStatusViewers(c.Param("id"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "status not found"})
+			return
+		}
+		result := make([]gin.H, 0, len(viewers))
+		for _, viewer := range viewers {
+			name := strings.TrimSpace(viewer.User.FirstName + " " + viewer.User.LastName)
+			if name == "" {
+				name = viewer.User.Email
+			}
+			result = append(result, gin.H{"user": gin.H{"id": viewer.User.ID, "name": name, "avatarUrl": viewer.User.AvatarURL}, "viewedAt": viewer.ViewedAt})
+		}
+		c.JSON(http.StatusOK, gin.H{"viewers": result})
+	})
+	group.DELETE("/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.DeleteStatus(c.Param("id"), authUser.ID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "status not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
 }
 
