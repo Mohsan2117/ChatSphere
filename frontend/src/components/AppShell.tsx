@@ -4001,8 +4001,12 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
   const [isPosting, setIsPosting] = useState(false);
   const [viewer, setViewer] = useState<{ group: StatusEntry[]; index: number } | null>(null);
   const [viewerPaused, setViewerPaused] = useState(false);
+  const [viewerProgress, setViewerProgress] = useState(0);
+  const [viewerDuration, setViewerDuration] = useState<number | null>(null);
   const [viewerList, setViewerList] = useState<{ user: { name: string; avatarUrl?: string }; viewedAt: string }[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const viewerAnimationFrameRef = useRef<number | null>(null);
+  const viewerProgressRef = useRef(0);
 
   const loadStatuses = useCallback(async () => {
     if (!authToken) return;
@@ -4040,13 +4044,51 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
     setStatuses((existing) => existing.map((status) => status.id === currentStatus.id ? { ...status, viewed: true } : status));
   }, [authToken, currentStatus, currentUserId]);
 
+  const advanceViewer = useCallback(() => {
+    setViewer((current) => {
+      if (!current || current.index >= current.group.length - 1) return null;
+      return { ...current, index: current.index + 1 };
+    });
+  }, []);
+
   useEffect(() => {
-    if (!currentStatus || currentStatus.type === "video" || viewerPaused) return;
-    const timer = window.setTimeout(() => {
-      setViewer((current) => current && current.index < current.group.length - 1 ? { ...current, index: current.index + 1 } : null);
-    }, 5000);
-    return () => window.clearTimeout(timer);
-  }, [currentStatus, viewerPaused]);
+    viewerProgressRef.current = 0;
+    setViewerProgress(0);
+    setViewerDuration(currentStatus?.type === "video" ? null : currentStatus ? 5000 : null);
+  }, [currentStatus?.id]);
+
+  useEffect(() => {
+    if (viewerAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(viewerAnimationFrameRef.current);
+      viewerAnimationFrameRef.current = null;
+    }
+    if (!currentStatus || viewerPaused || viewerDuration === null) return;
+
+    const duration = viewerDuration;
+    const start = performance.now() - viewerProgressRef.current * duration;
+    const animate = (now: number) => {
+      const nextProgress = Math.min(1, (now - start) / duration);
+      viewerProgressRef.current = nextProgress;
+      setViewerProgress(nextProgress);
+      if (nextProgress >= 1) {
+        viewerAnimationFrameRef.current = null;
+        advanceViewer();
+        return;
+      }
+      viewerAnimationFrameRef.current = window.requestAnimationFrame(animate);
+    };
+    viewerAnimationFrameRef.current = window.requestAnimationFrame(animate);
+    return () => {
+      if (viewerAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(viewerAnimationFrameRef.current);
+        viewerAnimationFrameRef.current = null;
+      }
+    };
+  }, [advanceViewer, currentStatus?.id, viewerDuration, viewerPaused]);
+
+  useEffect(() => () => {
+    if (viewerAnimationFrameRef.current !== null) window.cancelAnimationFrame(viewerAnimationFrameRef.current);
+  }, []);
 
   const closeComposer = () => {
     setIsComposerOpen(false); setComposerFile(null); setComposerPreview(""); setComposerText(""); setComposerCaption("");
@@ -4096,6 +4138,10 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
     const next = current.index + delta;
     return next < 0 || next >= current.group.length ? current : { ...current, index: next };
   });
+  const handleViewerVideoMetadata = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const duration = event.currentTarget.duration;
+    if (Number.isFinite(duration) && duration > 0) setViewerDuration(duration * 1000);
+  };
 
   const renderGroup = (group: StatusEntry[], compact = false) => {
     const first = group[0];
@@ -4119,7 +4165,7 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
             </div>
             <div className="relative hidden h-full flex-col items-center justify-between p-3 lg:flex">
               {mediaSource ? (
-                first.type === "video" ? <video aria-hidden className="absolute inset-0 h-full w-full object-cover" muted playsInline src={mediaSource} /> : <img alt="" className="absolute inset-0 h-full w-full object-cover" src={mediaSource} />
+                first.type === "video" ? <video aria-hidden className="absolute inset-0 h-full w-full object-cover" muted playsInline preload="metadata" src={mediaSource} /> : <img alt="" className="absolute inset-0 h-full w-full object-cover" src={mediaSource} />
               ) : <div className="absolute inset-0" style={{ backgroundColor: first.background || "#e7f8f2" }} />}
               <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/75" />
               <div className="relative flex h-full w-full flex-col items-center justify-between">
@@ -4163,10 +4209,10 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
         <button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:opacity-50" disabled={isPosting || (composerType === "text" ? !composerText.trim() : !composerFile)} type="submit">{isPosting ? "Posting..." : "Share status"}<Send size={16} /></button>
       </form></div> : null}
 
-      {viewer && currentStatus ? <div className="fixed inset-0 z-[80] flex flex-col bg-[#07130f] text-white" onMouseEnter={() => setViewerPaused(true)} onMouseLeave={() => setViewerPaused(false)} onTouchStart={() => setViewerPaused(true)}>
-        <div className="flex gap-1 px-4 pt-3">{viewer.group.map((status, index) => <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/30" key={status.id}><div className={`h-full bg-white ${index < viewer.index ? "w-full" : index === viewer.index ? "w-1/2" : "w-0"}`} /></div>)}</div>
+      {viewer && currentStatus ? <div className="fixed inset-0 z-[80] flex flex-col bg-[#07130f] text-white" onPointerCancel={() => setViewerPaused(false)} onPointerDown={() => setViewerPaused(true)} onPointerUp={() => setViewerPaused(false)}>
+        <div className="flex gap-1 px-4 pt-3">{viewer.group.map((status, index) => <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/30" key={status.id}><div className="h-full bg-white" style={{ width: index < viewer.index ? "100%" : index === viewer.index ? `${viewerProgress * 100}%` : "0%", transition: "width 50ms linear" }} /></div>)}</div>
         <div className="flex items-center gap-3 px-4 py-4"><StatusAvatar ring="none" size="h-10 w-10" user={currentStatus.user} /><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{currentStatus.user.name}</div><div className="text-xs text-white/70">{statusRelativeTime(currentStatus.createdAt)}</div></div>{currentStatus.userId === currentUserId ? <><button aria-label="Show viewers" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => showViewers(currentStatus)} type="button"><Eye size={18} /></button><button aria-label="Delete status" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => deleteStatus(currentStatus)} type="button"><Trash2 size={18} /></button></> : null}<button aria-label="Close status viewer" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => setViewer(null)} type="button"><X size={20} /></button></div>
-        <div className="relative flex min-h-0 flex-1 items-center justify-center px-8"><button aria-label="Previous status" className="absolute left-2 z-10 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === 0} onClick={() => goViewer(-1)} type="button"><ChevronLeft size={30} /></button><div className="max-h-full max-w-2xl text-center">{currentStatus.type === "text" ? <div className="flex min-h-[45vh] min-w-[min(80vw,34rem)] items-center justify-center rounded-2xl p-10 text-2xl font-black" style={{ backgroundColor: currentStatus.background || "#e7f8f2", color: "#18212f" }}>{currentStatus.textContent}</div> : currentStatus.type === "video" ? <video autoPlay className="max-h-[68vh] max-w-full rounded-2xl" controls onEnded={() => goViewer(1)} src={attachmentSource(currentStatus.mediaUrl || "", authToken)} /> : <img alt={currentStatus.caption || "Status update"} className="max-h-[68vh] max-w-full rounded-2xl object-contain" src={attachmentSource(currentStatus.mediaUrl || "", authToken)} />}{currentStatus.caption ? <p className="mt-4 text-sm text-white/90">{currentStatus.caption}</p> : null}</div><button aria-label="Next status" className="absolute right-2 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === viewer.group.length - 1} onClick={() => goViewer(1)} type="button"><ChevronRight size={30} /></button></div>
+        <div className="relative flex min-h-0 flex-1 items-center justify-center px-8"><button aria-label="Previous status" className="absolute left-2 z-10 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === 0} onClick={() => goViewer(-1)} type="button"><ChevronLeft size={30} /></button><div className="max-h-full max-w-2xl text-center">{currentStatus.type === "text" ? <div className="flex min-h-[45vh] min-w-[min(80vw,34rem)] items-center justify-center rounded-2xl p-10 text-2xl font-black" style={{ backgroundColor: currentStatus.background || "#e7f8f2", color: "#18212f" }}>{currentStatus.textContent}</div> : currentStatus.type === "video" ? <video autoPlay className="max-h-[68vh] max-w-full rounded-2xl" controls onLoadedMetadata={handleViewerVideoMetadata} src={attachmentSource(currentStatus.mediaUrl || "", authToken)} /> : <img alt={currentStatus.caption || "Status update"} className="max-h-[68vh] max-w-full rounded-2xl object-contain" src={attachmentSource(currentStatus.mediaUrl || "", authToken)} />}{currentStatus.caption ? <p className="mt-4 text-sm text-white/90">{currentStatus.caption}</p> : null}</div><button aria-label="Next status" className="absolute right-2 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === viewer.group.length - 1} onClick={() => goViewer(1)} type="button"><ChevronRight size={30} /></button></div>
         {viewerList ? <div className="absolute bottom-4 left-1/2 max-h-48 w-[min(90vw,24rem)] -translate-x-1/2 overflow-y-auto rounded-xl bg-white p-3 text-[#18212f] shadow-xl"><div className="mb-2 flex items-center justify-between text-sm font-black">Viewed by <button aria-label="Close viewer list" onClick={() => setViewerList(null)} type="button"><X size={16} /></button></div>{viewerList.length ? viewerList.map((item) => <div className="flex items-center gap-2 border-t border-[#edf1f5] py-2" key={`${item.user.name}-${item.viewedAt}`}><StatusAvatar size="h-7 w-7" user={item.user} /><span className="text-xs font-bold">{item.user.name}</span></div>) : <p className="text-xs text-[#64748b]">No views yet.</p>}</div> : null}
       </div> : null}
     </div>
