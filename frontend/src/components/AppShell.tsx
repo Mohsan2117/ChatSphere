@@ -136,6 +136,7 @@ export function AppShell() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
 
@@ -1193,20 +1194,23 @@ export function AppShell() {
     setAvatarPreview(URL.createObjectURL(file));
   }
 
-  function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
+  function handleFileAttachment(file: File) {
     const kind = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file";
     const attachment: AttachmentDraft = {
       name: file.name,
       type: file.type || "application/octet-stream",
       url: URL.createObjectURL(file),
       kind,
-      file
+      file,
     };
     if (selectedChatId) setDraftAttachment(selectedChatId, attachment);
+  }
+
+  function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    handleFileAttachment(file);
   }
 
   function setDraftText(chatId: string, text: string) {
@@ -3283,6 +3287,26 @@ export function AppShell() {
                     <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
                       <Smile size={22} />
                     </button>
+                    <button
+                      type="button"
+                      aria-label="Attach image or video"
+                      className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]"
+                      onClick={() => mediaInputRef.current?.click()}
+                    >
+                      <Image size={22} />
+                    </button>
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      className="hidden"
+                      ref={mediaInputRef}
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          handleFileAttachment(e.target.files[0]);
+                          e.target.value = "";
+                        }
+                      }}
+                    />
                     <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
                       <Paperclip size={22} />
                       <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />

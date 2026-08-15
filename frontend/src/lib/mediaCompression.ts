@@ -235,6 +235,16 @@ export async function handleVideoCompressionLoop(
   const maxUploadBytes = config.maxUploadSizeMb * 1024 * 1024;
   const safetyLimitBytes = maxUploadBytes - 1.5 * 1024 * 1024;
 
+  // If the original file is excessively large (e.g., >5× the allowed upload size),
+  // abort compression early and inform the user. This avoids long processing
+  // for videos that are unlikely to fit even after aggressive compression.
+  const excessiveMultiplier = 5;
+  if (file.size > maxUploadBytes * excessiveMultiplier) {
+    throw new Error(
+      `Video is too large. Maximum allowed size is ${config.maxUploadSizeMb} MB. Please select a smaller video.`
+    );
+  }
+
   if (file.size > config.videoOptimizeThresholdBytes || file.size > safetyLimitBytes) {
     onProgress("Preparing video metadata...");
     const dimensions = await getVideoDimensions(file);
@@ -275,7 +285,8 @@ export async function handleVideoCompressionLoop(
       try {
         currentFile = await compressVideo(currentFile, targetWidth, targetHeight, crf, onProgress, videoBitrateK);
       } catch (e) {
-        throw new Error(`Video compression failed: ${e instanceof Error ? e.message : String(e)}`);
+        // Unexpected error during compression
+        throw new Error('Could not optimize video. Please try again.');
       }
 
       const newDims = await getVideoDimensions(currentFile);
@@ -289,7 +300,7 @@ export async function handleVideoCompressionLoop(
 
   if (currentFile.size > safetyLimitBytes) {
     throw new Error(
-      "Video is still too large after compression attempts. Please choose a shorter video or lower its resolution."
+      `Video could not be compressed below the ${config.maxUploadSizeMb} MB limit. Please select a shorter or smaller video.`
     );
   }
 
