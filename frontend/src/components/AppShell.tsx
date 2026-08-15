@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -52,6 +52,7 @@ type ChatMessage = {
     kind: "image" | "video" | "file" | "audio";
   };
   localSeq?: number;
+  status?: "uploading" | "sending" | "sent" | "failed";
 };
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type ChatDraft = {
@@ -209,6 +210,12 @@ export function AppShell() {
     draftAttachment: AttachmentDraft | null;
   }[]>([]);
   const isProcessingQueueRef = useRef(false);
+  const failedTasksRef = useRef<Map<string, {
+    chatId: string;
+    message: ChatMessage;
+    draftText: string;
+    draftAttachment: AttachmentDraft | null;
+  }>>(new Map());
 
   const scrollToBottom = () => {
     if (scrollContainerRef.current) {
@@ -500,6 +507,8 @@ export function AppShell() {
           })
         );
       }
+      // Reconcile pending/failed messages
+      reconcilePendingMessagesRef.current();
     };
 
     socket.onmessage = (event) => {
@@ -508,10 +517,43 @@ export function AppShell() {
           type?: string;
           conversationId?: string;
           userId?: string;
-          payload?: ChatMessage & { userId?: string; online?: boolean };
+          payload?: ChatMessage & { userId?: string; online?: boolean; client_message_id?: string; message_id?: string; status?: string; error?: string };
         };
         if (data.type && data.type.startsWith("call_")) {
           handleSignalingEventRef.current(data);
+          return;
+        }
+        if (data.type === "message_sent" && data.payload) {
+          const clientMsgId = data.payload.client_message_id;
+          const serverMsgId = data.payload.message_id;
+          const status = data.payload.status;
+          
+          if (clientMsgId) {
+            if (status === "sent" && serverMsgId) {
+              setChatMessages((current) => {
+                const next = { ...current };
+                Object.keys(next).forEach((chatId) => {
+                  next[chatId] = (next[chatId] ?? []).map((msg) =>
+                    msg.id === clientMsgId ? { ...msg, id: serverMsgId, status: "sent" } : msg
+                  );
+                });
+                return next;
+              });
+            } else if (status === "failed") {
+              setChatMessages((current) => {
+                const next = { ...current };
+                Object.keys(next).forEach((chatId) => {
+                  next[chatId] = (next[chatId] ?? []).map((msg) =>
+                    msg.id === clientMsgId ? { ...msg, status: "failed" } : msg
+                  );
+                });
+                return next;
+              });
+              if (data.payload.error) {
+                setChatNotice(data.payload.error);
+              }
+            }
+          }
           return;
         }
         if (data.type === "presence.updated") {
@@ -605,6 +647,33 @@ export function AppShell() {
     socket.onclose = () => {
       setTypingUser(null);
       if (closedByCleanup) return;
+
+      // Transition any "sending" or "uploading" messages to "failed" and save tasks
+      setChatMessages((current) => {
+        const next = { ...current };
+        Object.entries(next).forEach(([chatId, messages]) => {
+          next[chatId] = (messages ?? []).map((msg) => {
+            if (msg.status === "sending" || msg.status === "uploading") {
+              const taskIndex = pendingSendQueueRef.current.findIndex((t) => t.message.id === msg.id);
+              if (taskIndex !== -1) {
+                const task = pendingSendQueueRef.current[taskIndex];
+                pendingSendQueueRef.current.splice(taskIndex, 1);
+                failedTasksRef.current.set(msg.id, task);
+              } else {
+                failedTasksRef.current.set(msg.id, {
+                  chatId,
+                  message: msg,
+                  draftText: msg.body,
+                  draftAttachment: msg.attachment ? { ...msg.attachment } : null
+                });
+              }
+              return { ...msg, status: "failed" };
+            }
+            return msg;
+          });
+        });
+        return next;
+      });
 
       if (callStateRef.current !== "idle" && callStateRef.current !== "ended" && callStateRef.current !== "rejected") {
         if (!callReconnectTimeoutRef.current) {
@@ -1316,24 +1385,37 @@ export function AppShell() {
       const task = pendingSendQueueRef.current[0];
       const { chatId, message, draftText, draftAttachment } = task;
 
-      let uploadedAttachment: NonNullable<ChatMessage["attachment"]> | undefined;
+      let uploadedAttachment: NonNullable<ChatMessage["attachment"]> | undefined = message.attachment;
       let uploadFailed = false;
 
-      if (draftAttachment) {
+      const attachmentIsUploaded = message.attachment && !message.attachment.url.startsWith("blob:");
+
+      if (draftAttachment && !attachmentIsUploaded) {
         try {
+          // Set UI status to uploading
+          setChatMessages((current) => ({
+            ...current,
+            [chatId]: (current[chatId] ?? []).map((msg) =>
+              msg.id === message.id ? { ...msg, status: "uploading" } : msg
+            )
+          }));
+
           uploadedAttachment = await uploadAttachment(draftAttachment);
         } catch (error) {
           uploadFailed = true;
-          setDraftText(chatId, draftText);
-          if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
           const errorMsg = error instanceof Error ? error.message : "Could not upload file";
           setAuthError(errorMsg);
           setChatNotice(errorMsg);
           console.error("[VoiceMessage debug] processSendQueue - Attachment upload failed:", errorMsg);
           
+          // Save task to failed tasks
+          failedTasksRef.current.set(message.id, task);
+
           setChatMessages((current) => ({
             ...current,
-            [chatId]: (current[chatId] ?? []).filter((msg) => msg.id !== message.id)
+            [chatId]: (current[chatId] ?? []).map((msg) =>
+              msg.id === message.id ? { ...msg, status: "failed" } : msg
+            )
           }));
         }
       }
@@ -1343,61 +1425,119 @@ export function AppShell() {
         continue;
       }
 
-      if (uploadedAttachment) {
+      if (uploadedAttachment && !attachmentIsUploaded) {
         message.attachment = uploadedAttachment;
         setChatMessages((current) => ({
           ...current,
           [chatId]: (current[chatId] ?? []).map((msg) =>
-            msg.id === message.id ? { ...msg, attachment: uploadedAttachment } : msg
+            msg.id === message.id ? { ...msg, attachment: uploadedAttachment, status: "sending" } : msg
           )
         }));
       }
 
-      try {
-        console.log("[VoiceMessage debug] processSendQueue - Sending message endpoint payload:", {
-          recipientId: chatId,
-          body: message.body,
-          attachment: uploadedAttachment
-        });
-        const response = await fetch(`${apiUrl()}/api/v1/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
-          body: JSON.stringify({
+      const socket = socketRef.current;
+      let useWebSocket = socket && socket.readyState === WebSocket.OPEN;
+      if (useWebSocket && socket) {
+        try {
+          // Set UI status to sending
+          setChatMessages((current) => ({
+            ...current,
+            [chatId]: (current[chatId] ?? []).map((msg) =>
+              msg.id === message.id ? { ...msg, status: "sending" } : msg
+            )
+          }));
+
+          socket.send(
+            JSON.stringify({
+              type: "message_send",
+              payload: {
+                client_message_id: message.id,
+                recipientId: chatId,
+                body: message.body,
+                attachment: uploadedAttachment
+                  ? {
+                      name: uploadedAttachment.name,
+                      type: uploadedAttachment.type,
+                      kind: uploadedAttachment.kind,
+                      url: uploadedAttachment.url
+                    }
+                  : undefined
+              }
+            })
+          );
+          console.log("[WebSocket debug] message_send sent via WS for client ID:", message.id);
+        } catch (error) {
+          console.error("[WebSocket debug] failed to send via WS, falling back to HTTP:", error);
+          useWebSocket = false;
+        }
+      }
+
+      if (!useWebSocket) {
+        try {
+          // Set UI status to sending
+          setChatMessages((current) => ({
+            ...current,
+            [chatId]: (current[chatId] ?? []).map((msg) =>
+              msg.id === message.id ? { ...msg, status: "sending" } : msg
+            )
+          }));
+
+          console.log("[VoiceMessage debug] processSendQueue - Sending message endpoint payload:", {
             recipientId: chatId,
             body: message.body,
             attachment: uploadedAttachment
-              ? {
-                  name: uploadedAttachment.name,
-                  type: uploadedAttachment.type,
-                  kind: uploadedAttachment.kind,
-                  url: uploadedAttachment.url
-                }
-              : undefined
-          })
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          console.error("[VoiceMessage debug] processSendQueue - Save message returned error. Status:", response.status, "data:", data);
-          throw new Error(data.error ?? `Message send failed with status ${response.status}`);
-        }
-        console.log("[VoiceMessage debug] processSendQueue - Message send succeeded. Data:", data);
-        if (data.message?.id) {
+          });
+          const response = await fetch(`${apiUrl()}/api/v1/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
+            body: JSON.stringify({
+              id: message.id, // client-generated ID
+              recipientId: chatId,
+              body: message.body,
+              attachment: uploadedAttachment
+                ? {
+                    name: uploadedAttachment.name,
+                    type: uploadedAttachment.type,
+                    kind: uploadedAttachment.kind,
+                    url: uploadedAttachment.url
+                  }
+                : undefined
+            })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            console.error("[VoiceMessage debug] processSendQueue - Save message returned error. Status:", response.status, "data:", data);
+            throw new Error(data.error ?? `Message send failed with status ${response.status}`);
+          }
+          console.log("[VoiceMessage debug] processSendQueue - Message send succeeded. Data:", data);
+          if (data.message?.id) {
+            setChatMessages((current) => ({
+              ...current,
+              [chatId]: (current[chatId] ?? []).map((currentMessage) =>
+                currentMessage.id === message.id
+                  ? { ...data.message, mine: true, status: "sent", localSeq: currentMessage.localSeq, createdAt: currentMessage.createdAt }
+                  : currentMessage
+              )
+            }));
+          }
+        } catch (error) {
+          console.error("[VoiceMessage debug] processSendQueue - Send message catch hit:", error);
+          
+          failedTasksRef.current.set(message.id, {
+            chatId,
+            message: { ...message, attachment: uploadedAttachment },
+            draftText,
+            draftAttachment: (uploadedAttachment && draftAttachment) ? ({ ...draftAttachment, url: uploadedAttachment.url, file: undefined } as AttachmentDraft) : draftAttachment
+          });
+
           setChatMessages((current) => ({
             ...current,
             [chatId]: (current[chatId] ?? []).map((currentMessage) =>
-              currentMessage.id === message.id ? { ...data.message, mine: true, localSeq: currentMessage.localSeq, createdAt: currentMessage.createdAt } : currentMessage
+              currentMessage.id === message.id ? { ...currentMessage, status: "failed" } : currentMessage
             )
           }));
+          setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
         }
-      } catch (error) {
-        console.error("[VoiceMessage debug] processSendQueue - Send message catch hit:", error);
-        setChatMessages((current) => ({
-          ...current,
-          [chatId]: (current[chatId] ?? []).filter((currentMessage) => currentMessage.id !== message.id)
-        }));
-        setDraftText(chatId, draftText);
-        if (draftAttachment) setDraftAttachment(chatId, draftAttachment);
-        setChatNotice(error instanceof Error ? error.message : "Message could not be saved");
       }
 
       pendingSendQueueRef.current.shift();
@@ -1405,6 +1545,52 @@ export function AppShell() {
 
     isProcessingQueueRef.current = false;
   }
+
+  const retryMessage = useCallback((failedMessage: ChatMessage) => {
+    const task = failedTasksRef.current.get(failedMessage.id);
+    if (!task) return;
+
+    failedTasksRef.current.delete(failedMessage.id);
+
+    // Update status in UI to uploading or sending
+    const initialStatus = (task.draftAttachment && !task.message.attachment?.url.startsWith("http")) ? "uploading" : "sending";
+    
+    setChatMessages((current) => ({
+      ...current,
+      [task.chatId]: (current[task.chatId] ?? []).map((msg) =>
+        msg.id === failedMessage.id ? { ...msg, status: initialStatus } : msg
+      )
+    }));
+
+    // Queue it back
+    pendingSendQueueRef.current.push(task);
+    processSendQueue();
+  }, []);
+
+  const reconcilePendingMessages = useCallback(() => {
+    if (failedTasksRef.current.size === 0) return;
+    console.log(`WebSocket reconnected. Reconciling ${failedTasksRef.current.size} failed messages...`);
+    const tasks = Array.from(failedTasksRef.current.values());
+    for (const task of tasks) {
+      failedTasksRef.current.delete(task.message.id);
+      
+      const initialStatus = (task.draftAttachment && !task.message.attachment?.url.startsWith("http")) ? "uploading" : "sending";
+      setChatMessages((current) => ({
+        ...current,
+        [task.chatId]: (current[task.chatId] ?? []).map((msg) =>
+          msg.id === task.message.id ? { ...msg, status: initialStatus } : msg
+        )
+      }));
+
+      pendingSendQueueRef.current.push(task);
+    }
+    processSendQueue();
+  }, []);
+
+  const reconcilePendingMessagesRef = useRef(reconcilePendingMessages);
+  useEffect(() => {
+    reconcilePendingMessagesRef.current = reconcilePendingMessages;
+  }, [reconcilePendingMessages]);
 
   async function sendTypingStatus(event: "start" | "stop", targetId?: string) {
     const chatId = targetId ?? selectedChatId;
@@ -1466,7 +1652,7 @@ export function AppShell() {
     setIsEmojiOpen(false);
 
     const message: ChatMessage = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       body,
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       mine: true,
@@ -1481,7 +1667,8 @@ export function AppShell() {
           }
         : undefined,
       createdAt: new Date().toISOString(),
-      localSeq: getNextLocalSeq()
+      localSeq: getNextLocalSeq(),
+      status: draftAttachment ? "uploading" : "sending"
     };
 
     setChatMessages((current) => ({
@@ -1643,7 +1830,7 @@ export function AppShell() {
     };
 
     const message: ChatMessage = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       body: "",
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       mine: true,
@@ -1656,7 +1843,8 @@ export function AppShell() {
         kind: "audio"
       },
       createdAt: new Date().toISOString(),
-      localSeq: getNextLocalSeq()
+      localSeq: getNextLocalSeq(),
+      status: "uploading"
     };
 
     setChatMessages((current) => ({
@@ -2885,7 +3073,7 @@ export function AppShell() {
                     {visibleSelectedMessages.map((message) => (
                       <div key={message.id} className={`cs-message-in flex ${message.mine ? "justify-end" : "justify-start"}`}>
                         {message.attachment && message.attachment.kind === "audio" ? (
-                          <VoiceMessageBubble message={message} authToken={authToken} selectedChat={selectedChat} />
+                          <VoiceMessageBubble message={message} authToken={authToken} selectedChat={selectedChat} onRetry={retryMessage} />
                         ) : (
                           <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
                             {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
@@ -2893,16 +3081,35 @@ export function AppShell() {
                             <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
                               {formatMessageTime(message)}
                               {message.mine ? (
-                                <>
-                                  <span>{message.readAt ? "Seen" : "Sent"}</span>
-                                  {message.readAt ? (
-                                    <CheckCheck size={15} className="text-[#00a884]" />
-                                  ) : selectedChat?.online ? (
-                                    <CheckCheck size={15} className="text-[#94a3b8]" />
+                                <div className="flex items-center gap-1">
+                                  {message.status === "uploading" ? (
+                                    <span>Uploading...</span>
+                                  ) : message.status === "sending" ? (
+                                    <span>Sending...</span>
+                                  ) : message.status === "failed" ? (
+                                    <span className="text-[#b42318] flex items-center gap-1">
+                                      <span>⚠ Failed</span>
+                                      <button
+                                        onClick={() => retryMessage(message)}
+                                        className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
+                                        type="button"
+                                      >
+                                        Retry
+                                      </button>
+                                    </span>
                                   ) : (
-                                    <Check size={15} className="text-[#94a3b8]" />
+                                    <>
+                                      <span>{message.readAt ? "Seen" : "Sent"}</span>
+                                      {message.readAt ? (
+                                        <CheckCheck size={15} className="text-[#00a884]" />
+                                      ) : selectedChat?.online ? (
+                                        <CheckCheck size={15} className="text-[#94a3b8]" />
+                                      ) : (
+                                        <Check size={15} className="text-[#94a3b8]" />
+                                      )}
+                                    </>
                                   )}
-                                </>
+                                </div>
                               ) : null}
                             </div>
                           </div>
@@ -3478,11 +3685,13 @@ const pauseAllOtherAudios = (currentAudio: HTMLAudioElement) => {
 function VoiceMessageBubble({
   message,
   authToken,
-  selectedChat
+  selectedChat,
+  onRetry
 }: {
   message: ChatMessage;
   authToken: string;
   selectedChat: any;
+  onRetry?: (message: ChatMessage) => void;
 }) {
   const attachment = message.attachment!;
   const [failed, setFailed] = useState(false);
@@ -3499,16 +3708,37 @@ function VoiceMessageBubble({
         <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
           {formatMessageTime(message)}
           {message.mine && (
-            <>
-              <span>{message.readAt ? "Seen" : "Sent"}</span>
-              {message.readAt ? (
-                <CheckCheck size={15} className="text-[#00a884]" />
-              ) : selectedChat?.online ? (
-                <CheckCheck size={15} className="text-[#94a3b8]" />
+            <div className="flex items-center gap-1">
+              {message.status === "uploading" ? (
+                <span>Uploading...</span>
+              ) : message.status === "sending" ? (
+                <span>Sending...</span>
+              ) : message.status === "failed" ? (
+                <span className="text-[#b42318] flex items-center gap-1">
+                  <span>⚠ Failed</span>
+                  {onRetry && (
+                    <button
+                      onClick={() => onRetry(message)}
+                      className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
+                      type="button"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </span>
               ) : (
-                <Check size={15} className="text-[#94a3b8]" />
+                <>
+                  <span>{message.readAt ? "Seen" : "Sent"}</span>
+                  {message.readAt ? (
+                    <CheckCheck size={15} className="text-[#00a884]" />
+                  ) : selectedChat?.online ? (
+                    <CheckCheck size={15} className="text-[#94a3b8]" />
+                  ) : (
+                    <Check size={15} className="text-[#94a3b8]" />
+                  )}
+                </>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -3521,6 +3751,7 @@ function VoiceMessageBubble({
       name={attachment.name}
       message={message}
       selectedChat={selectedChat}
+      onRetry={onRetry}
     />
   );
 }
@@ -3529,12 +3760,14 @@ function VoiceMessagePlayer({
   source,
   name,
   message,
-  selectedChat
+  selectedChat,
+  onRetry
 }: {
   source: string;
   name: string;
   message: ChatMessage;
   selectedChat: any;
+  onRetry?: (message: ChatMessage) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -3727,16 +3960,37 @@ function VoiceMessagePlayer({
           <div className="flex items-center gap-1">
             <span>{formatMessageTime(message)}</span>
             {message.mine && (
-              <>
-                <span>{message.readAt ? "Seen" : "Sent"}</span>
-                {message.readAt ? (
-                  <CheckCheck size={14} className="text-[#00a884]" />
-                ) : selectedChat?.online ? (
-                  <CheckCheck size={14} className="text-[#94a3b8]" />
+              <div className="flex items-center gap-1">
+                {message.status === "uploading" ? (
+                  <span>Uploading...</span>
+                ) : message.status === "sending" ? (
+                  <span>Sending...</span>
+                ) : message.status === "failed" ? (
+                  <span className="text-[#b42318] flex items-center gap-1">
+                    <span>⚠ Failed</span>
+                    {onRetry && (
+                      <button
+                        onClick={() => onRetry(message)}
+                        className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
+                        type="button"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </span>
                 ) : (
-                  <Check size={14} className="text-[#94a3b8]" />
+                  <>
+                    <span>{message.readAt ? "Seen" : "Sent"}</span>
+                    {message.readAt ? (
+                      <CheckCheck size={14} className="text-[#00a884]" />
+                    ) : selectedChat?.online ? (
+                      <CheckCheck size={14} className="text-[#94a3b8]" />
+                    ) : (
+                      <Check size={14} className="text-[#94a3b8]" />
+                    )}
+                  </>
                 )}
-              </>
+              </div>
             )}
           </div>
         </div>

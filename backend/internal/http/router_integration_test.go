@@ -326,3 +326,89 @@ func TestConfigDefaults(t *testing.T) {
 		t.Errorf("expected default VideoMaxDimension to be 1280, got %d", cfg.VideoMaxDimension)
 	}
 }
+
+func TestMessageIdempotencyAndClientGeneratedID(t *testing.T) {
+	cfg := config.Load()
+	if strings.TrimSpace(cfg.DatabaseURL) == "" {
+		t.Skip("DATABASE_URL is not configured")
+	}
+	cfg.Port = "0"
+	cfg.FrontendOrigin = "http://localhost:3000"
+
+	dataStore, err := store.New(cfg.DataPath, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	suffix := time.Now().UTC().Format("20060102150405")
+	senderEmail := "sender-" + suffix + "@example.com"
+	recipientEmail := "recipient-" + suffix + "@example.com"
+
+	// Create test users
+	hub := realtime.NewHub()
+	go hub.Run()
+	router := NewRouter(cfg, hub, dataStore)
+
+	sender := createTestUser(t, router, senderEmail, "Sender", "User")
+	recipient := createTestUser(t, router, recipientEmail, "Recipient", "User")
+
+	clientMsgID := "client-uuid-" + suffix
+
+	// 1. Save message with client message ID
+	msg, err := dataStore.SaveMessage(clientMsgID, sender.Email, recipient.ID, "Hello idempotency", "", "", "", "")
+	if err != nil {
+		t.Fatalf("SaveMessage failed: %v", err)
+	}
+	if msg.ID != clientMsgID {
+		t.Fatalf("expected message ID to be %s, got %s", clientMsgID, msg.ID)
+	}
+
+	// 2. Try saving again with the same client message ID
+	// Let's verify MessageByID returns it
+	foundMsg, err := dataStore.MessageByID(clientMsgID)
+	if err != nil {
+		t.Fatalf("MessageByID failed: %v", err)
+	}
+	if foundMsg.Body != "Hello idempotency" {
+		t.Fatalf("expected body 'Hello idempotency', got '%s'", foundMsg.Body)
+	}
+
+	// 3. Test HTTP POST `/api/v1/messages` with same ID -> should return existing message (idempotency check)
+	var body bytes.Buffer
+	err = json.NewEncoder(&body).Encode(map[string]any{
+		"id":          clientMsgID,
+		"recipientId": recipient.ID,
+		"body":        "Hello idempotency duplicate attempt",
+	})
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/messages", &body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sender.Token)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", resp.Code, resp.Body.String())
+	}
+
+	var postResp struct {
+		Message struct {
+			ID   string `json:"id"`
+			Body string `json:"body"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &postResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// It should return the original message ("Hello idempotency"), NOT the duplicate one!
+	if postResp.Message.ID != clientMsgID {
+		t.Fatalf("expected returned ID to be %s, got %s", clientMsgID, postResp.Message.ID)
+	}
+	if postResp.Message.Body != "Hello idempotency" {
+		t.Fatalf("idempotency check failed: expected original body 'Hello idempotency', got '%s'", postResp.Message.Body)
+	}
+}

@@ -715,7 +715,7 @@ func (s *Store) ResolveReport(id string) error {
 	return nil
 }
 
-func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind, attachmentURL string) (Message, error) {
+func (s *Store) SaveMessage(clientMsgID, senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind, attachmentURL string) (Message, error) {
 	if s.db == nil && s.my == nil {
 		return Message{}, errors.New("database is not configured")
 	}
@@ -730,8 +730,12 @@ func (s *Store) SaveMessage(senderEmail, recipientID, body, attachmentName, atta
 	if s.IsBlockedBetween(sender.ID, recipient.ID) {
 		return Message{}, errors.New("messaging is blocked between these users")
 	}
+	msgID := clientMsgID
+	if msgID == "" {
+		msgID = randomID()
+	}
 	message := Message{
-		ID:             randomID(),
+		ID:             msgID,
 		ConversationID: conversationID(sender.ID, recipient.ID),
 		SenderEmail:    sender.Email,
 		SenderID:       sender.ID,
@@ -1019,13 +1023,13 @@ func (s *Store) UpdateMessage(userEmail, id, body string) (Message, error) {
 		if err != nil {
 			return Message{}, err
 		}
-		return s.messageByID(id)
+		return s.MessageByID(id)
 	}
 	_, err := s.my.ExecContext(context.Background(), `update messages set body = ? where id = ? and sender_email = ?`, strings.TrimSpace(body), id, email)
 	if err != nil {
 		return Message{}, err
 	}
-	return s.messageByID(id)
+	return s.MessageByID(id)
 }
 
 func (s *Store) DeleteMessage(userEmail, id string) error {
@@ -1509,7 +1513,7 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 	return users, rows.Err()
 }
 
-func (s *Store) messageByID(id string) (Message, error) {
+func (s *Store) MessageByID(id string) (Message, error) {
 	query := `
 		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m

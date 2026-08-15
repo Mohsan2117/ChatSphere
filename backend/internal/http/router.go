@@ -408,6 +408,7 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			return
 		}
 		var body struct {
+			ID          string `json:"id"`
 			RecipientID string `json:"recipientId"`
 			Body        string `json:"body"`
 			Attachment  struct {
@@ -429,7 +430,16 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			c.JSON(http.StatusBadRequest, gin.H{"error": "message is empty"})
 			return
 		}
-		message, err := dataStore.SaveMessage(authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
+		if body.ID != "" {
+			if existingMsg, err := dataStore.MessageByID(body.ID); err == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"message":           publicMessage(existingMsg, authUser.Email),
+					"client_message_id": body.ID,
+				})
+				return
+			}
+		}
+		message, err := dataStore.SaveMessage(body.ID, authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
 		if err != nil {
 			log.Printf("save message failed sender=%s recipient=%s: %v", authUser.Email, body.RecipientID, err)
 			if strings.Contains(err.Error(), "blocked") {
@@ -450,7 +460,10 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 				Payload:        payload,
 			})
 		}
-		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
+		c.JSON(http.StatusOK, gin.H{
+			"message":           publicMessage(message, authUser.Email),
+			"client_message_id": body.ID,
+		})
 	})
 	group.POST("/:recipientId/read", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
