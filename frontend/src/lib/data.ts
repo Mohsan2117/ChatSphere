@@ -7,6 +7,7 @@ export type ChatSeed = {
   time: string;
   unread: number;
   online: boolean;
+  lastSeenAt?: string;
   avatarUrl?: string;
 };
 
@@ -19,6 +20,7 @@ export type DirectoryUser = {
   lastName?: string;
   avatarUrl?: string;
   online?: boolean;
+  lastSeenAt?: string;
 };
 
 export function userToChat(user: DirectoryUser): ChatSeed {
@@ -32,6 +34,7 @@ export function userToChat(user: DirectoryUser): ChatSeed {
     time: "",
     unread: 0,
     online: Boolean(user.online),
+    lastSeenAt: user.lastSeenAt,
     avatarUrl: user.avatarUrl
   };
 }

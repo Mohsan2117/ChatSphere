@@ -27,6 +27,7 @@ type Hub struct {
 	broadcast  chan Event
 	mu         sync.RWMutex
 	online     map[string]int
+	lastSeen   map[string]time.Time
 	calls      map[string]CallSession // callId -> CallSession
 }
 
@@ -37,6 +38,7 @@ func NewHub() *Hub {
 		unregister: make(chan *Client),
 		broadcast:  make(chan Event, 256),
 		online:     make(map[string]int),
+		lastSeen:   make(map[string]time.Time),
 		calls:      make(map[string]CallSession),
 	}
 }
@@ -49,6 +51,13 @@ func (h *Hub) IsOnline(userID string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.online[userID] > 0
+}
+
+func (h *Hub) LastSeenAt(userID string) (time.Time, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	lastSeen, ok := h.lastSeen[userID]
+	return lastSeen, ok
 }
 
 func (h *Hub) OnlineUserIDs() map[string]bool {
@@ -70,6 +79,7 @@ func (h *Hub) Run() {
 			h.clients[client] = true
 			h.mu.Lock()
 			h.online[client.userID]++
+			delete(h.lastSeen, client.userID)
 			onlineCount := h.online[client.userID]
 			h.mu.Unlock()
 			if onlineCount == 1 {
@@ -100,13 +110,16 @@ func (h *Hub) Run() {
 					h.mu.Lock()
 					defer h.mu.Unlock()
 					if h.online[uid] <= 0 {
+						lastSeen := time.Now().UTC()
+						h.lastSeen[uid] = lastSeen
 						events := h.removeCallsForUserLocked(uid)
 						h.dispatch(Event{
 							Type:   "presence.updated",
 							UserID: uid,
 							Payload: mustJSON(map[string]any{
-								"userId": uid,
-								"online": false,
+								"userId":     uid,
+								"online":     false,
+								"lastSeenAt": lastSeen.Format(time.RFC3339),
 							}),
 						})
 						for _, ev := range events {
@@ -349,4 +362,3 @@ func (h *Hub) InviteToCall(callID, userID string) bool {
 	}
 	return true
 }
-

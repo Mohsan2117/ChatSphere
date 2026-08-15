@@ -742,7 +742,7 @@ export function AppShell() {
           type?: string;
           conversationId?: string;
           userId?: string;
-          payload?: ChatMessage & { userId?: string; online?: boolean; client_message_id?: string; message_id?: string; status?: string; error?: string };
+          payload?: ChatMessage & { userId?: string; online?: boolean; lastSeenAt?: string; client_message_id?: string; message_id?: string; status?: string; error?: string };
         };
         if (data.type && data.type.startsWith("call_")) {
           handleSignalingEventRef.current(data);
@@ -784,9 +784,10 @@ export function AppShell() {
         if (data.type === "presence.updated") {
           const userId = data.payload?.userId || data.userId;
           const online = Boolean(data.payload?.online);
+          const lastSeenAt = data.payload?.lastSeenAt;
           if (!userId) return;
           setDirectoryChats((current) =>
-            current.map((chat) => (chat.id === userId ? { ...chat, online: chat.id === currentUserId ? true : online } : chat))
+            current.map((chat) => chat.id === userId ? { ...chat, online: chat.id === currentUserId ? true : online, ...(lastSeenAt ? { lastSeenAt } : {}) } : chat)
           );
           return;
         }
@@ -969,7 +970,8 @@ export function AppShell() {
               }
               return {
                 ...chat,
-                online: chat.online || Boolean(previous?.online)
+                online: chat.online || Boolean(previous?.online),
+                lastSeenAt: chat.lastSeenAt || previous?.lastSeenAt
               };
             });
           });
@@ -3229,7 +3231,7 @@ export function AppShell() {
             />
           ) : (
             <>
-          <header className="border-b border-[#e5e9f0] px-5 py-5">
+          <header className="border-b border-[#e5e9f0] px-3 py-3 lg:px-5 lg:py-5">
             <div className="hidden lg:flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere</p>
@@ -3264,7 +3266,7 @@ export function AppShell() {
                 </button>
               ))}
             </div>
-            <label className="mt-5 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b]">
+            <label className="mt-3 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b] lg:mt-5">
               <Search size={19} />
               <input
                 ref={chatSearchRef}
@@ -3276,8 +3278,8 @@ export function AppShell() {
             </label>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
-            <div className="mb-3 flex items-center justify-between px-2">
+          <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 py-3 pb-24 lg:px-3 lg:py-4 lg:pb-4">
+            <div className="mb-2 flex items-center justify-between px-2 lg:mb-3">
               <h2 className="text-sm font-black">
                 {workspaceMode === "files" ? "Shared files" : workspaceMode === "contacts" ? "All contacts" : "Open conversations"}
               </h2>
@@ -3319,7 +3321,7 @@ export function AppShell() {
                     <button
                       key={chat.id}
                       onClick={() => selectChat(chat)}
-                      className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                      className={`cs-hover-lift flex min-w-0 max-w-full w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                       type="button"
@@ -3398,19 +3400,19 @@ export function AppShell() {
                       <button
                         key={chat.id}
                         onClick={() => selectChat(chat)}
-                        className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
+                        className={`cs-hover-lift flex min-w-0 max-w-full w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
                           selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                         }`}
                         type="button"
                       >
                         <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
-                        <span className="min-w-0 flex-1">
+                        <span className="min-w-0 flex-1 overflow-hidden">
                           <span className="flex items-center justify-between gap-2">
                             <strong className="truncate text-sm">{chat.name}</strong>
-                            <span className="text-xs font-bold text-[#94a3b8]">{formatMessageTime(lastMessage)}</span>
+                            <span className="shrink-0 text-xs font-bold text-[#94a3b8]">{formatMessageTime(lastMessage)}</span>
                           </span>
                           <span className="mt-1 flex items-center justify-between gap-2 text-sm text-[#64748b]">
-                            <span className="truncate">{lastMessage?.body || lastMessage?.attachment?.name || "Attachment"}</span>
+                            <span className="min-w-0 truncate">{attachmentPreviewLabel(lastMessage) || (chat.online ? "Online now" : formatLastSeen(chat.lastSeenAt))}</span>
                             {unread ? <span className="grid h-5 min-w-5 place-items-center rounded-full bg-[#00a884] px-1.5 text-[11px] font-black text-white">{unread}</span> : null}
                           </span>
                         </span>
@@ -3502,7 +3504,7 @@ export function AppShell() {
                   <ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-2xl text-base" />
                   <div className="min-w-0">
                     <h2 className="truncate text-xl font-black">{selectedChat.name}</h2>
-                    <p className={`text-sm font-semibold ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : "Offline"}</p>
+                    <p className={`text-sm font-semibold ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : formatLastSeen(selectedChat.lastSeenAt)}</p>
                   </div>
                 </div>
                 <div className={`relative flex min-w-0 items-center justify-end gap-2 text-[#64748b] sm:gap-4 ${isChatSearchOpen ? "flex-1" : ""}`}>
@@ -3545,7 +3547,7 @@ export function AppShell() {
                     <div className="cs-scale-in absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white py-2 text-sm font-bold text-[#334155] shadow-[0_18px_45px_rgba(15,23,42,.14)]">
                       <div className="border-b border-[#edf1f5] px-4 py-3">
                         <div className="truncate text-[#18212f]">{selectedChat.name}</div>
-                        <div className={`mt-1 text-xs ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : "Offline"}</div>
+                        <div className={`mt-1 text-xs ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : formatLastSeen(selectedChat.lastSeenAt)}</div>
                       </div>
                       <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={toggleChatSearch} type="button">Search messages</button>
                       <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={reportCurrentChat} type="button">Report user</button>
@@ -4051,6 +4053,39 @@ const formatMessageTime = (message: ChatMessage | undefined) => {
 
   return message.time;
 };
+
+function formatLastSeen(lastSeenAt?: string): string {
+  if (!lastSeenAt) return "Offline";
+  const date = new Date(lastSeenAt);
+  if (Number.isNaN(date.getTime())) return "Offline";
+
+  const now = new Date();
+  const diffMs = Math.max(0, now.getTime() - date.getTime());
+  const diffMinutes = Math.floor(diffMs / 60000);
+  if (diffMinutes < 1) return "Last seen just now";
+  if (diffMinutes < 60) return `Last seen ${diffMinutes} min ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 6) return `Last seen ${diffHours} ${diffHours === 1 ? "hour" : "hours"} ago`;
+
+  const sameDay = now.toDateString() === date.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return `Last seen today at ${time}`;
+  if (yesterday.toDateString() === date.toDateString()) return `Last seen yesterday at ${time}`;
+  return `Last seen ${date.toLocaleDateString([], { month: "short", day: "numeric" })} at ${time}`;
+}
+
+function attachmentPreviewLabel(message: ChatMessage | undefined): string {
+  const body = message?.body?.trim();
+  if (body) return body;
+  const attachment = message?.attachment;
+  if (!attachment) return "";
+  if (attachment.kind === "image" || attachment.type.toLowerCase().startsWith("image/")) return "Photo";
+  if (attachment.kind === "video" || attachment.type.toLowerCase().startsWith("video/")) return "Video";
+  if (attachment.kind === "audio" || attachment.type.toLowerCase().startsWith("audio/")) return "Voice message";
+  return "File";
+}
 
 function apiUrl() {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;

@@ -175,6 +175,9 @@ func registerUserRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *rea
 		for _, user := range users {
 			result := publicUser(user)
 			result["online"] = hub.IsOnline(user.ID)
+			if lastSeen, ok := hub.LastSeenAt(user.ID); ok {
+				result["lastSeenAt"] = lastSeen
+			}
 			results = append(results, result)
 		}
 		c.JSON(http.StatusOK, gin.H{"users": results})
