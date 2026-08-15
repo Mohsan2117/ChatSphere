@@ -32,11 +32,31 @@ function getVideoDimensions(file: File): Promise<{ width: number; height: number
     video.preload = "metadata";
     video.src = URL.createObjectURL(file);
     video.onloadedmetadata = () => {
+      const width = video.videoWidth;
+      const height = video.videoHeight;
       URL.revokeObjectURL(video.src);
-      resolve({ width: video.videoWidth, height: video.videoHeight });
+      resolve({ width, height });
     };
     video.onerror = () => {
+      URL.revokeObjectURL(video.src);
       resolve({ width: 0, height: 0 });
+    };
+  });
+}
+
+export function getVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.src = URL.createObjectURL(file);
+    video.onloadedmetadata = () => {
+      const duration = video.duration || 0;
+      URL.revokeObjectURL(video.src);
+      resolve(duration);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(video.src);
+      resolve(0);
     };
   });
 }
@@ -116,7 +136,8 @@ async function compressVideo(
   targetWidth: number,
   targetHeight: number,
   crf: number,
-  onProgress: (msg: string) => void
+  onProgress: (msg: string) => void,
+  videoBitrateK?: number
 ): Promise<File> {
   const ffmpeg = await loadFFmpeg();
 
@@ -135,15 +156,17 @@ async function compressVideo(
     await ffmpeg.writeFile(inputName, await fetchFile(file));
 
     const args = [
-      "-i", inputName,
-      "-vcodec", "libx264",
-      "-crf", crf.toString(),
-      "-preset", "ultrafast",
-      "-vf", `scale=${targetWidth}:${targetHeight}`,
-      "-acodec", "aac",
-      "-b:a", "128k",
-      outputName
-    ];
+        "-i", inputName,
+        "-vcodec", "libx264",
+        "-crf", crf.toString(),
+        "-preset", "ultrafast",
+        "-vf", `scale=${targetWidth}:${targetHeight}`,
+        "-acodec", "aac",
+        "-b:a", "128k",
+        // If a target video bitrate (in kbps) is provided, use it; otherwise rely on CRF.
+        ...(videoBitrateK ? ["-b:v", `${videoBitrateK}k`] : []),
+        outputName
+      ];
 
     await ffmpeg.exec(args);
 
@@ -208,30 +231,28 @@ export async function handleVideoCompressionLoop(
 ): Promise<File> {
   let currentFile = file;
   let passes = 0;
-  const maxPasses = 3;
+  const maxPasses = 5; 
   const maxUploadBytes = config.maxUploadSizeMb * 1024 * 1024;
   const safetyLimitBytes = maxUploadBytes - 1.5 * 1024 * 1024;
 
   if (file.size > config.videoOptimizeThresholdBytes || file.size > safetyLimitBytes) {
-    onProgress("Preparing video...");
+    onProgress("Preparing video metadata...");
     const dimensions = await getVideoDimensions(file);
-    const origWidth = dimensions.width || 640;
-    const origHeight = dimensions.height || 480;
-
-    let targetWidth = origWidth;
-    let targetHeight = origHeight;
+    const duration = await getVideoDuration(file);
+    let targetWidth = dimensions.width || 640;
+    let targetHeight = dimensions.height || 480;
     let maxDim = config.videoMaxDimension;
     let crf = 28;
 
     while (currentFile.size > safetyLimitBytes && passes < maxPasses) {
       passes++;
-      
-      if (origWidth > maxDim || origHeight > maxDim) {
-        if (origWidth >= origHeight) {
-          targetHeight = Math.round((origHeight * maxDim) / origWidth);
+
+      if (targetWidth > maxDim || targetHeight > maxDim) {
+        if (targetWidth >= targetHeight) {
+          targetHeight = Math.round((targetHeight * maxDim) / targetWidth);
           targetWidth = maxDim;
         } else {
-          targetWidth = Math.round((origWidth * maxDim) / origHeight);
+          targetWidth = Math.round((targetWidth * maxDim) / targetHeight);
           targetHeight = maxDim;
         }
       }
@@ -239,17 +260,37 @@ export async function handleVideoCompressionLoop(
       targetWidth = Math.round(targetWidth / 2) * 2;
       targetHeight = Math.round(targetHeight / 2) * 2;
 
-      onProgress(`Compressing video... 0%`);
-      
-      currentFile = await compressVideo(currentFile, targetWidth, targetHeight, crf, onProgress);
+      let videoBitrateK: number | undefined;
+      if (duration > 0) {
+        const targetTotalBytes = safetyLimitBytes * 0.9;
+        const targetTotalBits = targetTotalBytes * 8;
+        const audioBitrateBits = 128 * 1000 * duration;
+        const videoBitsRemaining = Math.max(0, targetTotalBits - audioBitrateBits);
+        videoBitrateK = Math.floor(videoBitsRemaining / duration / 1000);
+        onProgress(`Compressing video pass ${passes} (Target: ~${videoBitrateK}kbps)...`);
+      } else {
+        onProgress(`Compressing video pass ${passes}...`);
+      }
 
-      crf += 6;
+      try {
+        currentFile = await compressVideo(currentFile, targetWidth, targetHeight, crf, onProgress, videoBitrateK);
+      } catch (e) {
+        throw new Error(`Video compression failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      const newDims = await getVideoDimensions(currentFile);
+      targetWidth = newDims.width || targetWidth;
+      targetHeight = newDims.height || targetHeight;
+
+      crf += 6; 
       maxDim = Math.round(maxDim * 0.8);
     }
   }
 
   if (currentFile.size > safetyLimitBytes) {
-    throw new Error("Video is still too large after compression. Please choose a shorter video.");
+    throw new Error(
+      "Video is still too large after compression attempts. Please choose a shorter video or lower its resolution."
+    );
   }
 
   return currentFile;
