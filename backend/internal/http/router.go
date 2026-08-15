@@ -95,6 +95,15 @@ func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gi
 	})
 
 	api := router.Group("/api/v1")
+	api.GET("/config", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"maxUploadSizeMb":             cfg.MaxUploadSizeMB,
+			"imageOptimizeThresholdBytes": cfg.ImageOptimizeThresholdBytes,
+			"videoOptimizeThresholdBytes": cfg.VideoOptimizeThresholdBytes,
+			"imageMaxDimension":           cfg.ImageMaxDimension,
+			"videoMaxDimension":           cfg.VideoMaxDimension,
+		})
+	})
 	registerAuthRoutes(api.Group("/auth"), cfg, dataStore)
 	registerUserRoutes(api.Group("/users"), dataStore, hub)
 	registerProfileRoutes(api.Group("/profile"), dataStore)

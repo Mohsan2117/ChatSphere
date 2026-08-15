@@ -33,6 +33,7 @@ import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 import { AIChat, AIMessage } from "@/components/AIChat";
 import { useAudioCall, AudioCallOverlay } from "./AudioCall";
+import { handleImageCompressionLoop, handleVideoCompressionLoop, AppConfig } from "@/lib/mediaCompression";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
@@ -53,6 +54,7 @@ type ChatMessage = {
   };
   localSeq?: number;
   status?: "uploading" | "sending" | "sent" | "failed";
+  progressMsg?: string;
 };
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type ChatDraft = {
@@ -121,6 +123,13 @@ export function AppShell() {
   const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
   const [isClearingChat, setIsClearingChat] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
+  const [appConfig, setAppConfig] = useState<AppConfig>({
+    maxUploadSizeMb: 50,
+    imageOptimizeThresholdBytes: 2097152,
+    videoOptimizeThresholdBytes: 10485760,
+    imageMaxDimension: 1920,
+    videoMaxDimension: 1280
+  });
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
 
@@ -140,6 +149,31 @@ export function AppShell() {
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    fetch(`${apiUrl()}/api/v1/config`, {
+      headers: authHeaders(authToken)
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load config");
+        return res.json();
+      })
+      .then((data) => {
+        if (data && typeof data.maxUploadSizeMb === "number") {
+          setAppConfig({
+            maxUploadSizeMb: data.maxUploadSizeMb,
+            imageOptimizeThresholdBytes: Number(data.imageOptimizeThresholdBytes) || 2097152,
+            videoOptimizeThresholdBytes: Number(data.videoOptimizeThresholdBytes) || 10485760,
+            imageMaxDimension: Number(data.imageMaxDimension) || 1920,
+            videoMaxDimension: Number(data.videoMaxDimension) || 1280
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[Config debug] Could not load backend config, using defaults:", err);
+      });
+  }, [authToken]);
 
   const {
     callState,
@@ -1346,35 +1380,96 @@ export function AppShell() {
     }
   }
 
-  async function uploadAttachment(draft: AttachmentDraft) {
-    if (!draft.file) return draft;
-    const file = await prepareUploadFile(draft.file);
-    const formData = new FormData();
-    // Explicitly pass third parameter filename to guarantee standard webview compliance
-    formData.set("file", file, file.name);
-    console.log("[VoiceMessage debug] uploadAttachment - Starting upload for file name:", file.name, "size:", file.size, "type:", file.type);
-    try {
-      const response = await fetch(`${apiUrl()}/api/v1/upload`, {
-        method: "POST",
-        headers: authHeaders(authToken),
-        body: formData
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        console.error("[VoiceMessage debug] uploadAttachment - Upload failed. Status:", response.status, "data:", data);
-        throw new Error(data.error ?? `Upload failed with status ${response.status}`);
+  async function prepareUploadFile(
+    file: File,
+    kind: "image" | "video" | "file" | "audio",
+    onProgress: (msg: string) => void
+  ): Promise<File> {
+    if (kind === "image" && file.type !== "image/gif") {
+      try {
+        return await handleImageCompressionLoop(file, appConfig, onProgress);
+      } catch (err) {
+        console.error("[Image Optimization debug] failed:", err);
+        throw err;
       }
-      console.log("[VoiceMessage debug] uploadAttachment - Upload succeeded. Response:", data);
-      return {
-        name: data.name ?? file.name ?? draft.name,
-        type: data.type ?? file.type ?? draft.type,
-        kind: data.kind ?? draft.kind,
-        url: data.url ?? draft.url
-      } as NonNullable<ChatMessage["attachment"]>;
-    } catch (err) {
-      console.error("[VoiceMessage debug] uploadAttachment - Network error during upload:", err);
-      throw err;
+    } else if (kind === "video") {
+      try {
+        return await handleVideoCompressionLoop(file, appConfig, onProgress);
+      } catch (err) {
+        console.error("[Video Optimization debug] failed:", err);
+        throw err;
+      }
     }
+    return file;
+  }
+
+  async function uploadAttachment(
+    draft: AttachmentDraft,
+    onProgress: (msg: string) => void
+  ): Promise<NonNullable<ChatMessage["attachment"]>> {
+    if (!draft.file) return draft;
+
+    let file: File;
+    try {
+      file = await prepareUploadFile(draft.file, draft.kind, onProgress);
+    } catch (err) {
+      console.error("[Attachment debug] compression failed:", err);
+      const errMsg = err instanceof Error ? err.message : "Compression failed";
+      if (errMsg.includes("too large") || errMsg.includes("limit") || errMsg.includes("choose a shorter")) {
+        throw new Error(`Video is still too large after compression. Please choose a shorter video.`);
+      }
+      throw new Error(`Could not optimize media. Retry`);
+    }
+
+    const formData = new FormData();
+    formData.set("file", file, file.name);
+
+    console.log("[Attachment debug] uploadAttachment - Starting upload for file name:", file.name, "size:", file.size, "type:", file.type);
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${apiUrl()}/api/v1/upload`);
+      xhr.setRequestHeader("Authorization", authHeaders(authToken)["Authorization"]);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          onProgress(`Uploading... ${percent}%`);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            console.log("[Attachment debug] uploadAttachment - Upload succeeded. Response:", data);
+            resolve({
+              name: data.name ?? file.name ?? draft.name,
+              type: data.type ?? file.type ?? draft.type,
+              kind: data.kind ?? draft.kind,
+              url: data.url ?? draft.url
+            } as NonNullable<ChatMessage["attachment"]>);
+          } catch (e) {
+            reject(new Error("Invalid upload response"));
+          }
+        } else {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            console.error("[Attachment debug] uploadAttachment - Upload failed. Status:", xhr.status, "data:", data);
+            reject(new Error(data.error ?? `Upload failed with status ${xhr.status}`));
+          } catch (e) {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => {
+        console.error("[Attachment debug] uploadAttachment - Network error during upload");
+        reject(new Error("Network error during upload"));
+      };
+
+      xhr.send(formData);
+    });
   }
 
   async function processSendQueue() {
@@ -1392,15 +1487,24 @@ export function AppShell() {
 
       if (draftAttachment && !attachmentIsUploaded) {
         try {
-          // Set UI status to uploading
+          // Set UI status to uploading with starting notice
           setChatMessages((current) => ({
             ...current,
             [chatId]: (current[chatId] ?? []).map((msg) =>
-              msg.id === message.id ? { ...msg, status: "uploading" } : msg
+              msg.id === message.id ? { ...msg, status: "uploading", progressMsg: "Preparing..." } : msg
             )
           }));
 
-          uploadedAttachment = await uploadAttachment(draftAttachment);
+          const onProgress = (progressText: string) => {
+            setChatMessages((current) => ({
+              ...current,
+              [chatId]: (current[chatId] ?? []).map((msg) =>
+                msg.id === message.id ? { ...msg, progressMsg: progressText } : msg
+              )
+            }));
+          };
+
+          uploadedAttachment = await uploadAttachment(draftAttachment, onProgress);
         } catch (error) {
           uploadFailed = true;
           const errorMsg = error instanceof Error ? error.message : "Could not upload file";
@@ -1414,7 +1518,7 @@ export function AppShell() {
           setChatMessages((current) => ({
             ...current,
             [chatId]: (current[chatId] ?? []).map((msg) =>
-              msg.id === message.id ? { ...msg, status: "failed" } : msg
+              msg.id === message.id ? { ...msg, status: "failed", progressMsg: errorMsg.startsWith("⚠") ? errorMsg : `⚠ ${errorMsg}` } : msg
             )
           }));
         }
@@ -1430,7 +1534,7 @@ export function AppShell() {
         setChatMessages((current) => ({
           ...current,
           [chatId]: (current[chatId] ?? []).map((msg) =>
-            msg.id === message.id ? { ...msg, attachment: uploadedAttachment, status: "sending" } : msg
+            msg.id === message.id ? { ...msg, attachment: uploadedAttachment, status: "sending", progressMsg: "Sending..." } : msg
           )
         }));
       }
@@ -1443,7 +1547,7 @@ export function AppShell() {
           setChatMessages((current) => ({
             ...current,
             [chatId]: (current[chatId] ?? []).map((msg) =>
-              msg.id === message.id ? { ...msg, status: "sending" } : msg
+              msg.id === message.id ? { ...msg, status: "sending", progressMsg: "Sending..." } : msg
             )
           }));
 
@@ -1478,7 +1582,7 @@ export function AppShell() {
           setChatMessages((current) => ({
             ...current,
             [chatId]: (current[chatId] ?? []).map((msg) =>
-              msg.id === message.id ? { ...msg, status: "sending" } : msg
+              msg.id === message.id ? { ...msg, status: "sending", progressMsg: "Sending..." } : msg
             )
           }));
 
@@ -1554,11 +1658,12 @@ export function AppShell() {
 
     // Update status in UI to uploading or sending
     const initialStatus = (task.draftAttachment && !task.message.attachment?.url.startsWith("http")) ? "uploading" : "sending";
+    const initialProgress = initialStatus === "uploading" ? "Preparing..." : "Sending...";
     
     setChatMessages((current) => ({
       ...current,
       [task.chatId]: (current[task.chatId] ?? []).map((msg) =>
-        msg.id === failedMessage.id ? { ...msg, status: initialStatus } : msg
+        msg.id === failedMessage.id ? { ...msg, status: initialStatus, progressMsg: initialProgress } : msg
       )
     }));
 
@@ -1575,10 +1680,11 @@ export function AppShell() {
       failedTasksRef.current.delete(task.message.id);
       
       const initialStatus = (task.draftAttachment && !task.message.attachment?.url.startsWith("http")) ? "uploading" : "sending";
+      const initialProgress = initialStatus === "uploading" ? "Preparing..." : "Sending...";
       setChatMessages((current) => ({
         ...current,
         [task.chatId]: (current[task.chatId] ?? []).map((msg) =>
-          msg.id === task.message.id ? { ...msg, status: initialStatus } : msg
+          msg.id === task.message.id ? { ...msg, status: initialStatus, progressMsg: initialProgress } : msg
         )
       }));
 
@@ -3083,12 +3189,12 @@ export function AppShell() {
                               {message.mine ? (
                                 <div className="flex items-center gap-1">
                                   {message.status === "uploading" ? (
-                                    <span>Uploading...</span>
+                                    <span>{message.progressMsg || "Uploading..."}</span>
                                   ) : message.status === "sending" ? (
-                                    <span>Sending...</span>
+                                    <span>{message.progressMsg || "Sending..."}</span>
                                   ) : message.status === "failed" ? (
                                     <span className="text-[#b42318] flex items-center gap-1">
-                                      <span>⚠ Failed</span>
+                                      <span>{message.progressMsg || "⚠ Failed"}</span>
                                       <button
                                         onClick={() => retryMessage(message)}
                                         className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
@@ -3434,59 +3540,7 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]) {
   });
 }
 
-async function prepareUploadFile(file: File) {
-  const canCompress =
-    typeof window !== "undefined" &&
-    typeof document !== "undefined" &&
-    file.type.startsWith("image/") &&
-    file.type !== "image/gif" &&
-    file.size > 1.5 * 1024 * 1024;
-  if (!canCompress) return file;
 
-  try {
-    return await compressImageFile(file);
-  } catch {
-    return file;
-  }
-}
-
-async function compressImageFile(file: File) {
-  const source = URL.createObjectURL(file);
-  try {
-    const image = await loadImage(source);
-    const maxSide = 1600;
-    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-    const width = Math.max(1, Math.round(image.naturalWidth * scale));
-    const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext("2d");
-    if (!context) return file;
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
-    if (!blob || blob.size >= file.size) return file;
-    return new File([blob], compressedImageName(file.name), { type: "image/jpeg", lastModified: Date.now() });
-  } finally {
-    URL.revokeObjectURL(source);
-  }
-}
-
-function loadImage(source: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new window.Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Could not prepare image"));
-    image.src = source;
-  });
-}
-
-function compressedImageName(name: string) {
-  const base = name.replace(/\.[^.]+$/, "") || "image";
-  return `${base}-compressed.jpg`;
-}
 
 function AttachmentPreview({ attachment, authToken }: { attachment: NonNullable<ChatMessage["attachment"]>; authToken: string }) {
   const [failed, setFailed] = useState(false);
@@ -3710,12 +3764,12 @@ function VoiceMessageBubble({
           {message.mine && (
             <div className="flex items-center gap-1">
               {message.status === "uploading" ? (
-                <span>Uploading...</span>
+                <span>{message.progressMsg || "Uploading..."}</span>
               ) : message.status === "sending" ? (
-                <span>Sending...</span>
+                <span>{message.progressMsg || "Sending..."}</span>
               ) : message.status === "failed" ? (
                 <span className="text-[#b42318] flex items-center gap-1">
-                  <span>⚠ Failed</span>
+                  <span>{message.progressMsg || "⚠ Failed"}</span>
                   {onRetry && (
                     <button
                       onClick={() => onRetry(message)}
@@ -3962,12 +4016,12 @@ function VoiceMessagePlayer({
             {message.mine && (
               <div className="flex items-center gap-1">
                 {message.status === "uploading" ? (
-                  <span>Uploading...</span>
+                  <span>{message.progressMsg || "Uploading..."}</span>
                 ) : message.status === "sending" ? (
-                  <span>Sending...</span>
+                  <span>{message.progressMsg || "Sending..."}</span>
                 ) : message.status === "failed" ? (
                   <span className="text-[#b42318] flex items-center gap-1">
-                    <span>⚠ Failed</span>
+                    <span>{message.progressMsg || "⚠ Failed"}</span>
                     {onRetry && (
                       <button
                         onClick={() => onRetry(message)}
