@@ -44,8 +44,6 @@ var builtInAvatarPaths = map[string]struct{}{
 	"/avatars/avatar-08.png": {},
 	"/avatars/avatar-09.png": {},
 	"/avatars/avatar-10.png": {},
-	"/avatars/avatar-11.png": {},
-	"/avatars/avatar-12.png": {},
 }
 
 func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gin.Engine {

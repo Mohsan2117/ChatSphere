@@ -161,7 +161,7 @@ type StatusPanelProps = {
   className?: string;
 };
 
-const BUILT_IN_AVATARS = Array.from({ length: 12 }, (_, index) => {
+const BUILT_IN_AVATARS = Array.from({ length: 10 }, (_, index) => {
   const id = `avatar-${String(index + 1).padStart(2, "0")}`;
   return { id, src: `/avatars/${id}.png` };
 });
@@ -5124,24 +5124,24 @@ function AvatarSelection({
   return (
     <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#0b141a]" : "border-[#e5e9f0] bg-[#f8fafc]"}`}>
       <div className={`text-sm font-bold ${isDark ? "text-white" : "text-[#18212f]"}`}>{title}</div>
-      <div className="mt-4 grid grid-cols-4 gap-3 sm:grid-cols-6">
+      <div className="mt-4 grid grid-cols-5 gap-2 sm:gap-3">
         {BUILT_IN_AVATARS.map((avatar, index) => {
           const selected = selectedBuiltInAvatar === avatar.src;
           return (
             <button
               aria-label={`Choose ChatSphere avatar ${index + 1}`}
               aria-pressed={selected}
-              className={`relative grid aspect-square place-items-center rounded-full border-2 transition ${
+              className={`relative grid aspect-square shrink-0 place-items-center rounded-full border-2 p-1 transition ${
                 selected ? "border-[#00a884] bg-[#e7f8f2] shadow-[0_0_0_3px_rgba(0,168,132,.18)]" : isDark ? "border-white/10 bg-[#17251f] hover:border-[#00a884]/70" : "border-[#dce1e8] bg-white hover:border-[#00a884]/70"
               }`}
               key={avatar.id}
               onClick={() => onChooseBuiltIn(avatar.src)}
               type="button"
             >
-              <span className="grid h-[86%] w-[86%] place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
+              <span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
                 <AvatarImage alt={`ChatSphere avatar ${index + 1}`} className="h-full w-full object-cover" fallback={<Image size={20} />} src={avatar.src} />
               </span>
-              {selected ? <span className="absolute bottom-0 right-0 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-[#00a884] text-white"><Check size={14} strokeWidth={3} /></span> : null}
+              {selected ? <span className="absolute bottom-0 right-0 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-[#00a884] text-white sm:h-6 sm:w-6"><Check size={13} strokeWidth={3} /></span> : null}
             </button>
           );
         })}
