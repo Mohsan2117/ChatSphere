@@ -3264,7 +3264,7 @@ export function AppShell() {
                 <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere</p>
                 <h1 className="mt-2 text-2xl font-black tracking-normal">{workspaceTitle}</h1>
               </div>
-              <button className="hidden lg:grid h-11 w-11 place-items-center overflow-hidden rounded-xl bg-[#e7f8f2] text-sm font-black text-[#008f70]" onClick={() => {
+              <button className="hidden lg:grid h-11 w-11 place-items-center overflow-hidden rounded-xl text-sm font-black text-[#008f70]" onClick={() => {
                 setIsProfileEditorOpen(true);
                 setProfileError("");
                 setProfileMessage("");
@@ -3276,7 +3276,7 @@ export function AppShell() {
                 )}
               </button>
             </div>
-            <div className="mt-5 hidden lg:grid grid-cols-3 gap-2">
+            <div className="mt-5 hidden lg:grid grid-cols-2 gap-2">
               {[
                 ["Me", "0"],
                 ["Open", String(inboxChats.length)],
