@@ -1,0 +1,254 @@
+"use client";
+
+import type { Ref, ReactNode } from "react";
+import type { EmojiClickData } from "emoji-picker-react";
+import { ArrowLeft, MessageCircle, MoreVertical, Phone, Search, Video } from "lucide-react";
+import type { ChatSeed } from "@/lib/data";
+import { MessageBubble, type BubbleMessage } from "./MessageBubble";
+import { MessageComposer } from "./MessageComposer";
+import type { ReactionSummary, ReactionTarget, ReactionUser } from "./MessageReactions";
+
+type DirectChatMessage = BubbleMessage & {
+  senderEmail?: string;
+  senderId?: string;
+  recipientId?: string;
+  localSeq?: number;
+  reactions?: ReactionSummary[];
+};
+
+type ComposerAttachment = NonNullable<DirectChatMessage["attachment"]> & { file?: File };
+
+type ChatPanelProps<TMessage extends DirectChatMessage> = {
+  attachment: ComposerAttachment | null;
+  authToken: string;
+  avatar: ReactNode;
+  chat: ChatSeed;
+  chatMessageSearch: string;
+  chatMessageSearchRef: Ref<HTMLInputElement>;
+  chatNotice: string;
+  disabled: boolean;
+  emojiPickerOpen: boolean;
+  isChatMenuOpen: boolean;
+  isChatSearchOpen: boolean;
+  isClearingChat: boolean;
+  isContactInfoOpen: boolean;
+  isRecording: boolean;
+  messages: TMessage[];
+  onBlock: () => void;
+  onCancelRecording: () => void;
+  onChangeDraft: (value: string) => void;
+  onClear: () => void;
+  onCloseChat: () => void;
+  onEmojiSelect: (emoji: EmojiClickData) => void;
+  onEmojiToggle: () => void;
+  onFileAttachment: (file: File) => void;
+  onMediaAttachment: (file: File) => void;
+  onOpenContactInfo: () => void;
+  onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
+  onReact: (target: ReactionTarget, emoji: string) => void;
+  onRemoveAttachment: () => void;
+  onReport: () => void;
+  onRetry: (message: TMessage) => void;
+  onScroll: () => void;
+  onSearchChange: (value: string) => void;
+  onSend: () => void;
+  onSendRecording: () => void;
+  onStartAudioCall: () => void;
+  onStartRecording: () => void;
+  onStartVideoCall: () => void;
+  onToggleChatMenu: () => void;
+  onToggleChatSearch: () => void;
+  onUnblock: () => void;
+  reactionPicker: ReactionTarget | null;
+  recordingDuration: number;
+  resolveAttachmentSource: (url: string, token: string) => string;
+  scrollContainerRef: Ref<HTMLDivElement>;
+  setReactionPicker: (target: ReactionTarget | null) => void;
+  timestamp: (message: TMessage) => ReactNode;
+  typingUser: string | null;
+  value: string;
+  formatLastSeen: (lastSeenAt?: string) => string;
+};
+
+export function ChatPanel<TMessage extends DirectChatMessage>({
+  attachment,
+  authToken,
+  avatar,
+  chat,
+  chatMessageSearch,
+  chatMessageSearchRef,
+  chatNotice,
+  disabled,
+  emojiPickerOpen,
+  isChatMenuOpen,
+  isChatSearchOpen,
+  isClearingChat,
+  isContactInfoOpen,
+  isRecording,
+  messages,
+  onBlock,
+  onCancelRecording,
+  onChangeDraft,
+  onClear,
+  onCloseChat,
+  onEmojiSelect,
+  onEmojiToggle,
+  onFileAttachment,
+  onMediaAttachment,
+  onOpenContactInfo,
+  onOpenReactionDetails,
+  onReact,
+  onRemoveAttachment,
+  onReport,
+  onRetry,
+  onScroll,
+  onSearchChange,
+  onSend,
+  onSendRecording,
+  onStartAudioCall,
+  onStartRecording,
+  onStartVideoCall,
+  onToggleChatMenu,
+  onToggleChatSearch,
+  onUnblock,
+  reactionPicker,
+  recordingDuration,
+  resolveAttachmentSource,
+  scrollContainerRef,
+  setReactionPicker,
+  timestamp,
+  typingUser,
+  value,
+  formatLastSeen
+}: ChatPanelProps<TMessage>) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
+        <div className={`min-w-0 items-center gap-3 sm:gap-4 ${isChatSearchOpen ? "hidden sm:flex" : "flex"}`}>
+          <button aria-label="Back to chats" className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onCloseChat} type="button">
+            <ArrowLeft size={22} />
+          </button>
+          <button className="flex min-w-0 items-center gap-3 rounded-2xl pr-2 text-left transition hover:bg-[#f8fafc] sm:gap-4" onClick={onOpenContactInfo} type="button">
+            {avatar}
+            <div className="min-w-0">
+              <h2 className="truncate text-xl font-black">{chat.name}</h2>
+              <p className={`text-sm font-semibold ${chat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{chat.online ? "Online" : formatLastSeen(chat.lastSeenAt)}</p>
+            </div>
+          </button>
+        </div>
+        <div className={`relative flex min-w-0 items-center justify-end gap-2 text-[#64748b] sm:gap-4 ${isChatSearchOpen ? "flex-1" : ""}`}>
+          {isChatSearchOpen ? (
+            <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 sm:w-72 sm:flex-none">
+              <Search size={18} />
+              <input
+                ref={chatMessageSearchRef}
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
+                onChange={(event) => onSearchChange(event.target.value)}
+                placeholder="Search this chat"
+                value={chatMessageSearch}
+              />
+            </label>
+          ) : null}
+          {chat.id !== "chatsphere-ai" && (
+            <>
+              <button
+                aria-label="Start audio call"
+                className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
+                onClick={onStartAudioCall}
+                type="button"
+              >
+                <Phone size={21} />
+              </button>
+              <button
+                aria-label="Start video call"
+                className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
+                onClick={onStartVideoCall}
+                type="button"
+              >
+                <Video size={21} />
+              </button>
+            </>
+          )}
+          <button aria-label="Chat options" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={onToggleChatMenu} type="button">
+            <MoreVertical size={23} />
+          </button>
+          {isChatMenuOpen ? (
+            <div className="cs-scale-in absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white py-2 text-sm font-bold text-[#334155] shadow-[0_18px_45px_rgba(15,23,42,.14)]">
+              <div className="border-b border-[#edf1f5] px-4 py-3">
+                <div className="truncate text-[#18212f]">{chat.name}</div>
+                <div className={`mt-1 text-xs ${chat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{chat.online ? "Online" : formatLastSeen(chat.lastSeenAt)}</div>
+              </div>
+              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onToggleChatSearch} type="button">Search messages</button>
+              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onReport} type="button">Report user</button>
+              {disabled ? (
+                <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onUnblock} type="button">Unblock user</button>
+              ) : (
+                <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={onBlock} type="button">Block user</button>
+              )}
+              <button className={`flex w-full items-center px-4 py-3 text-left text-[#b42318] ${isClearingChat ? "opacity-50 cursor-not-allowed" : "hover:bg-[#fff5f5]"}`} onClick={onClear} disabled={isClearingChat} type="button">
+                {isClearingChat ? "Chat clearing..." : "Clear chat"}
+              </button>
+              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onCloseChat} type="button">Close chat</button>
+            </div>
+          ) : null}
+        </div>
+      </header>
+
+      <div ref={scrollContainerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
+        <div className="mx-auto mb-8 w-fit rounded-full border border-[#dce1e8] bg-white px-4 py-2 text-xs font-bold text-[#64748b]">Conversation started</div>
+        {messages.length ? (
+          <div className="space-y-4">
+            {messages.map((message) => (
+              <MessageBubble
+                authToken={authToken}
+                key={message.id}
+                message={message}
+                onOpenReactionDetails={onOpenReactionDetails}
+                onReact={onReact}
+                onRetry={onRetry}
+                reactionPicker={reactionPicker}
+                reactionTarget={{ type: "direct", messageId: message.id }}
+                resolveAttachmentSource={resolveAttachmentSource}
+                selectedChatOnline={chat.online}
+                setReactionPicker={setReactionPicker}
+                timestamp={timestamp(message)}
+                variant="direct"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="mx-auto mt-20 max-w-md rounded-3xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center text-sm leading-6 text-[#64748b]">
+            <MessageCircle className="mx-auto text-[#00a884]" size={34} />
+            <h3 className="mt-4 text-lg font-black text-[#18212f]">{chatMessageSearch.trim() ? "No matching messages" : "No messages yet"}</h3>
+            <p className="mt-2">{chatMessageSearch.trim() ? "Try a different word from this conversation." : "Write the first message below. Attachments and emojis are ready."}</p>
+          </div>
+        )}
+      </div>
+
+      <footer className={`fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[600px] xl:left-[660px] ${isContactInfoOpen ? "lg:right-[360px] xl:right-[380px]" : ""}`}>
+        <MessageComposer
+          attachment={attachment}
+          disabled={disabled}
+          emojiPickerOpen={emojiPickerOpen}
+          isRecording={isRecording}
+          mode="direct"
+          notice={chatNotice}
+          onCancelRecording={onCancelRecording}
+          onChange={onChangeDraft}
+          onEmojiSelect={onEmojiSelect}
+          onEmojiToggle={onEmojiToggle}
+          onFileAttachment={onFileAttachment}
+          onMediaAttachment={onMediaAttachment}
+          onRemoveAttachment={onRemoveAttachment}
+          onSend={onSend}
+          onSendRecording={onSendRecording}
+          onStartRecording={onStartRecording}
+          placeholder={disabled ? "Unblock this user to send messages" : "Write a message"}
+          recordingDuration={recordingDuration}
+          typingUser={typingUser}
+          value={value}
+        />
+      </footer>
+    </div>
+  );
+}
