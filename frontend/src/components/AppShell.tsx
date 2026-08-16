@@ -8,6 +8,7 @@ import {
   CheckCheck,
   FileText,
   Image,
+  Link,
   Loader2,
   LogOut,
   MessageCircle,
@@ -67,6 +68,9 @@ type ChatMessage = {
 type ReactionUser = { id: string; name: string };
 type ReactionSummary = { emoji: string; count: number; reactedByMe?: boolean; users?: ReactionUser[] };
 type ReactionTarget = { type: "direct" | "group"; messageId: string; groupId?: string };
+type SharedAttachmentItem = { message: ChatMessage; attachment: NonNullable<ChatMessage["attachment"]>; source: string };
+type SharedLinkItem = { message: ChatMessage; url: string };
+type ContactInfoMediaTab = "media" | "links" | "files";
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type ChatDraft = {
   text: string;
@@ -252,6 +256,8 @@ export function AppShell() {
   const [chatNotice, setChatNotice] = useState("");
   const [reactionPicker, setReactionPicker] = useState<ReactionTarget | null>(null);
   const [reactionDetails, setReactionDetails] = useState<{ emoji: string; users: ReactionUser[] } | null>(null);
+  const [isContactInfoOpen, setIsContactInfoOpen] = useState(false);
+  const [contactInfoMediaTab, setContactInfoMediaTab] = useState<ContactInfoMediaTab | null>(null);
   const [appConfig, setAppConfig] = useState<AppConfig>({
     maxUploadSizeMb: 50,
     imageOptimizeThresholdBytes: 2097152,
@@ -288,6 +294,18 @@ export function AppShell() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [reactionPicker]);
+
+  useEffect(() => {
+    if (!isContactInfoOpen && !contactInfoMediaTab) return;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setContactInfoMediaTab(null);
+        setIsContactInfoOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [contactInfoMediaTab, isContactInfoOpen]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -512,6 +530,23 @@ export function AppShell() {
   const currentMessageDraft = selectedChatId ? (drafts[selectedChatId]?.text ?? "") : "";
   const currentAttachmentDraft = selectedChatId ? (drafts[selectedChatId]?.attachment ?? null) : null;
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
+  const selectedSharedMedia = useMemo<SharedAttachmentItem[]>(() => {
+    return selectedMessages
+      .filter((message) => message.attachment && (message.attachment.kind === "image" || message.attachment.kind === "video"))
+      .map((message) => ({ message, attachment: message.attachment!, source: attachmentSource(message.attachment!.url, authToken) }));
+  }, [authToken, selectedMessages]);
+  const selectedSharedFiles = useMemo<SharedAttachmentItem[]>(() => {
+    return selectedMessages
+      .filter((message) => message.attachment && !["image", "video", "audio"].includes(message.attachment.kind))
+      .map((message) => ({ message, attachment: message.attachment!, source: attachmentSource(message.attachment!.url, authToken) }));
+  }, [authToken, selectedMessages]);
+  const selectedSharedLinks = useMemo<SharedLinkItem[]>(() => {
+    const urlPattern = /\bhttps?:\/\/[^\s<>"']+/gi;
+    return selectedMessages.flatMap((message) => {
+      const matches = message.body.match(urlPattern) ?? [];
+      return matches.map((url) => ({ message, url: url.replace(/[),.;!?]+$/, "") }));
+    });
+  }, [selectedMessages]);
   const visibleSelectedMessages = useMemo(() => {
     const query = chatMessageSearch.trim().toLowerCase();
     if (!query) return selectedMessages;
@@ -623,6 +658,8 @@ export function AppShell() {
     setWorkspaceMode("inbox");
     setIsMobileAIChatOpen(false);
     setIsMobileDrawerOpen(false);
+    setIsContactInfoOpen(false);
+    setContactInfoMediaTab(null);
   }, [isAuthed]);
 
   useEffect(() => {
@@ -2365,6 +2402,8 @@ export function AppShell() {
     setSelectedGroupId("");
     setSelectedGroupDetails(null);
     setIsChatMenuOpen(false);
+    setIsContactInfoOpen(false);
+    setContactInfoMediaTab(null);
     setTypingUser(null);
     isTypingRef.current = false;
     if (typingTimeoutRef.current) {
@@ -2379,6 +2418,8 @@ export function AppShell() {
     setSelectedGroupId(groupId);
     setSelectedGroupDetails(null);
     setIsGroupInfoOpen(false);
+    setIsContactInfoOpen(false);
+    setContactInfoMediaTab(null);
     setMobileTab("groups");
   }
 
@@ -2398,6 +2439,12 @@ export function AppShell() {
       }
       return nextOpen;
     });
+  }
+
+  function openChatSearchFromContactInfo() {
+    setIsChatSearchOpen(true);
+    setIsChatMenuOpen(false);
+    window.setTimeout(() => chatMessageSearchRef.current?.focus(), 0);
   }
 
   async function clearCurrentChat() {
@@ -2491,6 +2538,8 @@ export function AppShell() {
     setSelectedGroupId("");
     setSelectedGroupDetails(null);
     setIsChatSearchOpen(false);
+    setIsContactInfoOpen(false);
+    setContactInfoMediaTab(null);
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
     setTypingUser(null);
@@ -3604,17 +3653,20 @@ export function AppShell() {
               onLeave={() => { closeCurrentGroup(); fetchGroups(); }}
             />
           ) : selectedChat ? (
-            <>
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-w-0 flex-1 flex-col">
               <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
                 <div className={`min-w-0 items-center gap-3 sm:gap-4 ${isChatSearchOpen ? "hidden sm:flex" : "flex"}`}>
                   <button aria-label="Back to chats" className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={closeCurrentChat} type="button">
                     <ArrowLeft size={22} />
                   </button>
-                  <ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-2xl text-base" />
+                  <button className="flex min-w-0 items-center gap-3 rounded-2xl pr-2 text-left transition hover:bg-[#f8fafc] sm:gap-4" onClick={() => setIsContactInfoOpen(true)} type="button">
+                    <ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-2xl text-base" />
                   <div className="min-w-0">
                     <h2 className="truncate text-xl font-black">{selectedChat.name}</h2>
                     <p className={`text-sm font-semibold ${selectedChat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{selectedChat.online ? "Online" : formatLastSeen(selectedChat.lastSeenAt)}</p>
                   </div>
+                  </button>
                 </div>
                 <div className={`relative flex min-w-0 items-center justify-end gap-2 text-[#64748b] sm:gap-4 ${isChatSearchOpen ? "flex-1" : ""}`}>
                   {isChatSearchOpen ? (
@@ -3737,7 +3789,7 @@ export function AppShell() {
                 )}
               </div>
 
-              <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[600px] xl:left-[660px]">
+              <footer className={`fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[600px] xl:left-[660px] ${isContactInfoOpen ? "lg:right-[360px] xl:right-[380px]" : ""}`}>
                 {chatNotice ? <div className="mb-3 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm font-semibold text-[#64748b]">{chatNotice}</div> : null}
                 {isEmojiOpen ? (
                   <div className="cs-scale-in absolute bottom-[78px] left-3 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl sm:left-5">
@@ -3837,7 +3889,26 @@ export function AppShell() {
                   </div>
                 )}
               </footer>
-            </>
+              </div>
+              <ContactInfoPanel
+                blocked={selectedChatBlocked}
+                chat={selectedChat}
+                files={selectedSharedFiles}
+                isOpen={isContactInfoOpen}
+                links={selectedSharedLinks}
+                media={selectedSharedMedia}
+                mediaTab={contactInfoMediaTab}
+                onBlock={blockCurrentChat}
+                onClear={clearCurrentChat}
+                onClose={() => { setIsContactInfoOpen(false); setContactInfoMediaTab(null); }}
+                onMediaTabChange={setContactInfoMediaTab}
+                onReport={reportCurrentChat}
+                onSearch={() => { openChatSearchFromContactInfo(); setIsContactInfoOpen(false); }}
+                onStartAudio={() => startCall(selectedChat, "audio")}
+                onStartVideo={() => startCall(selectedChat, "video")}
+                onUnblock={unblockCurrentChat}
+              />
+            </div>
           ) : mobileTab === "calls" ? (
             <div className="flex flex-1 items-center justify-center px-6">
               <div className="cs-fade-up max-w-lg text-center">
@@ -4662,6 +4733,243 @@ function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, o
 }
 
 
+
+function ContactInfoPanel({
+  blocked,
+  chat,
+  files,
+  isOpen,
+  links,
+  media,
+  mediaTab,
+  onBlock,
+  onClear,
+  onClose,
+  onMediaTabChange,
+  onReport,
+  onSearch,
+  onStartAudio,
+  onStartVideo,
+  onUnblock,
+}: {
+  blocked: boolean;
+  chat: ChatSeed;
+  files: SharedAttachmentItem[];
+  isOpen: boolean;
+  links: SharedLinkItem[];
+  media: SharedAttachmentItem[];
+  mediaTab: ContactInfoMediaTab | null;
+  onBlock: () => void;
+  onClear: () => void;
+  onClose: () => void;
+  onMediaTabChange: (tab: ContactInfoMediaTab | null) => void;
+  onReport: () => void;
+  onSearch: () => void;
+  onStartAudio: () => void;
+  onStartVideo: () => void;
+  onUnblock: () => void;
+}) {
+  const presenceText = chat.online ? "Online" : formatLastSeen(chat.lastSeenAt);
+  const totalShared = media.length + links.length + files.length;
+  const panel = (
+    <div className="flex h-full min-h-0 flex-col bg-[#f7f9fb]">
+      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[#e5e9f0] bg-white px-4">
+        <button aria-label="Close contact info" className="grid h-10 w-10 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={onClose} type="button">
+          <X size={21} />
+        </button>
+        <h2 className="text-lg font-black text-[#18212f]">Contact info</h2>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">
+        <section className="py-7 text-center">
+          <ChatAvatar chat={chat} className="mx-auto h-28 w-28 rounded-full text-3xl" />
+          <h3 className="mt-4 truncate text-2xl font-black text-[#18212f]">{chat.name}</h3>
+          <p className={`mt-1 text-sm font-bold ${chat.online ? "text-[#00a884]" : "text-[#64748b]"}`}>{presenceText}</p>
+          {chat.preview && chat.preview.includes("@") ? <p className="mt-2 truncate text-sm font-semibold text-[#94a3b8]">{chat.preview}</p> : null}
+        </section>
+
+        <section className="grid grid-cols-3 gap-2">
+          <ContactQuickAction icon={<Phone size={20} />} label="Voice" onClick={onStartAudio} />
+          <ContactQuickAction icon={<Video size={20} />} label="Video" onClick={onStartVideo} />
+          <ContactQuickAction icon={<Search size={20} />} label="Search" onClick={onSearch} />
+        </section>
+
+        <button className="mt-4 w-full rounded-2xl border border-[#e5e9f0] bg-white p-4 text-left shadow-sm transition hover:border-[#00a884]/30 hover:bg-[#fbfefd]" onClick={() => onMediaTabChange("media")} type="button">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-[#18212f]">Media, links and files</h3>
+              <p className="mt-1 text-xs font-semibold text-[#64748b]">{totalShared ? `${media.length} media · ${links.length} links · ${files.length} files` : "No shared items yet"}</p>
+            </div>
+            <span className="rounded-full bg-[#e7f8f2] px-2.5 py-1 text-xs font-black text-[#008f70]">{totalShared}</span>
+          </div>
+          {totalShared ? (
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+              {media.slice(-6).map((item) => <SharedMediaThumb item={item} key={`${item.message.id}-${item.attachment.url}`} />)}
+              {!media.length && links.slice(-3).map((item) => <SharedLinkPreview item={item} key={`${item.message.id}-${item.url}`} />)}
+              {!media.length && !links.length && files.slice(-3).map((item) => <SharedFilePreview item={item} key={`${item.message.id}-${item.attachment.url}`} />)}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-3 py-4 text-center text-xs font-bold text-[#94a3b8]">Shared photos, videos, links, and files will appear here.</div>
+          )}
+        </button>
+
+        <section className="mt-4 overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white shadow-sm">
+          <ContactActionRow danger label="Clear chat" onClick={onClear} />
+          {blocked ? (
+            <ContactActionRow label={`Unblock ${chat.name}`} onClick={onUnblock} />
+          ) : (
+            <ContactActionRow danger label={`Block ${chat.name}`} onClick={onBlock} />
+          )}
+          <ContactActionRow danger label="Report user" onClick={onReport} />
+        </section>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <aside className={`hidden h-full min-h-0 shrink-0 overflow-hidden border-l border-[#dce1e8] bg-white shadow-[-18px_0_45px_rgba(15,23,42,.08)] transition-[width,opacity] duration-300 lg:block ${isOpen ? "w-[360px] opacity-100 xl:w-[380px]" : "w-0 opacity-0"}`} aria-hidden={!isOpen}>
+        {isOpen ? panel : null}
+      </aside>
+      {isOpen ? (
+        <div className="fixed inset-0 z-[70] bg-white lg:hidden">
+          {panel}
+        </div>
+      ) : null}
+      {mediaTab ? <SharedMediaDetailsModal files={files} links={links} media={media} onClose={() => onMediaTabChange(null)} tab={mediaTab} setTab={onMediaTabChange} /> : null}
+    </>
+  );
+}
+
+function ContactQuickAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#dce1e8] bg-white px-2 py-3 text-sm font-black text-[#008f70] shadow-sm transition hover:border-[#00a884]/40 hover:bg-[#e7f8f2]" onClick={onClick} type="button">
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function ContactActionRow({ danger, label, onClick }: { danger?: boolean; label: string; onClick: () => void }) {
+  return (
+    <button className={`flex w-full items-center justify-between border-b border-[#edf1f5] px-4 py-3 text-left text-sm font-black last:border-b-0 ${danger ? "text-[#b42318] hover:bg-[#fff5f5]" : "text-[#008f70] hover:bg-[#f8fafc]"}`} onClick={onClick} type="button">
+      <span className="min-w-0 truncate">{label}</span>
+    </button>
+  );
+}
+
+function SharedMediaThumb({ item }: { item: SharedAttachmentItem }) {
+  const isVideo = item.attachment.kind === "video";
+  return (
+    <a className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[#e5e9f0] bg-[#f1f5f9]" href={item.source || undefined} rel="noreferrer" target="_blank">
+      {isVideo ? (
+        <video className="h-full w-full object-cover" src={item.source} />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img alt={item.attachment.name} className="h-full w-full object-cover" src={item.source} />
+      )}
+      {isVideo ? <span className="absolute inset-0 grid place-items-center bg-black/20 text-white"><Play size={20} fill="currentColor" /></span> : null}
+    </a>
+  );
+}
+
+function SharedLinkPreview({ item }: { item: SharedLinkItem }) {
+  return (
+    <a className="flex h-20 w-40 shrink-0 flex-col justify-between rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-xs font-bold text-[#334155]" href={item.url} rel="noreferrer" target="_blank">
+      <Link size={17} className="text-[#00a884]" />
+      <span className="line-clamp-2 break-all">{item.url}</span>
+    </a>
+  );
+}
+
+function SharedFilePreview({ item }: { item: SharedAttachmentItem }) {
+  return (
+    <a className="flex h-20 w-40 shrink-0 flex-col justify-between rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-xs font-bold text-[#334155]" download={item.attachment.name} href={item.source || undefined}>
+      <FileText size={18} className="text-[#00a884]" />
+      <span className="line-clamp-2">{item.attachment.name}</span>
+    </a>
+  );
+}
+
+function SharedMediaDetailsModal({
+  files,
+  links,
+  media,
+  onClose,
+  setTab,
+  tab,
+}: {
+  files: SharedAttachmentItem[];
+  links: SharedLinkItem[];
+  media: SharedAttachmentItem[];
+  onClose: () => void;
+  setTab: (tab: ContactInfoMediaTab | null) => void;
+  tab: ContactInfoMediaTab;
+}) {
+  return (
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-[#0f172a]/40 px-3" onClick={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#e5e9f0] px-4 py-3">
+          <h2 className="text-base font-black text-[#18212f]">Media, links and files</h2>
+          <button aria-label="Close shared media" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-3 gap-2 border-b border-[#e5e9f0] p-3">
+          {(["media", "links", "files"] as ContactInfoMediaTab[]).map((item) => (
+            <button className={`rounded-xl px-3 py-2 text-sm font-black ${tab === item ? "bg-[#e7f8f2] text-[#008f70]" : "text-[#64748b] hover:bg-[#f8fafc]"}`} key={item} onClick={() => setTab(item)} type="button">
+              {item === "media" ? "Media" : item === "links" ? "Links" : "Files"}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {tab === "media" ? <SharedMediaGrid items={media} /> : null}
+          {tab === "links" ? <SharedLinksList items={links} /> : null}
+          {tab === "files" ? <SharedFilesList items={files} /> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SharedMediaGrid({ items }: { items: SharedAttachmentItem[] }) {
+  if (!items.length) return <SharedEmptyState label="No media shared in this chat yet." />;
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+      {items.map((item) => <SharedMediaThumb item={item} key={`${item.message.id}-${item.attachment.url}`} />)}
+    </div>
+  );
+}
+
+function SharedLinksList({ items }: { items: SharedLinkItem[] }) {
+  if (!items.length) return <SharedEmptyState label="No links shared in this chat yet." />;
+  return (
+    <div className="space-y-2">
+      {items.map((item) => (
+        <a className="flex items-start gap-3 rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-sm font-bold text-[#334155] hover:border-[#00a884]/30" href={item.url} key={`${item.message.id}-${item.url}`} rel="noreferrer" target="_blank">
+          <Link size={18} className="mt-0.5 shrink-0 text-[#00a884]" />
+          <span className="min-w-0 break-all">{item.url}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function SharedFilesList({ items }: { items: SharedAttachmentItem[] }) {
+  if (!items.length) return <SharedEmptyState label="No files shared in this chat yet." />;
+  return (
+    <div className="space-y-2">
+      {items.map((item) => (
+        <a className="flex items-center gap-3 rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-sm font-bold text-[#334155] hover:border-[#00a884]/30" download={item.attachment.name} href={item.source || undefined} key={`${item.message.id}-${item.attachment.url}`}>
+          <FileText size={20} className="shrink-0 text-[#00a884]" />
+          <span className="min-w-0 flex-1 truncate">{item.attachment.name}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function SharedEmptyState({ label }: { label: string }) {
+  return <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-10 text-center text-sm font-bold text-[#94a3b8]">{label}</div>;
+}
 
 function AttachmentPreview({ attachment, authToken }: { attachment: NonNullable<ChatMessage["attachment"]>; authToken: string }) {
   const [failed, setFailed] = useState(false);
