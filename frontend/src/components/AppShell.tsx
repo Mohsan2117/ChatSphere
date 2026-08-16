@@ -3031,7 +3031,6 @@ export function AppShell() {
               { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
               { label: "Search", mode: "search" as const, icon: Search },
               { label: "Users", mode: "contacts" as const, icon: Users },
-              { label: "Documents", mode: "files" as const, icon: FileText },
               { label: "AI Assistant", mode: "ai" as const, icon: Bot }
             ].map(({ icon: Icon, label, mode }) => {
               const isActive = workspaceMode === mode;
@@ -3095,7 +3094,6 @@ export function AppShell() {
               { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
               { label: "Search", mode: "search" as const, icon: Search },
               { label: "Users", mode: "contacts" as const, icon: Users },
-              { label: "Documents", mode: "files" as const, icon: FileText },
               { label: "AI Assistant", mode: "ai" as const, icon: Bot }
             ].map(({ icon: Icon, label, mode }) => {
               const isActive = workspaceMode === mode;
