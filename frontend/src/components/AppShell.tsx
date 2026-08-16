@@ -39,7 +39,7 @@ import { AIChat, AIMessage } from "@/components/AIChat";
 import { useAudioCall, AudioCallOverlay } from "./AudioCall";
 import { handleImageCompressionLoop, handleVideoCompressionLoop, AppConfig } from "@/lib/mediaCompression";
 import { ChatPanel } from "@/components/chat/ChatPanel";
-import { MessageBubble, type BubbleAttachment } from "@/components/chat/MessageBubble";
+import { MessageBubble, type BubbleAttachment, type MessageReply } from "@/components/chat/MessageBubble";
 import { MessageComposer } from "@/components/chat/MessageComposer";
 import type { ReactionSummary, ReactionTarget, ReactionUser } from "@/components/chat/MessageReactions";
 
@@ -59,6 +59,7 @@ type ChatMessage = {
   status?: "uploading" | "sending" | "sent" | "failed";
   progressMsg?: string;
   reactions?: ReactionSummary[];
+  replyTo?: MessageReply;
 };
 type SharedAttachmentItem = { message: ChatMessage; attachment: NonNullable<ChatMessage["attachment"]>; source: string };
 type SharedLinkItem = { message: ChatMessage; url: string };
@@ -137,9 +138,15 @@ type GroupChatMessage = {
   mine?: boolean;
   attachment?: NonNullable<ChatMessage["attachment"]>;
   reactions?: ReactionSummary[];
+  replyTo?: MessageReply;
 };
 
 type GroupMessageStore = Record<string, GroupChatMessage[]>;
+type ActiveReply = {
+  mode: "direct" | "group";
+  conversationId: string;
+  message: MessageReply;
+};
 
 type StatusEntry = {
   id: string;
@@ -246,6 +253,7 @@ export function AppShell() {
   const [chatNotice, setChatNotice] = useState("");
   const [reactionPicker, setReactionPicker] = useState<ReactionTarget | null>(null);
   const [reactionDetails, setReactionDetails] = useState<{ emoji: string; users: ReactionUser[] } | null>(null);
+  const [activeReply, setActiveReply] = useState<ActiveReply | null>(null);
   const [isContactInfoOpen, setIsContactInfoOpen] = useState(false);
   const [contactInfoMediaTab, setContactInfoMediaTab] = useState<ContactInfoMediaTab | null>(null);
   const [appConfig, setAppConfig] = useState<AppConfig>({
@@ -517,6 +525,7 @@ export function AppShell() {
   const selectedChatBlocked = selectedChatId ? blockedChatIds.includes(selectedChatId) : false;
   const currentMessageDraft = selectedChatId ? (drafts[selectedChatId]?.text ?? "") : "";
   const currentAttachmentDraft = selectedChatId ? (drafts[selectedChatId]?.attachment ?? null) : null;
+  const activeDirectReply = activeReply?.mode === "direct" && activeReply.conversationId === selectedChatId ? activeReply.message : null;
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
   const selectedSharedMedia = useMemo<SharedAttachmentItem[]>(() => {
     return selectedMessages
@@ -559,6 +568,16 @@ export function AppShell() {
       ])
     ) as Record<string, number>;
   }, [chatMessages, selectedChatId]);
+  const directReplyForMessage = useCallback((message: ChatMessage): MessageReply => ({
+    id: message.id,
+    senderId: message.senderId,
+    senderName: message.mine ? "You" : selectedChat?.name || message.senderEmail || "Contact",
+    body: message.body,
+    attachmentKind: message.attachment?.kind
+  }), [selectedChat]);
+  useEffect(() => {
+    setActiveReply(null);
+  }, [selectedChatId, selectedGroupId]);
   const contactResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
     if (!query) return directoryChats;
@@ -640,6 +659,7 @@ export function AppShell() {
     if (!isAuthed) return;
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
+    setActiveReply(null);
     setSelectedGroupId("");
     setSelectedGroupDetails(null);
     setChatSearch("");
@@ -940,6 +960,7 @@ export function AppShell() {
             createdAt: data.payload?.createdAt,
             readAt,
             reactions: data.payload?.reactions ?? [],
+            replyTo: data.payload?.replyTo,
             localSeq: getNextLocalSeq()
           };
           if (isOpen && authToken) {
@@ -1897,6 +1918,7 @@ export function AppShell() {
                 client_message_id: message.id,
                 recipientId: chatId,
                 body: message.body,
+                replyToMessageId: message.replyTo?.id,
                 attachment: uploadedAttachment
                   ? {
                       name: uploadedAttachment.name,
@@ -1937,6 +1959,7 @@ export function AppShell() {
               id: message.id, // client-generated ID
               recipientId: chatId,
               body: message.body,
+              replyToMessageId: message.replyTo?.id,
               attachment: uploadedAttachment
                 ? {
                     name: uploadedAttachment.name,
@@ -2093,7 +2116,9 @@ export function AppShell() {
     const chatId = selectedChatId;
     const draftText = currentMessageDraft;
     const draftAttachment = currentAttachmentDraft;
+    const replyTo = activeDirectReply;
     removeDraft(chatId);
+    setActiveReply(null);
     setIsEmojiOpen(false);
 
     const message: ChatMessage = {
@@ -2111,6 +2136,7 @@ export function AppShell() {
             kind: draftAttachment.kind
           }
         : undefined,
+      replyTo: replyTo ?? undefined,
       createdAt: new Date().toISOString(),
       localSeq: getNextLocalSeq(),
       status: draftAttachment ? "uploading" : "sending"
@@ -2259,6 +2285,7 @@ export function AppShell() {
     const voiceFile = new File([blob], filename, { type: blob.type });
 
     const localUrl = URL.createObjectURL(blob);
+    const replyTo = activeDirectReply;
 
     const draftAttachment: AttachmentDraft = {
       name: filename,
@@ -2281,6 +2308,7 @@ export function AppShell() {
         url: localUrl,
         kind: "audio"
       },
+      replyTo: replyTo ?? undefined,
       createdAt: new Date().toISOString(),
       localSeq: getNextLocalSeq(),
       status: "uploading"
@@ -2298,6 +2326,7 @@ export function AppShell() {
       draftAttachment
     });
 
+    setActiveReply(null);
     processSendQueue();
   }
 
@@ -3634,7 +3663,12 @@ export function AppShell() {
                 onMediaAttachment={handleFileAttachment}
                 onOpenContactInfo={() => setIsContactInfoOpen(true)}
                 onOpenReactionDetails={setReactionDetails}
+                onCancelReply={() => setActiveReply(null)}
                 onReact={reactToMessage}
+                onReply={(message) => {
+                  if (!selectedChatId) return;
+                  setActiveReply({ mode: "direct", conversationId: selectedChatId, message: directReplyForMessage(message) });
+                }}
                 onRemoveAttachment={() => { if (selectedChatId) setDraftAttachment(selectedChatId, null); }}
                 onReport={reportCurrentChat}
                 onRetry={retryMessage}
@@ -3650,6 +3684,7 @@ export function AppShell() {
                 onUnblock={unblockCurrentChat}
                 reactionPicker={reactionPicker}
                 recordingDuration={recordingDuration}
+                replyTo={activeDirectReply}
                 resolveAttachmentSource={attachmentSource}
                 scrollContainerRef={scrollContainerRef}
                 setReactionPicker={setReactionPicker}
@@ -4472,22 +4507,42 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [infoError, setInfoError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [replyTo, setReplyTo] = useState<MessageReply | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const highlightTimeoutRef = useRef<number | null>(null);
   const group = details;
   const canManage = group?.role === "owner" || group?.role === "admin";
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages.length]);
+  useEffect(() => { setReplyTo(null); setHighlightedMessageId(""); }, [group?.id]);
+  useEffect(() => () => { if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current); }, []);
   const chooseFile = (next: File | undefined) => { if (!next) return; setFile(next); setFilePreview(next.type.startsWith("image/") ? URL.createObjectURL(next) : ""); };
   const upload = async (next: File) => { const form = new FormData(); form.append("file", next); const response = await fetch(`${apiUrl()}/api/v1/upload`, { method: "POST", headers: authHeaders(authToken), body: form }); const data = await response.json(); if (!response.ok || !data.url) throw new Error(data.error || "Could not upload attachment"); return { name: next.name, type: next.type, kind: next.type.startsWith("image/") ? "image" : next.type.startsWith("video/") ? "video" : next.type.startsWith("audio/") ? "audio" : "file", url: data.url } as NonNullable<ChatMessage["attachment"]>; };
-  const send = async (event?: FormEvent) => { event?.preventDefault(); if ((!draft.trim() && !file) || !group || isSending) return; setIsSending(true); try { const attachment = file ? await upload(file) : undefined; const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages`, { method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body: draft.trim(), attachment }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send group message"); onMessage({ ...data.message, mine: true }); setDraft(""); setFile(null); setFilePreview(""); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not send message"); } finally { setIsSending(false); } };
+  const replyForMessage = (message: GroupChatMessage): MessageReply => ({
+    id: message.id,
+    senderId: message.senderId,
+    senderName: message.mine ? "You" : group?.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member",
+    body: message.body,
+    attachmentKind: message.attachment?.kind
+  });
+  const scrollToOriginal = (messageId: string) => {
+    const target = scrollRef.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedMessageId(messageId);
+    if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = window.setTimeout(() => setHighlightedMessageId(""), 1400);
+  };
+  const send = async (event?: FormEvent) => { event?.preventDefault(); if ((!draft.trim() && !file) || !group || isSending) return; setIsSending(true); try { const attachment = file ? await upload(file) : undefined; const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages`, { method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body: draft.trim(), attachment, replyToMessageId: replyTo?.id }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send group message"); onMessage({ ...data.message, mine: true }); setDraft(""); setFile(null); setFilePreview(""); setReplyTo(null); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not send message"); } finally { setIsSending(false); } };
   const startRecording = async () => { if (!navigator.mediaDevices?.getUserMedia) return; const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); const recorder = new MediaRecorder(stream); chunksRef.current = []; recorder.ondataavailable = (event) => chunksRef.current.push(event.data); recorder.onstop = () => { stream.getTracks().forEach((track) => track.stop()); const voice = new File([new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })], `voice-${Date.now()}.webm`, { type: recorder.mimeType || "audio/webm" }); setFile(voice); setFilePreview(""); setIsRecording(false); }; recorderRef.current = recorder; recorder.start(); setIsRecording(true); };
   const stopRecording = () => recorderRef.current?.stop();
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} key={message.id} message={message} onOpenReactionDetails={onReactionDetails} onReact={onReact} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} isRecording={isRecording} isSending={isSending} mode="group" onAttachment={chooseFile} onChange={setDraft} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} value={draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => setReplyTo(replyForMessage(item))} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} isRecording={isRecording} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelReply={() => setReplyTo(null)} onChange={setDraft} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={replyTo} value={draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
 }
 
 function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {

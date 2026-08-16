@@ -70,10 +70,11 @@ func (c *Client) readPump() {
 		switch event.Type {
 		case "message_send":
 			var msgPayload struct {
-				ClientMessageID string `json:"client_message_id"`
-				RecipientID     string `json:"recipientId"`
-				Body            string `json:"body"`
-				Attachment      struct {
+				ClientMessageID  string `json:"client_message_id"`
+				RecipientID      string `json:"recipientId"`
+				Body             string `json:"body"`
+				ReplyToMessageID string `json:"replyToMessageId"`
+				Attachment       struct {
 					Name string `json:"name"`
 					Type string `json:"type"`
 					Kind string `json:"kind"`
@@ -117,6 +118,7 @@ func (c *Client) readPump() {
 				msgPayload.Attachment.Type,
 				msgPayload.Attachment.Kind,
 				msgPayload.Attachment.URL,
+				msgPayload.ReplyToMessageID,
 			)
 			if err != nil {
 				errPayload, _ := json.Marshal(map[string]any{
@@ -149,10 +151,11 @@ func (c *Client) readPump() {
 			}
 		case "group_message_send":
 			var msgPayload struct {
-				ClientMessageID string `json:"client_message_id"`
-				GroupID         string `json:"groupId"`
-				Body            string `json:"body"`
-				Attachment      struct {
+				ClientMessageID  string `json:"client_message_id"`
+				GroupID          string `json:"groupId"`
+				Body             string `json:"body"`
+				ReplyToMessageID string `json:"replyToMessageId"`
+				Attachment       struct {
 					Name string `json:"name"`
 					Type string `json:"type"`
 					Kind string `json:"kind"`
@@ -162,7 +165,7 @@ func (c *Client) readPump() {
 			if err := json.Unmarshal(event.Payload, &msgPayload); err != nil || strings.TrimSpace(msgPayload.GroupID) == "" {
 				continue
 			}
-			message, err := c.store.SaveGroupMessage(msgPayload.ClientMessageID, msgPayload.GroupID, c.userID, msgPayload.Body, msgPayload.Attachment.Name, msgPayload.Attachment.Type, msgPayload.Attachment.Kind, msgPayload.Attachment.URL)
+			message, err := c.store.SaveGroupMessage(msgPayload.ClientMessageID, msgPayload.GroupID, c.userID, msgPayload.Body, msgPayload.Attachment.Name, msgPayload.Attachment.Type, msgPayload.Attachment.Kind, msgPayload.Attachment.URL, msgPayload.ReplyToMessageID)
 			if err != nil {
 				errPayload, _ := json.Marshal(map[string]any{"client_message_id": msgPayload.ClientMessageID, "error": err.Error(), "status": "failed"})
 				c.send <- Event{Type: "group_message_sent", Payload: errPayload}
@@ -552,6 +555,9 @@ func mapPublicMessage(message store.Message, viewerEmail string) map[string]any 
 			"url":  message.AttachmentURL,
 		}
 	}
+	if message.ReplyTo != nil {
+		result["replyTo"] = message.ReplyTo
+	}
 	return result
 }
 
@@ -564,6 +570,9 @@ func mapPublicGroupMessage(message store.GroupMessage) map[string]any {
 	}
 	if message.AttachmentName != "" {
 		result["attachment"] = map[string]string{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}
+	}
+	if message.ReplyTo != nil {
+		result["replyTo"] = message.ReplyTo
 	}
 	return result
 }

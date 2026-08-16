@@ -2,7 +2,8 @@
 
 import { FormEvent, KeyboardEvent, useRef } from "react";
 import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
-import { Image, Mic, Paperclip, Send, Smile } from "lucide-react";
+import { Image, Mic, Paperclip, Send, Smile, X } from "lucide-react";
+import type { MessageReply } from "./MessageBubble";
 
 type ComposerAttachment = {
   name: string;
@@ -24,6 +25,7 @@ type DirectMessageComposerProps = {
   onFileAttachment: (file: File) => void;
   onMediaAttachment: (file: File) => void;
   onRemoveAttachment: () => void;
+  onCancelReply?: () => void;
   onSend: () => void;
   onSendRecording: () => void;
   onStartRecording: () => void;
@@ -31,6 +33,7 @@ type DirectMessageComposerProps = {
   recordingDuration: number;
   typingUser?: string | null;
   value: string;
+  replyTo?: MessageReply | null;
 };
 
 type GroupMessageComposerProps = {
@@ -41,10 +44,12 @@ type GroupMessageComposerProps = {
   onAttachment: (file: File | undefined) => void;
   onChange: (value: string) => void;
   onRemoveAttachment: () => void;
+  onCancelReply?: () => void;
   onSend: (event?: FormEvent) => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
   value: string;
+  replyTo?: MessageReply | null;
 };
 
 type MessageComposerProps =
@@ -52,6 +57,32 @@ type MessageComposerProps =
   | ({ mode: "group" } & GroupMessageComposerProps);
 
 const FILE_ACCEPT = "image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk";
+
+function replyPreviewText(reply: MessageReply) {
+  const body = reply.body?.trim();
+  if (body) return body;
+  if (reply.attachmentKind) {
+    return reply.attachmentKind === "audio" ? "Voice message" : `${reply.attachmentKind.charAt(0).toUpperCase()}${reply.attachmentKind.slice(1)} message`;
+  }
+  return "Message";
+}
+
+function ComposerReplyPreview({ reply, onCancel }: { reply?: MessageReply | null; onCancel?: () => void }) {
+  if (!reply) return null;
+  return (
+    <div className="mb-3 flex min-w-0 items-center gap-3 rounded-xl border border-[#dce1e8] border-l-4 border-l-[#00a884] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-black text-[#008f70]">Replying to {reply.senderName || "message"}</div>
+        <div className="mt-0.5 truncate text-xs font-semibold text-[#64748b]">{replyPreviewText(reply)}</div>
+      </div>
+      {onCancel ? (
+        <button aria-label="Cancel reply" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#64748b] hover:bg-white hover:text-[#18212f]" onClick={onCancel} type="button">
+          <X size={16} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 export function MessageComposer(props: MessageComposerProps) {
   if (props.mode === "group") {
@@ -73,12 +104,14 @@ function DirectMessageComposer({
   onEmojiToggle,
   onFileAttachment,
   onMediaAttachment,
+  onCancelReply,
   onRemoveAttachment,
   onSend,
   onSendRecording,
   onStartRecording,
   placeholder,
   recordingDuration,
+  replyTo,
   typingUser,
   value
 }: DirectMessageComposerProps) {
@@ -97,6 +130,7 @@ function DirectMessageComposer({
           <EmojiPicker height={390} onEmojiClick={onEmojiSelect} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
         </div>
       ) : null}
+      <ComposerReplyPreview reply={replyTo} onCancel={onCancelReply} />
       {attachment ? (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
           <div className="min-w-0 truncate">
@@ -209,10 +243,12 @@ function GroupMessageComposer({
   isSending,
   onAttachment,
   onChange,
+  onCancelReply,
   onRemoveAttachment,
   onSend,
   onStartRecording,
   onStopRecording,
+  replyTo,
   value
 }: GroupMessageComposerProps) {
   const sendOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -224,6 +260,7 @@ function GroupMessageComposer({
 
   return (
     <form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={onSend}>
+      <ComposerReplyPreview reply={replyTo} onCancel={onCancelReply} />
       {attachmentFile ? (
         <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">
           {attachmentPreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={attachmentPreview} /> : <span>{attachmentFile.name}</span>}

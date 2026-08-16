@@ -1,10 +1,10 @@
 "use client";
 
-import type { Ref, ReactNode } from "react";
+import { useEffect, useRef, useState, type Ref, type RefObject, type ReactNode } from "react";
 import type { EmojiClickData } from "emoji-picker-react";
 import { ArrowLeft, MessageCircle, MoreVertical, Phone, Search, Video } from "lucide-react";
 import type { ChatSeed } from "@/lib/data";
-import { MessageBubble, type BubbleMessage } from "./MessageBubble";
+import { MessageBubble, type BubbleMessage, type MessageReply } from "./MessageBubble";
 import { MessageComposer } from "./MessageComposer";
 import type { ReactionSummary, ReactionTarget, ReactionUser } from "./MessageReactions";
 
@@ -45,7 +45,9 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   onMediaAttachment: (file: File) => void;
   onOpenContactInfo: () => void;
   onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
+  onCancelReply: () => void;
   onReact: (target: ReactionTarget, emoji: string) => void;
+  onReply: (message: TMessage) => void;
   onRemoveAttachment: () => void;
   onReport: () => void;
   onRetry: (message: TMessage) => void;
@@ -61,8 +63,9 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   onUnblock: () => void;
   reactionPicker: ReactionTarget | null;
   recordingDuration: number;
+  replyTo?: MessageReply | null;
   resolveAttachmentSource: (url: string, token: string) => string;
-  scrollContainerRef: Ref<HTMLDivElement>;
+  scrollContainerRef: RefObject<HTMLDivElement | null>;
   setReactionPicker: (target: ReactionTarget | null) => void;
   timestamp: (message: TMessage) => ReactNode;
   typingUser: string | null;
@@ -97,7 +100,9 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   onMediaAttachment,
   onOpenContactInfo,
   onOpenReactionDetails,
+  onCancelReply,
   onReact,
+  onReply,
   onRemoveAttachment,
   onReport,
   onRetry,
@@ -113,6 +118,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   onUnblock,
   reactionPicker,
   recordingDuration,
+  replyTo,
   resolveAttachmentSource,
   scrollContainerRef,
   setReactionPicker,
@@ -121,6 +127,24 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   value,
   formatLastSeen
 }: ChatPanelProps<TMessage>) {
+  const [highlightedMessageId, setHighlightedMessageId] = useState("");
+  const highlightTimeoutRef = useRef<number | null>(null);
+  const scrollToOriginal = (messageId: string) => {
+    const container = scrollContainerRef.current;
+    const target = container?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedMessageId(messageId);
+    if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = window.setTimeout(() => setHighlightedMessageId(""), 1400);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
@@ -194,7 +218,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
         </div>
       </header>
 
-      <div ref={scrollContainerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
+      <div ref={scrollContainerRef as Ref<HTMLDivElement>} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
         <div className="mx-auto mb-8 w-fit rounded-full border border-[#dce1e8] bg-white px-4 py-2 text-xs font-bold text-[#64748b]">Conversation started</div>
         {messages.length ? (
           <div className="space-y-4">
@@ -203,8 +227,11 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
                 authToken={authToken}
                 key={message.id}
                 message={message}
+                highlighted={highlightedMessageId === message.id}
                 onOpenReactionDetails={onOpenReactionDetails}
+                onQuoteClick={scrollToOriginal}
                 onReact={onReact}
+                onReply={onReply}
                 onRetry={onRetry}
                 reactionPicker={reactionPicker}
                 reactionTarget={{ type: "direct", messageId: message.id }}
@@ -240,11 +267,13 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
           onFileAttachment={onFileAttachment}
           onMediaAttachment={onMediaAttachment}
           onRemoveAttachment={onRemoveAttachment}
+          onCancelReply={onCancelReply}
           onSend={onSend}
           onSendRecording={onSendRecording}
           onStartRecording={onStartRecording}
           placeholder={disabled ? "Unblock this user to send messages" : "Write a message"}
           recordingDuration={recordingDuration}
+          replyTo={replyTo}
           typingUser={typingUser}
           value={value}
         />

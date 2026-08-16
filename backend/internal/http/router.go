@@ -561,9 +561,10 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 			return
 		}
 		var body struct {
-			ID         string `json:"id"`
-			Body       string `json:"body"`
-			Attachment struct {
+			ID               string `json:"id"`
+			Body             string `json:"body"`
+			ReplyToMessageID string `json:"replyToMessageId"`
+			Attachment       struct {
 				Name string `json:"name"`
 				Type string `json:"type"`
 				Kind string `json:"kind"`
@@ -574,8 +575,12 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
-		message, err := dataStore.SaveGroupMessage(body.ID, c.Param("id"), authUser.ID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
+		message, err := dataStore.SaveGroupMessage(body.ID, c.Param("id"), authUser.ID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL, body.ReplyToMessageID)
 		if err != nil {
+			if strings.Contains(err.Error(), "reply message not found") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
@@ -637,6 +642,9 @@ func publicGroupMessage(message store.GroupMessage) gin.H {
 	result := gin.H{"id": message.ID, "groupId": message.GroupID, "senderId": message.SenderID, "senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt, "time": message.CreatedAt.Format("3:04 PM")}
 	if message.AttachmentName != "" {
 		result["attachment"] = gin.H{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}
+	}
+	if message.ReplyTo != nil {
+		result["replyTo"] = message.ReplyTo
 	}
 	result["reactions"] = message.Reactions
 	return result
@@ -880,10 +888,11 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 			return
 		}
 		var body struct {
-			ID          string `json:"id"`
-			RecipientID string `json:"recipientId"`
-			Body        string `json:"body"`
-			Attachment  struct {
+			ID               string `json:"id"`
+			RecipientID      string `json:"recipientId"`
+			Body             string `json:"body"`
+			ReplyToMessageID string `json:"replyToMessageId"`
+			Attachment       struct {
 				Name string `json:"name"`
 				Type string `json:"type"`
 				Kind string `json:"kind"`
@@ -911,11 +920,15 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 				return
 			}
 		}
-		message, err := dataStore.SaveMessage(body.ID, authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL)
+		message, err := dataStore.SaveMessage(body.ID, authUser.Email, body.RecipientID, body.Body, body.Attachment.Name, body.Attachment.Type, body.Attachment.Kind, body.Attachment.URL, body.ReplyToMessageID)
 		if err != nil {
 			log.Printf("save message failed sender=%s recipient=%s: %v", authUser.Email, body.RecipientID, err)
 			if strings.Contains(err.Error(), "blocked") {
 				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			if strings.Contains(err.Error(), "reply message not found") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save message"})
@@ -1118,6 +1131,9 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 			"kind": message.AttachmentKind,
 			"url":  message.AttachmentURL,
 		}
+	}
+	if message.ReplyTo != nil {
+		result["replyTo"] = message.ReplyTo
 	}
 	result["reactions"] = message.Reactions
 	return result

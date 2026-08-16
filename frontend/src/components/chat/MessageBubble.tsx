@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, MouseEvent, ReactNode, TouchEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, FileText, Pause, Play } from "lucide-react";
+import { Check, CheckCheck, FileText, Pause, Play, Reply } from "lucide-react";
 import { MessageReactions, type ReactionSummary, type ReactionTarget, type ReactionUser } from "./MessageReactions";
 
 export type BubbleAttachment = {
@@ -9,6 +9,14 @@ export type BubbleAttachment = {
   type: string;
   url: string;
   kind: "image" | "video" | "file" | "audio";
+};
+
+export type MessageReply = {
+  id: string;
+  senderId?: string;
+  senderName: string;
+  body?: string;
+  attachmentKind?: BubbleAttachment["kind"] | string;
 };
 
 export type BubbleMessage = {
@@ -22,6 +30,7 @@ export type BubbleMessage = {
   status?: "uploading" | "sending" | "sent" | "failed";
   progressMsg?: string;
   reactions?: ReactionSummary[];
+  replyTo?: MessageReply;
 };
 
 type MessageBubbleProps<TMessage extends BubbleMessage> = {
@@ -29,7 +38,9 @@ type MessageBubbleProps<TMessage extends BubbleMessage> = {
   isOwn?: boolean;
   message: TMessage;
   onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
+  onQuoteClick?: (messageId: string) => void;
   onReact: (target: ReactionTarget, emoji: string) => void;
+  onReply?: (message: TMessage) => void;
   onRetry?: (message: TMessage) => void;
   reactionPicker: ReactionTarget | null;
   reactionTarget: ReactionTarget;
@@ -39,6 +50,7 @@ type MessageBubbleProps<TMessage extends BubbleMessage> = {
   setReactionPicker: (target: ReactionTarget | null) => void;
   timestamp: ReactNode;
   variant: "direct" | "group";
+  highlighted?: boolean;
 };
 
 export function MessageBubble<TMessage extends BubbleMessage>({
@@ -46,7 +58,9 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   isOwn,
   message,
   onOpenReactionDetails,
+  onQuoteClick,
   onReact,
+  onReply,
   onRetry,
   reactionPicker,
   reactionTarget,
@@ -55,7 +69,8 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   senderName,
   setReactionPicker,
   timestamp,
-  variant
+  variant,
+  highlighted
 }: MessageBubbleProps<TMessage>) {
   const own = isOwn ?? Boolean(message.mine);
   const isDirect = variant === "direct";
@@ -66,16 +81,18 @@ export function MessageBubble<TMessage extends BubbleMessage>({
     ? `flex max-w-[72%] flex-col ${own ? "items-end" : "items-start"}`
     : `flex min-w-0 max-w-[78%] flex-col ${own ? "items-end" : "items-start"}`;
   const bubbleClass = isDirect
-    ? `max-w-full rounded-2xl border px-4 py-3 shadow-sm ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`
-    : `min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`;
+    ? `max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`
+    : `min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`;
 
   return (
-    <div className={outerClass}>
+    <div className={outerClass} data-message-id={message.id}>
       <div className={innerClass}>
         {isDirect && message.attachment?.kind === "audio" ? (
           <VoiceMessageBubble
             authToken={authToken}
+            highlighted={highlighted}
             message={message}
+            onQuoteClick={onQuoteClick}
             onRetry={onRetry}
             resolveAttachmentSource={resolveAttachmentSource}
             selectedChatOnline={selectedChatOnline}
@@ -84,6 +101,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
         ) : (
           <div className={bubbleClass}>
             {!isDirect && !own && senderName ? <div className="mb-1 text-xs font-black text-[#008f70]">{senderName}</div> : null}
+            {message.replyTo ? <QuotedMessage reply={message.replyTo} onQuoteClick={onQuoteClick} /> : null}
             {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} resolveAttachmentSource={resolveAttachmentSource} /> : null}
             {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
             {isDirect ? (
@@ -93,17 +111,52 @@ export function MessageBubble<TMessage extends BubbleMessage>({
             )}
           </div>
         )}
-        <MessageReactions
-          align={own ? "right" : "left"}
-          onReact={onReact}
-          onShowDetails={onOpenReactionDetails}
-          pickerTarget={reactionPicker}
-          reactions={message.reactions}
-          setPickerTarget={setReactionPicker}
-          target={reactionTarget}
-        />
+        <div className={`flex items-start gap-1 ${own ? "flex-row-reverse" : ""}`}>
+          {onReply ? (
+            <button
+              aria-label="Reply to message"
+              className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884]/30 hover:text-[#00a884]"
+              onClick={() => onReply(message)}
+              type="button"
+            >
+              <Reply size={14} />
+            </button>
+          ) : null}
+          <MessageReactions
+            align={own ? "right" : "left"}
+            onReact={onReact}
+            onShowDetails={onOpenReactionDetails}
+            pickerTarget={reactionPicker}
+            reactions={message.reactions}
+            setPickerTarget={setReactionPicker}
+            target={reactionTarget}
+          />
+        </div>
       </div>
     </div>
+  );
+}
+
+function replyPreviewText(reply: MessageReply) {
+  const body = reply.body?.trim();
+  if (body) return body;
+  if (reply.attachmentKind) {
+    const label = reply.attachmentKind === "audio" ? "Voice message" : `${reply.attachmentKind.charAt(0).toUpperCase()}${reply.attachmentKind.slice(1)} message`;
+    return label;
+  }
+  return "Message";
+}
+
+function QuotedMessage({ reply, onQuoteClick }: { reply: MessageReply; onQuoteClick?: (messageId: string) => void }) {
+  return (
+    <button
+      className="mb-3 w-full min-w-0 rounded-xl border-l-4 border-[#00a884] bg-white/65 px-3 py-2 text-left shadow-sm"
+      onClick={() => onQuoteClick?.(reply.id)}
+      type="button"
+    >
+      <span className="block truncate text-xs font-black text-[#008f70]">{reply.senderName || "Message"}</span>
+      <span className="mt-0.5 block truncate text-xs font-semibold text-[#64748b]">{replyPreviewText(reply)}</span>
+    </button>
   );
 }
 
@@ -362,14 +415,18 @@ const pauseAllOtherAudios = (currentAudio: HTMLAudioElement) => {
 
 function VoiceMessageBubble<TMessage extends BubbleMessage>({
   authToken,
+  highlighted,
   message,
+  onQuoteClick,
   onRetry,
   resolveAttachmentSource,
   selectedChatOnline,
   timestamp
 }: {
   authToken: string;
+  highlighted?: boolean;
   message: TMessage;
+  onQuoteClick?: (messageId: string) => void;
   onRetry?: (message: TMessage) => void;
   resolveAttachmentSource: (url: string, token: string) => string;
   selectedChatOnline?: boolean;
@@ -382,7 +439,8 @@ function VoiceMessageBubble<TMessage extends BubbleMessage>({
 
   if (!canPreview) {
     return (
-      <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+      <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+        {message.replyTo ? <QuotedMessage reply={message.replyTo} onQuoteClick={onQuoteClick} /> : null}
         <a className="flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
           <FileText size={20} />
           <span className="min-w-0 truncate">{attachment.name}</span>
@@ -397,6 +455,8 @@ function VoiceMessageBubble<TMessage extends BubbleMessage>({
       source={source}
       name={attachment.name}
       message={message}
+      highlighted={highlighted}
+      onQuoteClick={onQuoteClick}
       selectedChatOnline={selectedChatOnline}
       onRetry={onRetry}
       timestamp={timestamp}
@@ -408,6 +468,8 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
   source,
   name,
   message,
+  highlighted,
+  onQuoteClick,
   selectedChatOnline,
   onRetry,
   timestamp
@@ -415,6 +477,8 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
   source: string;
   name: string;
   message: TMessage;
+  highlighted?: boolean;
+  onQuoteClick?: (messageId: string) => void;
   selectedChatOnline?: boolean;
   onRetry?: (message: TMessage) => void;
   timestamp: ReactNode;
@@ -538,11 +602,13 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
   const displayTime = isPlaying || currentTime > 0 ? currentTime : duration;
 
   return (
-    <div className={`relative flex items-center gap-3 p-3 pl-4 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.12)] border select-none w-full max-w-[280px] sm:max-w-[320px] min-w-[240px] ${
+    <div className={`relative flex flex-col gap-3 p-3 pl-4 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.12)] border select-none w-full max-w-[280px] sm:max-w-[320px] min-w-[240px] transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${
       message.mine
         ? "bg-[#dff8ef] border-[#00a884]/15 rounded-bl-2xl rounded-br-none"
         : "bg-white border-[#e5e9f0] rounded-2xl rounded-bl-none ml-2"
     }`}>
+      {message.replyTo ? <QuotedMessage reply={message.replyTo} onQuoteClick={onQuoteClick} /> : null}
+      <div className="flex w-full items-center gap-3">
       <svg
         className={`absolute bottom-0 left-[-7px] h-[13px] w-[8px] fill-current ${
           message.mine ? "text-[#dff8ef]" : "text-white"
@@ -640,6 +706,7 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

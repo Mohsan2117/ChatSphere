@@ -60,19 +60,29 @@ type User struct {
 }
 
 type Message struct {
-	ID             string            `json:"id"`
-	ConversationID string            `json:"conversationId"`
-	SenderEmail    string            `json:"senderEmail"`
-	SenderID       string            `json:"senderId,omitempty"`
-	RecipientID    string            `json:"recipientId"`
-	Body           string            `json:"body"`
-	AttachmentName string            `json:"attachmentName,omitempty"`
-	AttachmentType string            `json:"attachmentType,omitempty"`
-	AttachmentKind string            `json:"attachmentKind,omitempty"`
-	AttachmentURL  string            `json:"attachmentUrl,omitempty"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	ReadAt         *time.Time        `json:"readAt,omitempty"`
-	Reactions      []ReactionSummary `json:"reactions,omitempty"`
+	ID               string            `json:"id"`
+	ConversationID   string            `json:"conversationId"`
+	SenderEmail      string            `json:"senderEmail"`
+	SenderID         string            `json:"senderId,omitempty"`
+	RecipientID      string            `json:"recipientId"`
+	Body             string            `json:"body"`
+	AttachmentName   string            `json:"attachmentName,omitempty"`
+	AttachmentType   string            `json:"attachmentType,omitempty"`
+	AttachmentKind   string            `json:"attachmentKind,omitempty"`
+	AttachmentURL    string            `json:"attachmentUrl,omitempty"`
+	ReplyToMessageID string            `json:"replyToMessageId,omitempty"`
+	ReplyTo          *MessageReply     `json:"replyTo,omitempty"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	ReadAt           *time.Time        `json:"readAt,omitempty"`
+	Reactions        []ReactionSummary `json:"reactions,omitempty"`
+}
+
+type MessageReply struct {
+	ID             string `json:"id"`
+	SenderID       string `json:"senderId"`
+	SenderName     string `json:"senderName"`
+	Body           string `json:"body"`
+	AttachmentKind string `json:"attachmentKind,omitempty"`
 }
 
 type CallHistory struct {
@@ -133,17 +143,19 @@ type GroupMember struct {
 }
 
 type GroupMessage struct {
-	ID             string            `json:"id"`
-	GroupID        string            `json:"groupId"`
-	SenderID       string            `json:"senderId"`
-	SenderEmail    string            `json:"senderEmail"`
-	Body           string            `json:"body"`
-	AttachmentName string            `json:"attachmentName,omitempty"`
-	AttachmentType string            `json:"attachmentType,omitempty"`
-	AttachmentKind string            `json:"attachmentKind,omitempty"`
-	AttachmentURL  string            `json:"attachmentUrl,omitempty"`
-	CreatedAt      time.Time         `json:"createdAt"`
-	Reactions      []ReactionSummary `json:"reactions,omitempty"`
+	ID               string            `json:"id"`
+	GroupID          string            `json:"groupId"`
+	SenderID         string            `json:"senderId"`
+	SenderEmail      string            `json:"senderEmail"`
+	Body             string            `json:"body"`
+	AttachmentName   string            `json:"attachmentName,omitempty"`
+	AttachmentType   string            `json:"attachmentType,omitempty"`
+	AttachmentKind   string            `json:"attachmentKind,omitempty"`
+	AttachmentURL    string            `json:"attachmentUrl,omitempty"`
+	ReplyToMessageID string            `json:"replyToMessageId,omitempty"`
+	ReplyTo          *MessageReply     `json:"replyTo,omitempty"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	Reactions        []ReactionSummary `json:"reactions,omitempty"`
 }
 
 type MessageReaction struct {
@@ -831,7 +843,7 @@ func (s *Store) ResolveReport(id string) error {
 	return nil
 }
 
-func (s *Store) SaveMessage(clientMsgID, senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind, attachmentURL string) (Message, error) {
+func (s *Store) SaveMessage(clientMsgID, senderEmail, recipientID, body, attachmentName, attachmentType, attachmentKind, attachmentURL, replyToMessageID string) (Message, error) {
 	if s.db == nil && s.my == nil {
 		return Message{}, errors.New("database is not configured")
 	}
@@ -851,28 +863,36 @@ func (s *Store) SaveMessage(clientMsgID, senderEmail, recipientID, body, attachm
 		msgID = randomID()
 	}
 	message := Message{
-		ID:             msgID,
-		ConversationID: conversationID(sender.ID, recipient.ID),
-		SenderEmail:    sender.Email,
-		SenderID:       sender.ID,
-		RecipientID:    recipient.ID,
-		Body:           strings.TrimSpace(body),
-		AttachmentName: strings.TrimSpace(attachmentName),
-		AttachmentType: strings.TrimSpace(attachmentType),
-		AttachmentKind: strings.TrimSpace(attachmentKind),
-		AttachmentURL:  strings.TrimSpace(attachmentURL),
-		CreatedAt:      time.Now().UTC(),
+		ID:               msgID,
+		ConversationID:   conversationID(sender.ID, recipient.ID),
+		SenderEmail:      sender.Email,
+		SenderID:         sender.ID,
+		RecipientID:      recipient.ID,
+		Body:             strings.TrimSpace(body),
+		AttachmentName:   strings.TrimSpace(attachmentName),
+		AttachmentType:   strings.TrimSpace(attachmentType),
+		AttachmentKind:   strings.TrimSpace(attachmentKind),
+		AttachmentURL:    strings.TrimSpace(attachmentURL),
+		ReplyToMessageID: strings.TrimSpace(replyToMessageID),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if message.ReplyToMessageID != "" {
+		reply, err := s.directReplyByID(message.ReplyToMessageID, message.ConversationID)
+		if err != nil {
+			return Message{}, errors.New("reply message not found")
+		}
+		message.ReplyTo = reply
 	}
 	if s.db != nil {
 		_, err = s.db.Exec(context.Background(), `
-			insert into messages (id, conversation_id, sender_email, sender_id, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
-			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		`, message.ID, message.ConversationID, message.SenderEmail, message.SenderID, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+			insert into messages (id, conversation_id, sender_email, sender_id, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, reply_to_message_id, created_at)
+			values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		`, message.ID, message.ConversationID, message.SenderEmail, message.SenderID, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.ReplyToMessageID, message.CreatedAt)
 	} else {
 		_, err = s.my.ExecContext(context.Background(), `
-			insert into messages (id, conversation_id, sender_email, sender_id, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, created_at)
-			values (?,?,?,?,?,?,?,?,?,?,?)
-		`, message.ID, message.ConversationID, message.SenderEmail, message.SenderID, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+			insert into messages (id, conversation_id, sender_email, sender_id, recipient_id, body, attachment_name, attachment_type, attachment_kind, attachment_url, reply_to_message_id, created_at)
+			values (?,?,?,?,?,?,?,?,?,?,?,?)
+		`, message.ID, message.ConversationID, message.SenderEmail, message.SenderID, message.RecipientID, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.ReplyToMessageID, message.CreatedAt)
 	}
 	return message, err
 }
@@ -1023,7 +1043,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 		limit = 50
 	}
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where coalesce(m.conversation_id, '') = %s
@@ -1052,7 +1072,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.ReadAt); err != nil {
 			return nil, err
 		}
 		messages = append([]Message{message}, messages...)
@@ -1060,7 +1080,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.withMessageReactions(messages, user.ID), nil
+	return s.withMessageReactions(s.withMessageReplies(messages), user.ID), nil
 }
 
 func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error) {
@@ -1075,7 +1095,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 		limit = 200
 	}
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where lower(coalesce(m.sender_email, '')) = %s or coalesce(m.recipient_id, '') = %s
@@ -1101,7 +1121,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.ReadAt); err != nil {
 			return nil, err
 		}
 		messages = append([]Message{message}, messages...)
@@ -1109,7 +1129,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.withMessageReactions(messages, user.ID), nil
+	return s.withMessageReactions(s.withMessageReplies(messages), user.ID), nil
 }
 
 func (s *Store) MarkConversationRead(userEmail, otherUserID string) error {
@@ -1246,6 +1266,7 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_type text not null,
 				attachment_kind varchar(32) not null,
 				attachment_url mediumtext not null,
+				reply_to_message_id varchar(64) not null default '',
 				read_at datetime null,
 				created_at datetime not null default current_timestamp
 			)`,
@@ -1345,6 +1366,7 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_type text not null,
 				attachment_kind varchar(32) not null,
 				attachment_url mediumtext not null,
+				reply_to_message_id varchar(64) not null default '',
 				created_at datetime not null default current_timestamp
 			)`,
 			`
@@ -1379,8 +1401,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_type text null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_kind varchar(32) null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column attachment_url mediumtext null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column reply_to_message_id varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column created_at datetime not null default current_timestamp`)
+		_, _ = s.my.ExecContext(ctx, `alter table group_messages add column reply_to_message_id varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column size_bytes bigint not null default 0`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_url text null`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_public_id varchar(255) null`)
@@ -1413,6 +1437,7 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_type = coalesce(attachment_type, ''),
 				attachment_kind = coalesce(attachment_kind, ''),
 				attachment_url = coalesce(attachment_url, ''),
+				reply_to_message_id = coalesce(reply_to_message_id, ''),
 				created_at = coalesce(created_at, utc_timestamp())
 		`)
 		_, _ = s.my.ExecContext(ctx, `
@@ -1452,6 +1477,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			attachment_type text not null default '',
 			attachment_kind text not null default '',
 			attachment_url text not null default '',
+			reply_to_message_id text not null default '',
 			read_at timestamptz null,
 			created_at timestamptz not null default now()
 		);
@@ -1545,6 +1571,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			attachment_type text not null default '',
 			attachment_kind text not null default '',
 			attachment_url text not null default '',
+			reply_to_message_id text not null default '',
 			created_at timestamptz not null default now()
 		);
 		create index if not exists group_messages_group_created on group_messages(group_id, created_at);
@@ -1572,7 +1599,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_type text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_kind text not null default ''`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists reply_to_message_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists created_at timestamptz not null default now()`)
+	_, _ = s.db.Exec(ctx, `alter table group_messages add column if not exists reply_to_message_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists first_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists last_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists password_hash text not null default ''`)
@@ -1612,6 +1641,7 @@ func (s *Store) migrate(ctx context.Context) error {
 			attachment_type = coalesce(attachment_type, ''),
 			attachment_kind = coalesce(attachment_kind, ''),
 			attachment_url = coalesce(attachment_url, ''),
+			reply_to_message_id = coalesce(reply_to_message_id, ''),
 			created_at = coalesce(created_at, now())
 	`)
 	_, _ = s.db.Exec(ctx, `
@@ -1796,18 +1826,24 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 func (s *Store) MessageByID(id string) (Message, error) {
 	id = strings.TrimSpace(id)
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where m.id = %s
 	`
 	var message Message
 	if s.db != nil {
-		err := s.db.QueryRow(context.Background(), fmt.Sprintf(query, "$1"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
+		err := s.db.QueryRow(context.Background(), fmt.Sprintf(query, "$1"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.ReadAt)
+		if err == nil {
+			message = s.withMessageReplies([]Message{message})[0]
+		}
 		return message, err
 	}
 	if s.my != nil {
-		err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
+		err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.ReadAt)
+		if err == nil {
+			message = s.withMessageReplies([]Message{message})[0]
+		}
 		return message, err
 	}
 	return Message{}, errors.New("database is not configured")
@@ -1859,6 +1895,55 @@ func (s *Store) ToggleGroupMessageReaction(groupID, messageID, userID, emoji str
 		targets = append(targets, member.UserID)
 	}
 	return message, summaries[message.ID], targets, nil
+}
+
+func (s *Store) withMessageReplies(messages []Message) []Message {
+	for index := range messages {
+		replyID := strings.TrimSpace(messages[index].ReplyToMessageID)
+		if replyID == "" {
+			continue
+		}
+		reply, err := s.directReplyByID(replyID, messages[index].ConversationID)
+		if err == nil {
+			messages[index].ReplyTo = reply
+		}
+	}
+	return messages
+}
+
+func (s *Store) directReplyByID(messageID, conversationID string) (*MessageReply, error) {
+	messageID = strings.TrimSpace(messageID)
+	conversationID = strings.TrimSpace(conversationID)
+	if messageID == "" || conversationID == "" {
+		return nil, errors.New("message not found")
+	}
+	var reply MessageReply
+	var senderEmail string
+	if s.db != nil {
+		err := s.db.QueryRow(context.Background(), `
+			select m.id, coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), coalesce(m.sender_email, '')), coalesce(m.body, ''), coalesce(m.attachment_kind, ''), coalesce(m.sender_email, '')
+			from messages m
+			left join app_users u on u.email = m.sender_email
+			where m.id=$1 and coalesce(m.conversation_id, '')=$2
+		`, messageID, conversationID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &senderEmail)
+		if err != nil {
+			return nil, err
+		}
+		return &reply, nil
+	}
+	if s.my != nil {
+		err := s.my.QueryRowContext(context.Background(), `
+			select m.id, coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(nullif(trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,''))), ''), coalesce(m.sender_email, '')), coalesce(m.body, ''), coalesce(m.attachment_kind, ''), coalesce(m.sender_email, '')
+			from messages m
+			left join app_users u on u.email = m.sender_email
+			where m.id=? and coalesce(m.conversation_id, '')=?
+		`, messageID, conversationID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &senderEmail)
+		if err != nil {
+			return nil, err
+		}
+		return &reply, nil
+	}
+	return nil, errors.New("database is not configured")
 }
 
 func (s *Store) toggleReaction(messageType, messageID, userID, emoji string) error {
@@ -1939,6 +2024,71 @@ func (s *Store) withGroupMessageReactions(messages []GroupMessage, viewerID stri
 		messages[index].Reactions = summaries[messages[index].ID]
 	}
 	return messages
+}
+
+func (s *Store) withGroupMessageReplies(messages []GroupMessage) []GroupMessage {
+	for index := range messages {
+		replyID := strings.TrimSpace(messages[index].ReplyToMessageID)
+		if replyID == "" {
+			continue
+		}
+		reply, err := s.groupReplyByID(messages[index].GroupID, replyID)
+		if err == nil {
+			messages[index].ReplyTo = reply
+		}
+	}
+	return messages
+}
+
+func (s *Store) groupReplyByID(groupID, messageID string) (*MessageReply, error) {
+	groupID = strings.TrimSpace(groupID)
+	messageID = strings.TrimSpace(messageID)
+	if groupID == "" || messageID == "" {
+		return nil, errors.New("message not found")
+	}
+	var reply MessageReply
+	if s.db != nil {
+		err := s.db.QueryRow(context.Background(), `
+			select gm.id, gm.sender_id, coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), coalesce(gm.sender_email, '')), coalesce(gm.body, ''), coalesce(gm.attachment_kind, '')
+			from group_messages gm
+			left join app_users u on u.id = gm.sender_id
+			where gm.group_id=$1 and gm.id=$2
+		`, groupID, messageID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind)
+		if err != nil {
+			return nil, err
+		}
+		return &reply, nil
+	}
+	if s.my != nil {
+		err := s.my.QueryRowContext(context.Background(), `
+			select gm.id, gm.sender_id, coalesce(nullif(trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,''))), ''), coalesce(gm.sender_email, '')), coalesce(gm.body, ''), coalesce(gm.attachment_kind, '')
+			from group_messages gm
+			left join app_users u on u.id = gm.sender_id
+			where gm.group_id=? and gm.id=?
+		`, groupID, messageID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind)
+		if err != nil {
+			return nil, err
+		}
+		return &reply, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, message := range s.data.GroupMessages {
+		if message.GroupID == groupID && message.ID == messageID {
+			reply = MessageReply{ID: message.ID, SenderID: message.SenderID, SenderName: message.SenderEmail, Body: message.Body, AttachmentKind: message.AttachmentKind}
+			for _, user := range s.data.Users {
+				if user.ID == message.SenderID {
+					reply.SenderName = strings.TrimSpace(user.FirstName + " " + user.LastName)
+					if reply.SenderName == "" {
+						reply.SenderName = user.Email
+					}
+					break
+				}
+			}
+			return &reply, nil
+		}
+	}
+	return nil, errors.New("message not found")
 }
 
 func (s *Store) reactionSummaries(messageType string, messageIDs []string, viewerID string) (map[string][]ReactionSummary, error) {
@@ -2059,12 +2209,18 @@ func (s *Store) groupMessageByID(groupID, messageID string) (GroupMessage, error
 	messageID = strings.TrimSpace(messageID)
 	if s.db != nil {
 		var message GroupMessage
-		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=$1 and id=$2`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at from group_messages where group_id=$1 and id=$2`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt)
+		if err == nil {
+			message = s.withGroupMessageReplies([]GroupMessage{message})[0]
+		}
 		return message, err
 	}
 	if s.my != nil {
 		var message GroupMessage
-		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? and id=?`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at from group_messages where group_id=? and id=?`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt)
+		if err == nil {
+			message = s.withGroupMessageReplies([]GroupMessage{message})[0]
+		}
 		return message, err
 	}
 	s.mu.Lock()
@@ -2848,35 +3004,41 @@ func (s *Store) groupByID(groupID string) (Group, error) {
 func (s *Store) groupLatestMessage(groupID string) (*GroupMessage, error) {
 	if s.db != nil {
 		var message GroupMessage
-		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=$1 order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at from group_messages where group_id=$1 order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
+		message = s.withGroupMessageReplies([]GroupMessage{message})[0]
 		return &message, nil
 	}
 	if s.my != nil {
 		var message GroupMessage
-		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at from group_messages where group_id=? order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
+		message = s.withGroupMessageReplies([]GroupMessage{message})[0]
 		return &message, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var latest *GroupMessage
+	s.mu.Lock()
 	for i := range s.data.GroupMessages {
 		message := s.data.GroupMessages[i]
 		if message.GroupID == groupID && (latest == nil || message.CreatedAt.After(latest.CreatedAt)) {
 			copy := message
 			latest = &copy
 		}
+	}
+	s.mu.Unlock()
+	if latest != nil {
+		hydrated := s.withGroupMessageReplies([]GroupMessage{*latest})
+		latest = &hydrated[0]
 	}
 	return latest, nil
 }
@@ -3163,7 +3325,7 @@ func (s *Store) SetGroupAdmin(groupID, actorID, memberID string, promote bool) e
 	return errors.New("member not found")
 }
 
-func (s *Store) SaveGroupMessage(clientMessageID, groupID, senderID, body, attachmentName, attachmentType, attachmentKind, attachmentURL string) (GroupMessage, error) {
+func (s *Store) SaveGroupMessage(clientMessageID, groupID, senderID, body, attachmentName, attachmentType, attachmentKind, attachmentURL, replyToMessageID string) (GroupMessage, error) {
 	if _, err := s.groupRole(groupID, senderID); err != nil {
 		return GroupMessage{}, errors.New("group membership required")
 	}
@@ -3171,19 +3333,26 @@ func (s *Store) SaveGroupMessage(clientMessageID, groupID, senderID, body, attac
 	if err != nil {
 		return GroupMessage{}, err
 	}
-	message := GroupMessage{ID: strings.TrimSpace(clientMessageID), GroupID: groupID, SenderID: senderID, SenderEmail: sender.Email, Body: strings.TrimSpace(body), AttachmentName: strings.TrimSpace(attachmentName), AttachmentType: strings.TrimSpace(attachmentType), AttachmentKind: strings.TrimSpace(attachmentKind), AttachmentURL: strings.TrimSpace(attachmentURL), CreatedAt: time.Now().UTC()}
+	message := GroupMessage{ID: strings.TrimSpace(clientMessageID), GroupID: groupID, SenderID: senderID, SenderEmail: sender.Email, Body: strings.TrimSpace(body), AttachmentName: strings.TrimSpace(attachmentName), AttachmentType: strings.TrimSpace(attachmentType), AttachmentKind: strings.TrimSpace(attachmentKind), AttachmentURL: strings.TrimSpace(attachmentURL), ReplyToMessageID: strings.TrimSpace(replyToMessageID), CreatedAt: time.Now().UTC()}
 	if message.ID == "" {
 		message.ID = randomID()
 	}
 	if message.Body == "" && message.AttachmentName == "" {
 		return GroupMessage{}, errors.New("message is empty")
 	}
+	if message.ReplyToMessageID != "" {
+		reply, err := s.groupReplyByID(groupID, message.ReplyToMessageID)
+		if err != nil {
+			return GroupMessage{}, errors.New("reply message not found")
+		}
+		message.ReplyTo = reply
+	}
 	if s.db != nil {
-		_, err = s.db.Exec(context.Background(), `insert into group_messages (id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, message.ID, message.GroupID, message.SenderID, message.SenderEmail, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+		_, err = s.db.Exec(context.Background(), `insert into group_messages (id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,reply_to_message_id,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, message.ID, message.GroupID, message.SenderID, message.SenderEmail, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.ReplyToMessageID, message.CreatedAt)
 		return message, err
 	}
 	if s.my != nil {
-		_, err = s.my.ExecContext(context.Background(), `insert into group_messages (id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at) values (?,?,?,?,?,?,?,?,?,?)`, message.ID, message.GroupID, message.SenderID, message.SenderEmail, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.CreatedAt)
+		_, err = s.my.ExecContext(context.Background(), `insert into group_messages (id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,reply_to_message_id,created_at) values (?,?,?,?,?,?,?,?,?,?,?)`, message.ID, message.GroupID, message.SenderID, message.SenderEmail, message.Body, message.AttachmentName, message.AttachmentType, message.AttachmentKind, message.AttachmentURL, message.ReplyToMessageID, message.CreatedAt)
 		return message, err
 	}
 	s.mu.Lock()
@@ -3210,7 +3379,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		limit = 50
 	}
 	if s.db != nil {
-		rows, err := s.db.Query(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=$1 order by created_at desc,id desc limit $2`, groupID, limit)
+		rows, err := s.db.Query(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at from group_messages where group_id=$1 order by created_at desc,id desc limit $2`, groupID, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -3218,7 +3387,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		var result []GroupMessage
 		for rows.Next() {
 			var message GroupMessage
-			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt); err != nil {
+			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt); err != nil {
 				return nil, err
 			}
 			result = append(result, message)
@@ -3227,10 +3396,10 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		return s.withGroupMessageReactions(result, userID), nil
+		return s.withGroupMessageReactions(s.withGroupMessageReplies(result), userID), nil
 	}
 	if s.my != nil {
-		rows, err := s.my.QueryContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? order by created_at desc,id desc limit ?`, groupID, limit)
+		rows, err := s.my.QueryContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at from group_messages where group_id=? order by created_at desc,id desc limit ?`, groupID, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -3238,7 +3407,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		var result []GroupMessage
 		for rows.Next() {
 			var message GroupMessage
-			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt); err != nil {
+			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt); err != nil {
 				return nil, err
 			}
 			result = append(result, message)
@@ -3247,7 +3416,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		return s.withGroupMessageReactions(result, userID), nil
+		return s.withGroupMessageReactions(s.withGroupMessageReplies(result), userID), nil
 	}
 	var result []GroupMessage
 	s.mu.Lock()
@@ -3258,7 +3427,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 	}
 	s.mu.Unlock()
 	reverseGroupMessages(result)
-	return s.withGroupMessageReactions(result, userID), nil
+	return s.withGroupMessageReactions(s.withGroupMessageReplies(result), userID), nil
 }
 
 func reverseGroupMessages(messages []GroupMessage) {

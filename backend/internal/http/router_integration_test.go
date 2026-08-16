@@ -51,6 +51,26 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	if messageID == "" {
 		t.Fatalf("sent message has no id: %s", sendResp.Body.String())
 	}
+	replyResp := requestJSON(t, router, http.MethodPost, "/api/v1/messages", hamza.Token, map[string]any{
+		"recipientId":      ali.ID,
+		"body":             "Replying to Ali",
+		"replyToMessageId": messageID,
+	}, http.StatusOK)
+	var replyPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(replyResp.Body.Bytes(), &replyPayload); err != nil {
+		t.Fatalf("decode direct reply: %v", err)
+	}
+	replyTo, _ := replyPayload.Message["replyTo"].(map[string]any)
+	if replyTo["id"] != messageID || replyTo["senderName"] == "" {
+		t.Fatalf("direct reply metadata missing: %+v", replyPayload.Message)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages", mohsin.Token, map[string]any{
+		"recipientId":      hamza.ID,
+		"body":             "Invalid cross-conversation reply",
+		"replyToMessageId": messageID,
+	}, http.StatusBadRequest)
 
 	aliInbox := getMessages(t, router, "/api/v1/messages/inbox", ali.Token)
 	if len(aliInbox) == 0 {
@@ -292,6 +312,18 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	if groupMessageID == "" {
 		t.Fatalf("group message has no id: %s", groupMessageResp.Body.String())
 	}
+	groupReplyResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", member.Token, map[string]any{"body": "Replying in group", "replyToMessageId": groupMessageID}, http.StatusOK)
+	var groupReplyPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupReplyResp.Body.Bytes(), &groupReplyPayload); err != nil {
+		t.Fatalf("decode group reply: %v", err)
+	}
+	groupReplyTo, _ := groupReplyPayload.Message["replyTo"].(map[string]any)
+	if groupReplyTo["id"] != groupMessageID || groupReplyTo["senderName"] == "" {
+		t.Fatalf("group reply metadata missing: %+v", groupReplyPayload.Message)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", stranger.Token, map[string]any{"body": "Unauthorized reply", "replyToMessageId": groupMessageID}, http.StatusForbidden)
 	reactions := decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "❤️"}, http.StatusOK))
 	assertReaction(t, reactions, "❤️", 1, true)
 	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "👍"}, http.StatusOK))
@@ -636,7 +668,7 @@ func TestMessageIdempotencyAndClientGeneratedID(t *testing.T) {
 	clientMsgID := "client-uuid-" + suffix
 
 	// 1. Save message with client message ID
-	msg, err := dataStore.SaveMessage(clientMsgID, sender.Email, recipient.ID, "Hello idempotency", "", "", "", "")
+	msg, err := dataStore.SaveMessage(clientMsgID, sender.Email, recipient.ID, "Hello idempotency", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("SaveMessage failed: %v", err)
 	}
