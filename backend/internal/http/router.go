@@ -591,6 +591,24 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 		}
 		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
 	})
+	group.POST("/:id/messages/:messageId/reactions", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		emoji, ok := reactionEmoji(c)
+		if !ok {
+			return
+		}
+		message, reactions, targets, err := dataStore.ToggleGroupMessageReaction(c.Param("id"), c.Param("messageId"), authUser.ID, emoji)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		payload, _ := json.Marshal(gin.H{"messageId": message.ID, "groupId": message.GroupID, "messageType": "group", "reactions": reactions})
+		hub.Broadcast(realtime.Event{Type: "message.reaction", ConversationID: message.GroupID, UserID: authUser.ID, TargetUserIDs: targets, Payload: payload})
+		c.JSON(http.StatusOK, gin.H{"messageId": message.ID, "groupId": message.GroupID, "reactions": reactions})
+	})
 }
 
 func publicGroupSummary(group store.GroupSummary) gin.H {
@@ -620,6 +638,7 @@ func publicGroupMessage(message store.GroupMessage) gin.H {
 	if message.AttachmentName != "" {
 		result["attachment"] = gin.H{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}
 	}
+	result["reactions"] = message.Reactions
 	return result
 }
 
@@ -1042,7 +1061,42 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		})
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	group.POST("/reactions/:id", accepted("react to message"))
+	group.POST("/reactions/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		emoji, ok := reactionEmoji(c)
+		if !ok {
+			return
+		}
+		message, reactions, targets, err := dataStore.ToggleMessageReaction(c.Param("id"), authUser.ID, emoji)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		payload, _ := json.Marshal(gin.H{"messageId": message.ID, "conversationId": message.ConversationID, "messageType": "direct", "reactions": reactions})
+		hub.Broadcast(realtime.Event{Type: "message.reaction", ConversationID: message.ConversationID, UserID: authUser.ID, TargetUserIDs: targets, Payload: payload})
+		c.JSON(http.StatusOK, gin.H{"messageId": message.ID, "conversationId": message.ConversationID, "reactions": reactions})
+	})
+}
+
+func reactionEmoji(c *gin.Context) (string, bool) {
+	var body struct {
+		Emoji string `json:"emoji"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return "", false
+	}
+	emoji := strings.TrimSpace(body.Emoji)
+	switch emoji {
+	case "👍", "❤️", "😂", "😮", "😢", "🙏":
+		return emoji, true
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported reaction"})
+		return "", false
+	}
 }
 
 func publicMessage(message store.Message, viewerEmail string) gin.H {
@@ -1065,6 +1119,7 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 			"url":  message.AttachmentURL,
 		}
 	}
+	result["reactions"] = message.Reactions
 	return result
 }
 

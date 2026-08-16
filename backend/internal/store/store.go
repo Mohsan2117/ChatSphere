@@ -44,6 +44,7 @@ type dataFile struct {
 	Groups        []Group                   `json:"groups,omitempty"`
 	GroupMembers  []GroupMember             `json:"groupMembers,omitempty"`
 	GroupMessages []GroupMessage            `json:"groupMessages,omitempty"`
+	Reactions     []MessageReaction         `json:"messageReactions,omitempty"`
 }
 
 type User struct {
@@ -59,18 +60,19 @@ type User struct {
 }
 
 type Message struct {
-	ID             string     `json:"id"`
-	ConversationID string     `json:"conversationId"`
-	SenderEmail    string     `json:"senderEmail"`
-	SenderID       string     `json:"senderId,omitempty"`
-	RecipientID    string     `json:"recipientId"`
-	Body           string     `json:"body"`
-	AttachmentName string     `json:"attachmentName,omitempty"`
-	AttachmentType string     `json:"attachmentType,omitempty"`
-	AttachmentKind string     `json:"attachmentKind,omitempty"`
-	AttachmentURL  string     `json:"attachmentUrl,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	ReadAt         *time.Time `json:"readAt,omitempty"`
+	ID             string            `json:"id"`
+	ConversationID string            `json:"conversationId"`
+	SenderEmail    string            `json:"senderEmail"`
+	SenderID       string            `json:"senderId,omitempty"`
+	RecipientID    string            `json:"recipientId"`
+	Body           string            `json:"body"`
+	AttachmentName string            `json:"attachmentName,omitempty"`
+	AttachmentType string            `json:"attachmentType,omitempty"`
+	AttachmentKind string            `json:"attachmentKind,omitempty"`
+	AttachmentURL  string            `json:"attachmentUrl,omitempty"`
+	CreatedAt      time.Time         `json:"createdAt"`
+	ReadAt         *time.Time        `json:"readAt,omitempty"`
+	Reactions      []ReactionSummary `json:"reactions,omitempty"`
 }
 
 type CallHistory struct {
@@ -131,16 +133,37 @@ type GroupMember struct {
 }
 
 type GroupMessage struct {
-	ID             string    `json:"id"`
-	GroupID        string    `json:"groupId"`
-	SenderID       string    `json:"senderId"`
-	SenderEmail    string    `json:"senderEmail"`
-	Body           string    `json:"body"`
-	AttachmentName string    `json:"attachmentName,omitempty"`
-	AttachmentType string    `json:"attachmentType,omitempty"`
-	AttachmentKind string    `json:"attachmentKind,omitempty"`
-	AttachmentURL  string    `json:"attachmentUrl,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID             string            `json:"id"`
+	GroupID        string            `json:"groupId"`
+	SenderID       string            `json:"senderId"`
+	SenderEmail    string            `json:"senderEmail"`
+	Body           string            `json:"body"`
+	AttachmentName string            `json:"attachmentName,omitempty"`
+	AttachmentType string            `json:"attachmentType,omitempty"`
+	AttachmentKind string            `json:"attachmentKind,omitempty"`
+	AttachmentURL  string            `json:"attachmentUrl,omitempty"`
+	CreatedAt      time.Time         `json:"createdAt"`
+	Reactions      []ReactionSummary `json:"reactions,omitempty"`
+}
+
+type MessageReaction struct {
+	MessageType string    `json:"messageType"`
+	MessageID   string    `json:"messageId"`
+	UserID      string    `json:"userId"`
+	Emoji       string    `json:"emoji"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type ReactionUser struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type ReactionSummary struct {
+	Emoji       string         `json:"emoji"`
+	Count       int            `json:"count"`
+	ReactedByMe bool           `json:"reactedByMe"`
+	Users       []ReactionUser `json:"users"`
 }
 
 type GroupMemberView struct {
@@ -1034,7 +1057,10 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 		}
 		messages = append([]Message{message}, messages...)
 	}
-	return messages, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return s.withMessageReactions(messages, user.ID), nil
 }
 
 func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error) {
@@ -1080,7 +1106,10 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 		}
 		messages = append([]Message{message}, messages...)
 	}
-	return messages, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return s.withMessageReactions(messages, user.ID), nil
 }
 
 func (s *Store) MarkConversationRead(userEmail, otherUserID string) error {
@@ -1318,6 +1347,15 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_url mediumtext not null,
 				created_at datetime not null default current_timestamp
 			)`,
+			`
+			create table if not exists message_reactions (
+				message_type varchar(16) not null,
+				message_id varchar(64) not null,
+				user_id varchar(64) not null,
+				emoji varchar(16) not null,
+				created_at datetime not null default current_timestamp,
+				primary key (message_type, message_id, user_id)
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -1387,6 +1425,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `create index idx_attachments_owner on attachments (owner_id)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_call_history_caller on call_history(caller_id)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_call_history_recipient on call_history(recipient_id)`)
+		_, _ = s.my.ExecContext(ctx, `create index idx_message_reactions_message on message_reactions (message_type, message_id)`)
 		return nil
 	}
 	_, err := s.db.Exec(ctx, `
@@ -1509,6 +1548,15 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at timestamptz not null default now()
 		);
 		create index if not exists group_messages_group_created on group_messages(group_id, created_at);
+		create table if not exists message_reactions (
+			message_type text not null,
+			message_id text not null,
+			user_id text not null,
+			emoji text not null,
+			created_at timestamptz not null default now(),
+			primary key (message_type, message_id, user_id)
+		);
+		create index if not exists idx_message_reactions_message on message_reactions(message_type, message_id);
 	`)
 	if err != nil {
 		return err
@@ -1746,6 +1794,7 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 }
 
 func (s *Store) MessageByID(id string) (Message, error) {
+	id = strings.TrimSpace(id)
 	query := `
 		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.created_at, now()), m.read_at
 		from messages m
@@ -1757,8 +1806,275 @@ func (s *Store) MessageByID(id string) (Message, error) {
 		err := s.db.QueryRow(context.Background(), fmt.Sprintf(query, "$1"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
 		return message, err
 	}
-	err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
-	return message, err
+	if s.my != nil {
+		err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt, &message.ReadAt)
+		return message, err
+	}
+	return Message{}, errors.New("database is not configured")
+}
+
+func (s *Store) ToggleMessageReaction(messageID, userID, emoji string) (Message, []ReactionSummary, []string, error) {
+	message, err := s.MessageByID(messageID)
+	if err != nil {
+		return Message{}, nil, nil, err
+	}
+	user, err := s.UserByID(userID)
+	if err != nil {
+		return Message{}, nil, nil, err
+	}
+	if message.SenderID != user.ID && message.RecipientID != user.ID && !strings.EqualFold(message.SenderEmail, user.Email) {
+		return Message{}, nil, nil, errors.New("message not found")
+	}
+	if err := s.toggleReaction("direct", message.ID, user.ID, emoji); err != nil {
+		return Message{}, nil, nil, err
+	}
+	summaries, err := s.reactionSummaries("direct", []string{message.ID}, user.ID)
+	if err != nil {
+		return Message{}, nil, nil, err
+	}
+	return message, summaries[message.ID], []string{message.SenderID, message.RecipientID}, nil
+}
+
+func (s *Store) ToggleGroupMessageReaction(groupID, messageID, userID, emoji string) (GroupMessage, []ReactionSummary, []string, error) {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return GroupMessage{}, nil, nil, errors.New("group membership required")
+	}
+	message, err := s.groupMessageByID(groupID, messageID)
+	if err != nil {
+		return GroupMessage{}, nil, nil, err
+	}
+	if err := s.toggleReaction("group", message.ID, userID, emoji); err != nil {
+		return GroupMessage{}, nil, nil, err
+	}
+	summaries, err := s.reactionSummaries("group", []string{message.ID}, userID)
+	if err != nil {
+		return GroupMessage{}, nil, nil, err
+	}
+	details, err := s.GetGroupDetails(groupID, userID)
+	if err != nil {
+		return GroupMessage{}, nil, nil, err
+	}
+	targets := make([]string, 0, len(details.Members))
+	for _, member := range details.Members {
+		targets = append(targets, member.UserID)
+	}
+	return message, summaries[message.ID], targets, nil
+}
+
+func (s *Store) toggleReaction(messageType, messageID, userID, emoji string) error {
+	messageType = strings.TrimSpace(messageType)
+	messageID = strings.TrimSpace(messageID)
+	userID = strings.TrimSpace(userID)
+	emoji = strings.TrimSpace(emoji)
+	if messageID == "" || userID == "" || emoji == "" {
+		return errors.New("reaction is required")
+	}
+	now := time.Now().UTC()
+	if s.db != nil {
+		var existing string
+		err := s.db.QueryRow(context.Background(), `select emoji from message_reactions where message_type=$1 and message_id=$2 and user_id=$3`, messageType, messageID, userID).Scan(&existing)
+		if err == nil && existing == emoji {
+			_, err = s.db.Exec(context.Background(), `delete from message_reactions where message_type=$1 and message_id=$2 and user_id=$3`, messageType, messageID, userID)
+			return err
+		}
+		_, err = s.db.Exec(context.Background(), `
+			insert into message_reactions (message_type,message_id,user_id,emoji,created_at)
+			values ($1,$2,$3,$4,$5)
+			on conflict (message_type,message_id,user_id)
+			do update set emoji=excluded.emoji, created_at=excluded.created_at
+		`, messageType, messageID, userID, emoji, now)
+		return err
+	}
+	if s.my != nil {
+		var existing string
+		err := s.my.QueryRowContext(context.Background(), `select emoji from message_reactions where message_type=? and message_id=? and user_id=?`, messageType, messageID, userID).Scan(&existing)
+		if err == nil && existing == emoji {
+			_, err = s.my.ExecContext(context.Background(), `delete from message_reactions where message_type=? and message_id=? and user_id=?`, messageType, messageID, userID)
+			return err
+		}
+		_, err = s.my.ExecContext(context.Background(), `
+			insert into message_reactions (message_type,message_id,user_id,emoji,created_at)
+			values (?,?,?,?,?)
+			on duplicate key update emoji=values(emoji), created_at=values(created_at)
+		`, messageType, messageID, userID, emoji, now)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.data.Reactions {
+		reaction := s.data.Reactions[index]
+		if reaction.MessageType == messageType && reaction.MessageID == messageID && reaction.UserID == userID {
+			if reaction.Emoji == emoji {
+				s.data.Reactions = append(s.data.Reactions[:index], s.data.Reactions[index+1:]...)
+			} else {
+				s.data.Reactions[index].Emoji = emoji
+				s.data.Reactions[index].CreatedAt = now
+			}
+			return s.saveLocked()
+		}
+	}
+	s.data.Reactions = append(s.data.Reactions, MessageReaction{MessageType: messageType, MessageID: messageID, UserID: userID, Emoji: emoji, CreatedAt: now})
+	return s.saveLocked()
+}
+
+func (s *Store) withMessageReactions(messages []Message, viewerID string) []Message {
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	summaries, _ := s.reactionSummaries("direct", ids, viewerID)
+	for index := range messages {
+		messages[index].Reactions = summaries[messages[index].ID]
+	}
+	return messages
+}
+
+func (s *Store) withGroupMessageReactions(messages []GroupMessage, viewerID string) []GroupMessage {
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	summaries, _ := s.reactionSummaries("group", ids, viewerID)
+	for index := range messages {
+		messages[index].Reactions = summaries[messages[index].ID]
+	}
+	return messages
+}
+
+func (s *Store) reactionSummaries(messageType string, messageIDs []string, viewerID string) (map[string][]ReactionSummary, error) {
+	result := make(map[string][]ReactionSummary, len(messageIDs))
+	for _, id := range messageIDs {
+		result[id] = []ReactionSummary{}
+	}
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+	type reactionRow struct {
+		MessageID string
+		UserID    string
+		Emoji     string
+		Name      string
+	}
+	rows := []reactionRow{}
+	for _, messageID := range messageIDs {
+		if s.db != nil {
+			dbRows, err := s.db.Query(context.Background(), `
+				select r.message_id, r.user_id, r.emoji, trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,''))
+				from message_reactions r
+				left join app_users u on u.id=r.user_id
+				where r.message_type=$1 and r.message_id=$2
+				order by r.created_at asc
+			`, messageType, messageID)
+			if err != nil {
+				return result, err
+			}
+			for dbRows.Next() {
+				var row reactionRow
+				if err := dbRows.Scan(&row.MessageID, &row.UserID, &row.Emoji, &row.Name); err != nil {
+					dbRows.Close()
+					return result, err
+				}
+				rows = append(rows, row)
+			}
+			if err := dbRows.Err(); err != nil {
+				dbRows.Close()
+				return result, err
+			}
+			dbRows.Close()
+			continue
+		}
+		if s.my != nil {
+			dbRows, err := s.my.QueryContext(context.Background(), `
+				select r.message_id, r.user_id, r.emoji, trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,'')))
+				from message_reactions r
+				left join app_users u on u.id=r.user_id
+				where r.message_type=? and r.message_id=?
+				order by r.created_at asc
+			`, messageType, messageID)
+			if err != nil {
+				return result, err
+			}
+			for dbRows.Next() {
+				var row reactionRow
+				if err := dbRows.Scan(&row.MessageID, &row.UserID, &row.Emoji, &row.Name); err != nil {
+					dbRows.Close()
+					return result, err
+				}
+				rows = append(rows, row)
+			}
+			if err := dbRows.Err(); err != nil {
+				dbRows.Close()
+				return result, err
+			}
+			_ = dbRows.Close()
+			continue
+		}
+		s.mu.Lock()
+		for _, reaction := range s.data.Reactions {
+			if reaction.MessageType == messageType && reaction.MessageID == messageID {
+				name := ""
+				for _, user := range s.data.Users {
+					if user.ID == reaction.UserID {
+						name = strings.TrimSpace(user.FirstName + " " + user.LastName)
+						if name == "" {
+							name = user.Email
+						}
+						break
+					}
+				}
+				rows = append(rows, reactionRow{MessageID: reaction.MessageID, UserID: reaction.UserID, Emoji: reaction.Emoji, Name: name})
+			}
+		}
+		s.mu.Unlock()
+	}
+	grouped := map[string]map[string]*ReactionSummary{}
+	for _, row := range rows {
+		if row.Name == "" {
+			row.Name = "Unknown user"
+		}
+		if grouped[row.MessageID] == nil {
+			grouped[row.MessageID] = map[string]*ReactionSummary{}
+		}
+		summary := grouped[row.MessageID][row.Emoji]
+		if summary == nil {
+			grouped[row.MessageID][row.Emoji] = &ReactionSummary{Emoji: row.Emoji, Users: []ReactionUser{}}
+			summary = grouped[row.MessageID][row.Emoji]
+		}
+		summary.Count++
+		if row.UserID == viewerID {
+			summary.ReactedByMe = true
+		}
+		summary.Users = append(summary.Users, ReactionUser{ID: row.UserID, Name: row.Name})
+	}
+	for _, messageID := range messageIDs {
+		for _, summary := range grouped[messageID] {
+			result[messageID] = append(result[messageID], *summary)
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) groupMessageByID(groupID, messageID string) (GroupMessage, error) {
+	groupID = strings.TrimSpace(groupID)
+	messageID = strings.TrimSpace(messageID)
+	if s.db != nil {
+		var message GroupMessage
+		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=$1 and id=$2`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		return message, err
+	}
+	if s.my != nil {
+		var message GroupMessage
+		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? and id=?`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.CreatedAt)
+		return message, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, message := range s.data.GroupMessages {
+		if message.GroupID == groupID && message.ID == messageID {
+			return message, nil
+		}
+	}
+	return GroupMessage{}, errors.New("message not found")
 }
 
 // AICountToday returns the number of AI requests the user has already made
@@ -2908,7 +3224,10 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 			result = append(result, message)
 		}
 		reverseGroupMessages(result)
-		return result, rows.Err()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return s.withGroupMessageReactions(result, userID), nil
 	}
 	if s.my != nil {
 		rows, err := s.my.QueryContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,created_at from group_messages where group_id=? order by created_at desc,id desc limit ?`, groupID, limit)
@@ -2925,17 +3244,21 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 			result = append(result, message)
 		}
 		reverseGroupMessages(result)
-		return result, rows.Err()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return s.withGroupMessageReactions(result, userID), nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var result []GroupMessage
+	s.mu.Lock()
 	for i := len(s.data.GroupMessages) - 1; i >= 0 && len(result) < limit; i-- {
 		if s.data.GroupMessages[i].GroupID == groupID {
 			result = append(result, s.data.GroupMessages[i])
 		}
 	}
-	return result, nil
+	s.mu.Unlock()
+	reverseGroupMessages(result)
+	return s.withGroupMessageReactions(result, userID), nil
 }
 
 func reverseGroupMessages(messages []GroupMessage) {

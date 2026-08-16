@@ -37,10 +37,20 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	hamza := createTestUser(t, router, "hamza-"+suffix+"@example.com", "Hamza", "Tester")
 	mohsin := createTestUser(t, router, "mohsin-"+suffix+"@example.com", "Mohsin", "Tester")
 
-	postJSON(t, router, http.MethodPost, "/api/v1/messages", ali.Token, map[string]any{
+	sendResp := requestJSON(t, router, http.MethodPost, "/api/v1/messages", ali.Token, map[string]any{
 		"recipientId": hamza.ID,
 		"body":        "Private message from Ali to Hamza",
 	}, http.StatusOK)
+	var sent struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(sendResp.Body.Bytes(), &sent); err != nil {
+		t.Fatalf("decode sent message: %v", err)
+	}
+	messageID, _ := sent.Message["id"].(string)
+	if messageID == "" {
+		t.Fatalf("sent message has no id: %s", sendResp.Body.String())
+	}
 
 	aliInbox := getMessages(t, router, "/api/v1/messages/inbox", ali.Token)
 	if len(aliInbox) == 0 {
@@ -50,6 +60,27 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	hamzaInbox := getMessages(t, router, "/api/v1/messages/inbox", hamza.Token)
 	if len(hamzaInbox) == 0 {
 		t.Fatal("expected recipient inbox to include received message")
+	}
+	reactions := decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+messageID, hamza.Token, map[string]any{"emoji": "❤️"}, http.StatusOK))
+	assertReaction(t, reactions, "❤️", 1, true)
+	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+messageID, hamza.Token, map[string]any{"emoji": "😂"}, http.StatusOK))
+	assertReaction(t, reactions, "😂", 1, true)
+	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+messageID, hamza.Token, map[string]any{"emoji": "😂"}, http.StatusOK))
+	if len(reactions) != 0 {
+		t.Fatalf("same emoji should toggle off reaction, got %+v", reactions)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+messageID, mohsin.Token, map[string]any{"emoji": "🙏"}, http.StatusNotFound)
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+messageID, hamza.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
+	readback := getMessages(t, router, "/api/v1/messages/"+ali.ID, hamza.Token)
+	foundReaction := false
+	for _, message := range readback {
+		if message["id"] == messageID {
+			foundReaction = len(reactionsFromMap(message)) == 1
+			break
+		}
+	}
+	if !foundReaction {
+		t.Fatalf("expected direct message reactions in readback: %+v", readback)
 	}
 
 	mohsinInbox := getMessages(t, router, "/api/v1/messages/inbox", mohsin.Token)
@@ -204,6 +235,7 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	owner := createTestUser(t, router, "owner-group-"+suffix+"@example.com", "Owner", "Group")
 	member := createTestUser(t, router, "member-group-"+suffix+"@example.com", "Member", "Group")
 	outsider := createTestUser(t, router, "outsider-group-"+suffix+"@example.com", "Outside", "Group")
+	stranger := createTestUser(t, router, "stranger-group-"+suffix+"@example.com", "Stranger", "Group")
 
 	var created struct {
 		Group struct {
@@ -249,8 +281,39 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/admins/"+member.ID, member.Token, map[string]any{}, http.StatusForbidden)
 	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/admins/"+member.ID, owner.Token, map[string]any{}, http.StatusOK)
 	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/members/"+owner.ID, member.Token, map[string]any{}, http.StatusForbidden)
-	postJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", owner.Token, map[string]any{"body": "Welcome to the group"}, http.StatusOK)
+	groupMessageResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", owner.Token, map[string]any{"body": "Welcome to the group"}, http.StatusOK)
+	var groupMessagePayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupMessageResp.Body.Bytes(), &groupMessagePayload); err != nil {
+		t.Fatalf("decode group message: %v", err)
+	}
+	groupMessageID, _ := groupMessagePayload.Message["id"].(string)
+	if groupMessageID == "" {
+		t.Fatalf("group message has no id: %s", groupMessageResp.Body.String())
+	}
+	reactions := decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "❤️"}, http.StatusOK))
+	assertReaction(t, reactions, "❤️", 1, true)
+	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "👍"}, http.StatusOK))
+	assertReaction(t, reactions, "👍", 1, true)
+	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "👍"}, http.StatusOK))
+	if len(reactions) != 0 {
+		t.Fatalf("same group emoji should toggle off reaction, got %+v", reactions)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", stranger.Token, map[string]any{"emoji": "🙏"}, http.StatusForbidden)
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
 	getGroup(member, "/api/v1/groups/"+groupID+"/messages", http.StatusOK)
+	groupReadback := getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", member.Token)
+	foundReaction := false
+	for _, message := range groupReadback {
+		if message["id"] == groupMessageID {
+			foundReaction = len(reactionsFromMap(message)) == 1
+			break
+		}
+	}
+	if !foundReaction {
+		t.Fatalf("expected group message reactions in readback: %+v", groupReadback)
+	}
 	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/members/"+outsider.ID, owner.Token, map[string]any{}, http.StatusOK)
 	getGroup(outsider, "/api/v1/groups/"+groupID+"/messages", http.StatusForbidden)
 }
@@ -295,6 +358,11 @@ func createTestUser(t *testing.T, handler http.Handler, email, firstName, lastNa
 
 func postJSON(t *testing.T, handler http.Handler, method, path, token string, body map[string]any, wantStatus int) {
 	t.Helper()
+	requestJSON(t, handler, method, path, token, body, wantStatus)
+}
+
+func requestJSON(t *testing.T, handler http.Handler, method, path, token string, body map[string]any, wantStatus int) *httptest.ResponseRecorder {
+	t.Helper()
 	content, _ := json.Marshal(body)
 	req := httptest.NewRequest(method, path, bytes.NewReader(content))
 	req.Header.Set("Content-Type", "application/json")
@@ -306,6 +374,37 @@ func postJSON(t *testing.T, handler http.Handler, method, path, token string, bo
 	if resp.Code != wantStatus {
 		t.Fatalf("%s %s: status %d want %d body %s", method, path, resp.Code, wantStatus, resp.Body.String())
 	}
+	return resp
+}
+
+func decodeReactionResponse(t *testing.T, resp *httptest.ResponseRecorder) []map[string]any {
+	t.Helper()
+	var payload struct {
+		Reactions []map[string]any `json:"reactions"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode reaction response: %v", err)
+	}
+	return payload.Reactions
+}
+
+func assertReaction(t *testing.T, reactions []map[string]any, emoji string, count int, reactedByMe bool) {
+	t.Helper()
+	if len(reactions) != 1 {
+		t.Fatalf("reaction count = %d, want 1: %+v", len(reactions), reactions)
+	}
+	if reactions[0]["emoji"] != emoji || int(reactions[0]["count"].(float64)) != count || reactions[0]["reactedByMe"] != reactedByMe {
+		t.Fatalf("unexpected reaction summary: %+v", reactions[0])
+	}
+	users, _ := reactions[0]["users"].([]any)
+	if len(users) != count {
+		t.Fatalf("reaction users = %d, want %d: %+v", len(users), count, reactions[0])
+	}
+}
+
+func reactionsFromMap(message map[string]any) []any {
+	reactions, _ := message["reactions"].([]any)
+	return reactions
 }
 
 func getMessages(t *testing.T, handler http.Handler, path, token string) []map[string]any {

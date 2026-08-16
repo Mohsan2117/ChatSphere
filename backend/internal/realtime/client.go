@@ -542,6 +542,7 @@ func mapPublicMessage(message store.Message, viewerEmail string) map[string]any 
 		"recipientId": message.RecipientID,
 		"createdAt":   message.CreatedAt,
 		"readAt":      message.ReadAt,
+		"reactions":   message.Reactions,
 	}
 	if message.AttachmentName != "" {
 		result["attachment"] = map[string]any{
@@ -558,7 +559,8 @@ func mapPublicGroupMessage(message store.GroupMessage) map[string]any {
 	result := map[string]any{
 		"id": message.ID, "groupId": message.GroupID, "senderId": message.SenderID,
 		"senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt,
-		"time": message.CreatedAt.Format("3:04 PM"),
+		"time":      message.CreatedAt.Format("3:04 PM"),
+		"reactions": message.Reactions,
 	}
 	if message.AttachmentName != "" {
 		result["attachment"] = map[string]string{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}

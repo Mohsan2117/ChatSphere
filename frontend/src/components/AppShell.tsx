@@ -62,7 +62,11 @@ type ChatMessage = {
   localSeq?: number;
   status?: "uploading" | "sending" | "sent" | "failed";
   progressMsg?: string;
+  reactions?: ReactionSummary[];
 };
+type ReactionUser = { id: string; name: string };
+type ReactionSummary = { emoji: string; count: number; reactedByMe?: boolean; users?: ReactionUser[] };
+type ReactionTarget = { type: "direct" | "group"; messageId: string; groupId?: string };
 type AttachmentDraft = NonNullable<ChatMessage["attachment"]> & { file?: File };
 type ChatDraft = {
   text: string;
@@ -136,6 +140,7 @@ type GroupChatMessage = {
   time?: string;
   mine?: boolean;
   attachment?: NonNullable<ChatMessage["attachment"]>;
+  reactions?: ReactionSummary[];
 };
 
 type GroupMessageStore = Record<string, GroupChatMessage[]>;
@@ -165,6 +170,7 @@ const BUILT_IN_AVATARS = Array.from({ length: 10 }, (_, index) => {
   const id = `avatar-${String(index + 1).padStart(2, "0")}`;
   return { id, src: `/avatars/${id}.png` };
 });
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 function isBuiltInAvatar(value?: string) {
   return BUILT_IN_AVATARS.some((avatar) => avatar.src === value);
@@ -244,6 +250,8 @@ export function AppShell() {
   const [blockedChatIds, setBlockedChatIds] = useState<string[]>([]);
   const [isClearingChat, setIsClearingChat] = useState(false);
   const [chatNotice, setChatNotice] = useState("");
+  const [reactionPicker, setReactionPicker] = useState<ReactionTarget | null>(null);
+  const [reactionDetails, setReactionDetails] = useState<{ emoji: string; users: ReactionUser[] } | null>(null);
   const [appConfig, setAppConfig] = useState<AppConfig>({
     maxUploadSizeMb: 50,
     imageOptimizeThresholdBytes: 2097152,
@@ -271,6 +279,15 @@ export function AppShell() {
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
+
+  useEffect(() => {
+    if (!reactionPicker) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement).closest("[data-reaction-picker]")) setReactionPicker(null);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [reactionPicker]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -758,7 +775,7 @@ export function AppShell() {
           type?: string;
           conversationId?: string;
           userId?: string;
-          payload?: ChatMessage & { userId?: string; online?: boolean; lastSeenAt?: string; client_message_id?: string; message_id?: string; status?: string; error?: string };
+          payload?: ChatMessage & { userId?: string; online?: boolean; lastSeenAt?: string; client_message_id?: string; message_id?: string; status?: string; error?: string; messageId?: string; messageType?: "direct" | "group"; groupId?: string; reactions?: ReactionSummary[] };
         };
         if (data.type && data.type.startsWith("call_")) {
           handleSignalingEventRef.current(data);
@@ -842,6 +859,28 @@ export function AppShell() {
           }
           return;
         }
+        if (data.type === "message.reaction" && data.payload?.messageId) {
+          const payload = data.payload;
+          if (payload.messageType === "group" && payload.groupId) {
+            setGroupMessages((current) => ({
+              ...current,
+              [payload.groupId as string]: (current[payload.groupId as string] ?? []).map((message) =>
+                message.id === payload.messageId ? { ...message, reactions: payload.reactions ?? [] } : message
+              )
+            }));
+          } else {
+            setChatMessages((current) => {
+              const next = { ...current };
+              Object.keys(next).forEach((chatId) => {
+                next[chatId] = (next[chatId] ?? []).map((message) =>
+                  message.id === payload.messageId ? { ...message, reactions: payload.reactions ?? [] } : message
+                );
+              });
+              return next;
+            });
+          }
+          return;
+        }
         const groupPayload = data.payload as unknown as GroupChatMessage;
         if (data.type === "group.message" && groupPayload?.id && groupPayload?.groupId) {
           const payload = groupPayload;
@@ -875,6 +914,7 @@ export function AppShell() {
             attachment: data.payload?.attachment,
             createdAt: data.payload?.createdAt,
             readAt,
+            reactions: data.payload?.reactions ?? [],
             localSeq: getNextLocalSeq()
           };
           if (isOpen && authToken) {
@@ -1424,6 +1464,47 @@ export function AppShell() {
     setSelectedBuiltInAvatar(src);
     setAvatarFile(null);
     setAvatarPreview(src);
+  }
+
+  function applyReactionUpdate(target: ReactionTarget, reactions: ReactionSummary[]) {
+    if (target.type === "group" && target.groupId) {
+      setGroupMessages((current) => ({
+        ...current,
+        [target.groupId as string]: (current[target.groupId as string] ?? []).map((message) =>
+          message.id === target.messageId ? { ...message, reactions } : message
+        )
+      }));
+      return;
+    }
+    setChatMessages((current) => {
+      const next = { ...current };
+      Object.keys(next).forEach((chatId) => {
+        next[chatId] = (next[chatId] ?? []).map((message) =>
+          message.id === target.messageId ? { ...message, reactions } : message
+        );
+      });
+      return next;
+    });
+  }
+
+  async function reactToMessage(target: ReactionTarget, emoji: string) {
+    if (!authToken) return;
+    setReactionPicker(null);
+    const endpoint = target.type === "group" && target.groupId
+      ? `${apiUrl()}/api/v1/groups/${encodeURIComponent(target.groupId)}/messages/${encodeURIComponent(target.messageId)}/reactions`
+      : `${apiUrl()}/api/v1/messages/reactions/${encodeURIComponent(target.messageId)}`;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { ...authHeaders(authToken), "Content-Type": "application/json" },
+        body: JSON.stringify({ emoji })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not update reaction");
+      applyReactionUpdate(target, Array.isArray(data.reactions) ? data.reactions : []);
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not update reaction");
+    }
   }
 
   function handleFileAttachment(file: File) {
@@ -3512,8 +3593,12 @@ export function AppShell() {
               currentUserName={`${firstName} ${lastName}`.trim() || email}
               details={selectedGroupDetails}
               messages={groupMessages[selectedGroupId] ?? []}
+              reactionPicker={reactionPicker}
+              setReactionPicker={setReactionPicker}
               users={directoryChats}
               onBack={closeCurrentGroup}
+              onReact={reactToMessage}
+              onReactionDetails={setReactionDetails}
               onRefresh={async () => { await fetchGroups(); if (selectedGroupId) { const response = await fetch(`${apiUrl()}/api/v1/groups/${selectedGroupId}`, { headers: authHeaders(authToken) }); if (response.ok) { const data = await response.json(); setSelectedGroupDetails(data.group ?? null); } } }}
               onMessage={(message) => setGroupMessages((current) => { const existing = current[selectedGroupId] ?? []; return existing.some((item) => item.id === message.id) ? current : { ...current, [selectedGroupId]: [...existing, message] }; })}
               onLeave={() => { closeCurrentGroup(); fetchGroups(); }}
@@ -3595,48 +3680,51 @@ export function AppShell() {
                   <div className="space-y-4">
                     {visibleSelectedMessages.map((message) => (
                       <div key={message.id} className={`cs-message-in flex ${message.mine ? "justify-end" : "justify-start"}`}>
-                        {message.attachment && message.attachment.kind === "audio" ? (
-                          <VoiceMessageBubble message={message} authToken={authToken} selectedChat={selectedChat} onRetry={retryMessage} />
-                        ) : (
-                          <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
-                            {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
-                            {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
-                            <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
-                              {formatMessageTime(message)}
-                              {message.mine ? (
-                                <div className="flex items-center gap-1">
-                                  {message.status === "uploading" ? (
-                                    <span>{message.progressMsg || "Uploading..."}</span>
-                                  ) : message.status === "sending" ? (
-                                    <span>{message.progressMsg || "Sending..."}</span>
-                                  ) : message.status === "failed" ? (
-                                    <span className="text-[#b42318] flex items-center gap-1">
-                                      <span>{message.progressMsg || "⚠ Failed"}</span>
-                                      <button
-                                        onClick={() => retryMessage(message)}
-                                        className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
-                                        type="button"
-                                      >
-                                        Retry
-                                      </button>
-                                    </span>
-                                  ) : (
-                                    <>
-                                      <span>{message.readAt ? "Seen" : "Sent"}</span>
-                                      {message.readAt ? (
-                                        <CheckCheck size={15} className="text-[#00a884]" />
-                                      ) : selectedChat?.online ? (
-                                        <CheckCheck size={15} className="text-[#94a3b8]" />
-                                      ) : (
-                                        <Check size={15} className="text-[#94a3b8]" />
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              ) : null}
+                        <div className={`flex max-w-[72%] flex-col ${message.mine ? "items-end" : "items-start"}`}>
+                          {message.attachment && message.attachment.kind === "audio" ? (
+                            <VoiceMessageBubble message={message} authToken={authToken} selectedChat={selectedChat} onRetry={retryMessage} />
+                          ) : (
+                            <div className={`max-w-full rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+                              {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
+                              {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
+                              <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
+                                {formatMessageTime(message)}
+                                {message.mine ? (
+                                  <div className="flex items-center gap-1">
+                                    {message.status === "uploading" ? (
+                                      <span>{message.progressMsg || "Uploading..."}</span>
+                                    ) : message.status === "sending" ? (
+                                      <span>{message.progressMsg || "Sending..."}</span>
+                                    ) : message.status === "failed" ? (
+                                      <span className="text-[#b42318] flex items-center gap-1">
+                                        <span>{message.progressMsg || "⚠ Failed"}</span>
+                                        <button
+                                          onClick={() => retryMessage(message)}
+                                          className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
+                                          type="button"
+                                        >
+                                          Retry
+                                        </button>
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <span>{message.readAt ? "Seen" : "Sent"}</span>
+                                        {message.readAt ? (
+                                          <CheckCheck size={15} className="text-[#00a884]" />
+                                        ) : selectedChat?.online ? (
+                                          <CheckCheck size={15} className="text-[#94a3b8]" />
+                                        ) : (
+                                          <Check size={15} className="text-[#94a3b8]" />
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                          <MessageReactions align={message.mine ? "right" : "left"} onReact={reactToMessage} onShowDetails={setReactionDetails} pickerTarget={reactionPicker} reactions={message.reactions} setPickerTarget={setReactionPicker} target={{ type: "direct", messageId: message.id }} />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -4025,6 +4113,25 @@ export function AppShell() {
               Log out
             </button>
           </form>
+        </div>
+      ) : null}
+
+      {reactionDetails ? (
+        <div className="fixed inset-0 z-[75] grid place-items-center bg-[#0f172a]/35 px-4" onClick={() => setReactionDetails(null)}>
+          <div className="cs-scale-in w-full max-w-xs rounded-2xl border border-[#dce1e8] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-3xl">{reactionDetails.emoji}</div>
+                <h2 className="mt-2 text-base font-black">Reacted</h2>
+              </div>
+              <button aria-label="Close reactions" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={() => setReactionDetails(null)} type="button"><X size={18} /></button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {reactionDetails.users.length ? reactionDetails.users.map((user) => (
+                <div className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]" key={user.id}>{user.name}</div>
+              )) : <p className="text-sm font-semibold text-[#64748b]">No reactions yet.</p>}
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -4508,14 +4615,18 @@ type GroupChatPanelProps = {
   currentUserName: string;
   details: GroupDetails | null;
   messages: GroupChatMessage[];
+  reactionPicker: ReactionTarget | null;
+  setReactionPicker: (target: ReactionTarget | null) => void;
   users: ChatSeed[];
   onBack: () => void;
+  onReact: (target: ReactionTarget, emoji: string) => void;
+  onReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
   onRefresh: () => Promise<void>;
   onMessage: (message: GroupChatMessage) => void;
   onLeave: () => void;
 };
 
-function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, users, onBack, onRefresh, onMessage, onLeave }: GroupChatPanelProps) {
+function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, reactionPicker, setReactionPicker, users, onBack, onReact, onReactionDetails, onRefresh, onMessage, onLeave }: GroupChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState("");
@@ -4538,7 +4649,7 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <div className={`flex w-full min-w-0 items-start ${message.mine ? "justify-end" : "justify-start"}`} key={message.id}><div className={`min-w-0 max-w-[78%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>{!message.mine ? <div className="mb-1 text-xs font-black text-[#008f70]">{group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member"}</div> : null}{message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}{message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}<div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{formatGroupTime(message.createdAt || "")}</div></div></div>)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={send}>{file ? <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">{filePreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={filePreview} /> : <span>{file.name}</span>}<button className="text-[#64748b]" onClick={() => { setFile(null); setFilePreview(""); }} type="button">Remove</button></div> : null}<div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2"><label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white"><Paperclip size={20} /><input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value=""; }} type="file" /></label>{isRecording ? <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={stopRecording} type="button"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop</button> : <input className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Write a group message" value={draft} />}{!draft.trim() && !file && !isRecording ? <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={startRecording} type="button"><Mic size={20} /></button> : null}<button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!draft.trim() && !file)} type="submit"><Send size={17} /></button></div></form>{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <div className={`flex w-full min-w-0 items-start ${message.mine ? "justify-end" : "justify-start"}`} key={message.id}><div className={`flex min-w-0 max-w-[78%] flex-col ${message.mine ? "items-end" : "items-start"}`}><div className={`min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>{!message.mine ? <div className="mb-1 text-xs font-black text-[#008f70]">{group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member"}</div> : null}{message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}{message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}<div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{formatGroupTime(message.createdAt || "")}</div></div><MessageReactions align={message.mine ? "right" : "left"} onReact={onReact} onShowDetails={onReactionDetails} pickerTarget={reactionPicker} reactions={message.reactions} setPickerTarget={setReactionPicker} target={{ type: "group", groupId: group.id, messageId: message.id }} /></div></div>)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={send}>{file ? <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">{filePreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={filePreview} /> : <span>{file.name}</span>}<button className="text-[#64748b]" onClick={() => { setFile(null); setFilePreview(""); }} type="button">Remove</button></div> : null}<div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2"><label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white"><Paperclip size={20} /><input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value=""; }} type="file" /></label>{isRecording ? <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={stopRecording} type="button"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop</button> : <input className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Write a group message" value={draft} />}{!draft.trim() && !file && !isRecording ? <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={startRecording} type="button"><Mic size={20} /></button> : null}<button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!draft.trim() && !file)} type="submit"><Send size={17} /></button></div></form>{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
 }
 
 function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
@@ -5081,6 +5192,71 @@ function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) 
         chat.avatar
       )}
     </span>
+  );
+}
+
+function MessageReactions({
+  align,
+  onReact,
+  onShowDetails,
+  pickerTarget,
+  reactions,
+  setPickerTarget,
+  target
+}: {
+  align: "left" | "right";
+  onReact: (target: ReactionTarget, emoji: string) => void;
+  onShowDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
+  pickerTarget: ReactionTarget | null;
+  reactions?: ReactionSummary[];
+  setPickerTarget: (target: ReactionTarget | null) => void;
+  target: ReactionTarget;
+}) {
+  const isPickerOpen = pickerTarget?.type === target.type && pickerTarget.messageId === target.messageId && pickerTarget.groupId === target.groupId;
+  return (
+    <div className={`relative mt-1 flex flex-wrap items-center gap-1 ${align === "right" ? "justify-end" : "justify-start"}`} data-reaction-picker={isPickerOpen ? "true" : undefined}>
+      <button
+        aria-label="React to message"
+        className="grid h-7 w-7 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884] hover:text-[#00a884]"
+        onClick={(event) => {
+          event.stopPropagation();
+          setPickerTarget(isPickerOpen ? null : target);
+        }}
+        type="button"
+      >
+        <Smile size={14} />
+      </button>
+      {(reactions ?? []).map((reaction) => (
+        <button
+          className={`inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-black ${
+            reaction.reactedByMe ? "border-[#00a884]/40 bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] bg-white text-[#334155]"
+          }`}
+          key={reaction.emoji}
+          onClick={() => onShowDetails({ emoji: reaction.emoji, users: reaction.users ?? [] })}
+          type="button"
+        >
+          <span>{reaction.emoji}</span>
+          <span>{reaction.count}</span>
+        </button>
+      ))}
+      {isPickerOpen ? (
+        <div className={`absolute bottom-9 z-40 flex gap-1 rounded-full border border-[#dce1e8] bg-white p-1 shadow-[0_14px_35px_rgba(15,23,42,.16)] ${align === "right" ? "right-0" : "left-0"}`}>
+          {REACTION_EMOJIS.map((emoji) => (
+            <button
+              className="grid h-9 w-9 place-items-center rounded-full text-lg transition hover:bg-[#e7f8f2]"
+              key={emoji}
+              onClick={(event) => {
+                event.stopPropagation();
+                onReact(target, emoji);
+              }}
+              type="button"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
