@@ -125,6 +125,70 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	if attachment["name"] != "direct-note.txt" || attachment["url"] != "https://cdn.example.com/direct-note.txt" {
 		t.Fatalf("direct edit changed attachment metadata: %+v", attachmentEditPayload.Message)
 	}
+	privateDeleteResp := requestJSON(t, router, http.MethodPost, "/api/v1/messages", ali.Token, map[string]any{
+		"recipientId": hamza.ID,
+		"body":        "Direct delete for me",
+	}, http.StatusOK)
+	var privateDeletePayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(privateDeleteResp.Body.Bytes(), &privateDeletePayload); err != nil {
+		t.Fatalf("decode direct delete-for-me message: %v", err)
+	}
+	privateDeleteID, _ := privateDeletePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodDelete, "/api/v1/messages/"+privateDeleteID+"/me", hamza.Token, nil, http.StatusOK)
+	if foundMessage(getMessages(t, router, "/api/v1/messages/"+ali.ID, hamza.Token), privateDeleteID) != nil {
+		t.Fatal("direct delete for me should hide message from deleting recipient")
+	}
+	if foundMessage(getMessages(t, router, "/api/v1/messages/"+hamza.ID, ali.Token), privateDeleteID) == nil {
+		t.Fatal("direct delete for me should not hide message from other participant")
+	}
+	deleteEveryoneResp := requestJSON(t, router, http.MethodPost, "/api/v1/messages", ali.Token, map[string]any{
+		"recipientId": hamza.ID,
+		"body":        "Direct delete for everyone",
+		"attachment": map[string]any{
+			"name": "delete-direct.txt",
+			"type": "text/plain",
+			"kind": "file",
+			"url":  "https://cdn.example.com/delete-direct.txt",
+		},
+	}, http.StatusOK)
+	var deleteEveryonePayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(deleteEveryoneResp.Body.Bytes(), &deleteEveryonePayload); err != nil {
+		t.Fatalf("decode direct delete-everyone message: %v", err)
+	}
+	deleteEveryoneID, _ := deleteEveryonePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+deleteEveryoneID, hamza.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
+	requestJSON(t, router, http.MethodDelete, "/api/v1/messages/"+deleteEveryoneID+"/everyone", hamza.Token, nil, http.StatusNotFound)
+	deleteEveryoneResult := requestJSON(t, router, http.MethodDelete, "/api/v1/messages/"+deleteEveryoneID+"/everyone", ali.Token, nil, http.StatusOK)
+	var deletedDirect struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(deleteEveryoneResult.Body.Bytes(), &deletedDirect); err != nil {
+		t.Fatalf("decode direct tombstone: %v", err)
+	}
+	if deletedDirect.Message["deletedForEveryone"] != true || deletedDirect.Message["body"] != "" || deletedDirect.Message["attachment"] != nil || len(reactionsFromMap(deletedDirect.Message)) != 0 {
+		t.Fatalf("direct tombstone leaked content/reactions: %+v", deletedDirect.Message)
+	}
+	requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+deleteEveryoneID, ali.Token, map[string]any{"body": "Edit deleted message"}, http.StatusBadRequest)
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+deleteEveryoneID, hamza.Token, map[string]any{"emoji": "🙏"}, http.StatusNotFound)
+	replyToDeletedResp := requestJSON(t, router, http.MethodPost, "/api/v1/messages", hamza.Token, map[string]any{
+		"recipientId":      ali.ID,
+		"body":             "Replying to a deleted direct message",
+		"replyToMessageId": deleteEveryoneID,
+	}, http.StatusOK)
+	var replyToDeletedPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(replyToDeletedResp.Body.Bytes(), &replyToDeletedPayload); err != nil {
+		t.Fatalf("decode direct reply to deleted message: %v", err)
+	}
+	deletedReplyTo, _ := replyToDeletedPayload.Message["replyTo"].(map[string]any)
+	if deletedReplyTo["unavailable"] != true || deletedReplyTo["body"] != "" || deletedReplyTo["attachmentKind"] != nil {
+		t.Fatalf("direct reply leaked deleted original: %+v", replyToDeletedPayload.Message)
+	}
 
 	aliInbox := getMessages(t, router, "/api/v1/messages/inbox", ali.Token)
 	if len(aliInbox) == 0 {
@@ -438,6 +502,62 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	if groupAttachment["name"] != "group-note.txt" || groupAttachment["url"] != "https://cdn.example.com/group-note.txt" {
 		t.Fatalf("group edit changed attachment metadata: %+v", groupAttachmentEditPayload.Message)
 	}
+	groupPrivateDeleteResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", owner.Token, map[string]any{"body": "Group delete for me"}, http.StatusOK)
+	var groupPrivateDeletePayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupPrivateDeleteResp.Body.Bytes(), &groupPrivateDeletePayload); err != nil {
+		t.Fatalf("decode group delete-for-me message: %v", err)
+	}
+	groupPrivateDeleteID, _ := groupPrivateDeletePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupPrivateDeleteID+"/me", member.Token, nil, http.StatusOK)
+	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", member.Token), groupPrivateDeleteID) != nil {
+		t.Fatal("group delete for me should hide message from deleting member")
+	}
+	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", owner.Token), groupPrivateDeleteID) == nil {
+		t.Fatal("group delete for me should not hide message from other members")
+	}
+	groupDeleteEveryoneResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", member.Token, map[string]any{
+		"body": "Group delete for everyone",
+		"attachment": map[string]any{
+			"name": "delete-group.txt",
+			"type": "text/plain",
+			"kind": "file",
+			"url":  "https://cdn.example.com/delete-group.txt",
+		},
+	}, http.StatusOK)
+	var groupDeleteEveryonePayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupDeleteEveryoneResp.Body.Bytes(), &groupDeleteEveryonePayload); err != nil {
+		t.Fatalf("decode group delete-everyone message: %v", err)
+	}
+	groupDeleteEveryoneID, _ := groupDeleteEveryonePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/reactions", owner.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
+	requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/everyone", owner.Token, nil, http.StatusForbidden)
+	groupDeleteEveryoneResult := requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/everyone", member.Token, nil, http.StatusOK)
+	var deletedGroup struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupDeleteEveryoneResult.Body.Bytes(), &deletedGroup); err != nil {
+		t.Fatalf("decode group tombstone: %v", err)
+	}
+	if deletedGroup.Message["deletedForEveryone"] != true || deletedGroup.Message["body"] != "" || deletedGroup.Message["attachment"] != nil || len(reactionsFromMap(deletedGroup.Message)) != 0 {
+		t.Fatalf("group tombstone leaked content/reactions: %+v", deletedGroup.Message)
+	}
+	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID, member.Token, map[string]any{"body": "Edit deleted group message"}, http.StatusBadRequest)
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/reactions", owner.Token, map[string]any{"emoji": "🙏"}, http.StatusForbidden)
+	groupReplyToDeletedResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", owner.Token, map[string]any{"body": "Replying to a deleted group message", "replyToMessageId": groupDeleteEveryoneID}, http.StatusOK)
+	var groupReplyToDeletedPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupReplyToDeletedResp.Body.Bytes(), &groupReplyToDeletedPayload); err != nil {
+		t.Fatalf("decode group reply to deleted message: %v", err)
+	}
+	groupDeletedReplyTo, _ := groupReplyToDeletedPayload.Message["replyTo"].(map[string]any)
+	if groupDeletedReplyTo["unavailable"] != true || groupDeletedReplyTo["body"] != "" || groupDeletedReplyTo["attachmentKind"] != nil {
+		t.Fatalf("group reply leaked deleted original: %+v", groupReplyToDeletedPayload.Message)
+	}
 	reactions := decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "❤️"}, http.StatusOK))
 	assertReaction(t, reactions, "❤️", 1, true)
 	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "👍"}, http.StatusOK))
@@ -555,6 +675,15 @@ func assertReaction(t *testing.T, reactions []map[string]any, emoji string, coun
 func reactionsFromMap(message map[string]any) []any {
 	reactions, _ := message["reactions"].([]any)
 	return reactions
+}
+
+func foundMessage(messages []map[string]any, id string) map[string]any {
+	for _, message := range messages {
+		if message["id"] == id {
+			return message
+		}
+	}
+	return nil
 }
 
 func getMessages(t *testing.T, handler http.Handler, path, token string) []map[string]any {

@@ -627,6 +627,37 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 		}
 		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
 	})
+	group.DELETE("/:id/messages/:messageId/me", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.DeleteGroupMessageForMe(c.Param("id"), c.Param("messageId"), authUser.ID); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted-for-me"})
+	})
+	group.DELETE("/:id/messages/:messageId/everyone", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		message, err := dataStore.DeleteGroupMessageForEveryone(c.Param("id"), c.Param("messageId"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "message not found"})
+			return
+		}
+		if details, detailsErr := dataStore.GetGroupDetails(c.Param("id"), authUser.ID); detailsErr == nil {
+			targets := make([]string, 0, len(details.Members))
+			for _, member := range details.Members {
+				targets = append(targets, member.UserID)
+			}
+			payload, _ := json.Marshal(gin.H{"messageType": "group", "messageId": message.ID, "groupId": message.GroupID, "deletedForEveryoneAt": message.DeletedForEveryoneAt, "deletedForEveryoneBy": message.DeletedForEveryoneBy})
+			hub.Broadcast(realtime.Event{Type: "message.deleted", ConversationID: message.GroupID, UserID: authUser.ID, TargetUserIDs: targets, Payload: payload})
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
+	})
 	group.POST("/:id/messages/:messageId/reactions", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -671,6 +702,14 @@ func publicGroupDetails(group store.GroupDetails) gin.H {
 
 func publicGroupMessage(message store.GroupMessage) gin.H {
 	result := gin.H{"id": message.ID, "groupId": message.GroupID, "senderId": message.SenderID, "senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt, "time": message.CreatedAt.Format("3:04 PM")}
+	if message.DeletedForEveryoneAt != nil {
+		result["body"] = ""
+		result["deletedForEveryone"] = true
+		result["deletedForEveryoneAt"] = message.DeletedForEveryoneAt
+		result["deletedForEveryoneBy"] = message.DeletedForEveryoneBy
+		result["reactions"] = []store.ReactionSummary{}
+		return result
+	}
 	if message.AttachmentName != "" {
 		result["attachment"] = gin.H{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}
 	}
@@ -1051,6 +1090,31 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "cleared"})
 	})
+	group.DELETE("/:id/me", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		if err := dataStore.DeleteMessageForMe(authUser.Email, c.Param("id")); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted-for-me"})
+	})
+	group.DELETE("/:id/everyone", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		message, err := dataStore.DeleteMessageForEveryone(authUser.Email, c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		payload, _ := json.Marshal(gin.H{"messageType": "direct", "messageId": message.ID, "conversationId": message.ConversationID, "deletedForEveryoneAt": message.DeletedForEveryoneAt, "deletedForEveryoneBy": message.DeletedForEveryoneBy})
+		hub.Broadcast(realtime.Event{Type: "message.deleted", ConversationID: message.ConversationID, UserID: authUser.ID, TargetUserIDs: []string{message.SenderID, message.RecipientID}, Payload: payload})
+		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
+	})
 	group.DELETE("/:id", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -1163,6 +1227,14 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 		"recipientId": message.RecipientID,
 		"createdAt":   message.CreatedAt,
 		"readAt":      message.ReadAt,
+	}
+	if message.DeletedForEveryoneAt != nil {
+		result["body"] = ""
+		result["deletedForEveryone"] = true
+		result["deletedForEveryoneAt"] = message.DeletedForEveryoneAt
+		result["deletedForEveryoneBy"] = message.DeletedForEveryoneBy
+		result["reactions"] = []store.ReactionSummary{}
+		return result
 	}
 	if message.AttachmentName != "" {
 		result["attachment"] = gin.H{

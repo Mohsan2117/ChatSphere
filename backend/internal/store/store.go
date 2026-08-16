@@ -45,6 +45,7 @@ type dataFile struct {
 	GroupMembers  []GroupMember             `json:"groupMembers,omitempty"`
 	GroupMessages []GroupMessage            `json:"groupMessages,omitempty"`
 	Reactions     []MessageReaction         `json:"messageReactions,omitempty"`
+	Deletions     []MessageDeletion         `json:"messageDeletions,omitempty"`
 }
 
 type User struct {
@@ -60,22 +61,24 @@ type User struct {
 }
 
 type Message struct {
-	ID               string            `json:"id"`
-	ConversationID   string            `json:"conversationId"`
-	SenderEmail      string            `json:"senderEmail"`
-	SenderID         string            `json:"senderId,omitempty"`
-	RecipientID      string            `json:"recipientId"`
-	Body             string            `json:"body"`
-	AttachmentName   string            `json:"attachmentName,omitempty"`
-	AttachmentType   string            `json:"attachmentType,omitempty"`
-	AttachmentKind   string            `json:"attachmentKind,omitempty"`
-	AttachmentURL    string            `json:"attachmentUrl,omitempty"`
-	ReplyToMessageID string            `json:"replyToMessageId,omitempty"`
-	ReplyTo          *MessageReply     `json:"replyTo,omitempty"`
-	CreatedAt        time.Time         `json:"createdAt"`
-	EditedAt         *time.Time        `json:"editedAt,omitempty"`
-	ReadAt           *time.Time        `json:"readAt,omitempty"`
-	Reactions        []ReactionSummary `json:"reactions,omitempty"`
+	ID                   string            `json:"id"`
+	ConversationID       string            `json:"conversationId"`
+	SenderEmail          string            `json:"senderEmail"`
+	SenderID             string            `json:"senderId,omitempty"`
+	RecipientID          string            `json:"recipientId"`
+	Body                 string            `json:"body"`
+	AttachmentName       string            `json:"attachmentName,omitempty"`
+	AttachmentType       string            `json:"attachmentType,omitempty"`
+	AttachmentKind       string            `json:"attachmentKind,omitempty"`
+	AttachmentURL        string            `json:"attachmentUrl,omitempty"`
+	ReplyToMessageID     string            `json:"replyToMessageId,omitempty"`
+	ReplyTo              *MessageReply     `json:"replyTo,omitempty"`
+	CreatedAt            time.Time         `json:"createdAt"`
+	EditedAt             *time.Time        `json:"editedAt,omitempty"`
+	DeletedForEveryoneAt *time.Time        `json:"deletedForEveryoneAt,omitempty"`
+	DeletedForEveryoneBy string            `json:"deletedForEveryoneBy,omitempty"`
+	ReadAt               *time.Time        `json:"readAt,omitempty"`
+	Reactions            []ReactionSummary `json:"reactions,omitempty"`
 }
 
 type MessageReply struct {
@@ -84,6 +87,7 @@ type MessageReply struct {
 	SenderName     string `json:"senderName"`
 	Body           string `json:"body"`
 	AttachmentKind string `json:"attachmentKind,omitempty"`
+	Unavailable    bool   `json:"unavailable,omitempty"`
 }
 
 type CallHistory struct {
@@ -144,20 +148,22 @@ type GroupMember struct {
 }
 
 type GroupMessage struct {
-	ID               string            `json:"id"`
-	GroupID          string            `json:"groupId"`
-	SenderID         string            `json:"senderId"`
-	SenderEmail      string            `json:"senderEmail"`
-	Body             string            `json:"body"`
-	AttachmentName   string            `json:"attachmentName,omitempty"`
-	AttachmentType   string            `json:"attachmentType,omitempty"`
-	AttachmentKind   string            `json:"attachmentKind,omitempty"`
-	AttachmentURL    string            `json:"attachmentUrl,omitempty"`
-	ReplyToMessageID string            `json:"replyToMessageId,omitempty"`
-	ReplyTo          *MessageReply     `json:"replyTo,omitempty"`
-	CreatedAt        time.Time         `json:"createdAt"`
-	EditedAt         *time.Time        `json:"editedAt,omitempty"`
-	Reactions        []ReactionSummary `json:"reactions,omitempty"`
+	ID                   string            `json:"id"`
+	GroupID              string            `json:"groupId"`
+	SenderID             string            `json:"senderId"`
+	SenderEmail          string            `json:"senderEmail"`
+	Body                 string            `json:"body"`
+	AttachmentName       string            `json:"attachmentName,omitempty"`
+	AttachmentType       string            `json:"attachmentType,omitempty"`
+	AttachmentKind       string            `json:"attachmentKind,omitempty"`
+	AttachmentURL        string            `json:"attachmentUrl,omitempty"`
+	ReplyToMessageID     string            `json:"replyToMessageId,omitempty"`
+	ReplyTo              *MessageReply     `json:"replyTo,omitempty"`
+	CreatedAt            time.Time         `json:"createdAt"`
+	EditedAt             *time.Time        `json:"editedAt,omitempty"`
+	DeletedForEveryoneAt *time.Time        `json:"deletedForEveryoneAt,omitempty"`
+	DeletedForEveryoneBy string            `json:"deletedForEveryoneBy,omitempty"`
+	Reactions            []ReactionSummary `json:"reactions,omitempty"`
 }
 
 type MessageReaction struct {
@@ -166,6 +172,13 @@ type MessageReaction struct {
 	UserID      string    `json:"userId"`
 	Emoji       string    `json:"emoji"`
 	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type MessageDeletion struct {
+	MessageType string    `json:"messageType"`
+	MessageID   string    `json:"messageId"`
+	UserID      string    `json:"userId"`
+	DeletedAt   time.Time `json:"deletedAt"`
 }
 
 type ReactionUser struct {
@@ -879,7 +892,7 @@ func (s *Store) SaveMessage(clientMsgID, senderEmail, recipientID, body, attachm
 		CreatedAt:        time.Now().UTC(),
 	}
 	if message.ReplyToMessageID != "" {
-		reply, err := s.directReplyByID(message.ReplyToMessageID, message.ConversationID)
+		reply, err := s.directReplyByID(message.ReplyToMessageID, message.ConversationID, sender.ID)
 		if err != nil {
 			return Message{}, errors.New("reply message not found")
 		}
@@ -1045,24 +1058,30 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 		limit = 50
 	}
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.deleted_for_everyone_at, coalesce(m.deleted_for_everyone_by, ''), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
-		where coalesce(m.conversation_id, '') = %s
+		where (
+		   coalesce(m.conversation_id, '') = %s
 		   or (lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
 		   or (%s <> '' and lower(coalesce(m.sender_email, '')) = %s and coalesce(m.recipient_id, '') = %s)
 		   or (coalesce(m.sender_id, '') = %s and coalesce(m.recipient_id, '') = %s)
+		)
+		  and not exists (
+			select 1 from message_deletions md
+			where md.message_type = 'direct' and md.message_id = m.id and md.user_id = %s
+		  )
 		order by m.created_at desc, m.seq desc
 		limit %s
 	`
 	var rows messageRows
 	closeRows := func() {}
 	if s.db != nil {
-		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"), conversationID(user.ID, otherID), user.Email, otherID, otherEmail, otherEmail, user.ID, otherID, user.ID, limit)
+		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$10"), conversationID(user.ID, otherID), user.Email, otherID, otherEmail, otherEmail, user.ID, otherID, user.ID, user.ID, limit)
 		rows, err = pgRows, queryErr
 		closeRows = pgRows.Close
 	} else {
-		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?", "?", "?", "?", "?", "?", "?"), conversationID(user.ID, otherID), user.Email, otherID, otherEmail, otherEmail, user.ID, otherID, user.ID, limit)
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?", "?", "?", "?", "?", "?", "?", "?"), conversationID(user.ID, otherID), user.Email, otherID, otherEmail, otherEmail, user.ID, otherID, user.ID, user.ID, limit)
 		rows, err = sqlRows, queryErr
 		closeRows = func() { _ = sqlRows.Close() }
 	}
@@ -1074,7 +1093,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.ReadAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy, &message.ReadAt); err != nil {
 			return nil, err
 		}
 		messages = append([]Message{message}, messages...)
@@ -1082,7 +1101,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.withMessageReactions(s.withMessageReplies(messages), user.ID), nil
+	return s.withMessageReactions(s.withMessageReplies(messages, user.ID), user.ID), nil
 }
 
 func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error) {
@@ -1097,21 +1116,25 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 		limit = 200
 	}
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.deleted_for_everyone_at, coalesce(m.deleted_for_everyone_by, ''), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
-		where lower(coalesce(m.sender_email, '')) = %s or coalesce(m.recipient_id, '') = %s
+		where (lower(coalesce(m.sender_email, '')) = %s or coalesce(m.recipient_id, '') = %s)
+		  and not exists (
+			select 1 from message_deletions md
+			where md.message_type = 'direct' and md.message_id = m.id and md.user_id = %s
+		  )
 		order by m.created_at desc, m.seq desc
 		limit %s
 	`
 	var rows messageRows
 	closeRows := func() {}
 	if s.db != nil {
-		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID, limit)
+		pgRows, queryErr := s.db.Query(context.Background(), fmt.Sprintf(query, "$1", "$2", "$3", "$4"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID, user.ID, limit)
 		rows, err = pgRows, queryErr
 		closeRows = pgRows.Close
 	} else {
-		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID, limit)
+		sqlRows, queryErr := s.my.QueryContext(context.Background(), fmt.Sprintf(query, "?", "?", "?", "?"), strings.ToLower(strings.TrimSpace(userEmail)), user.ID, user.ID, limit)
 		rows, err = sqlRows, queryErr
 		closeRows = func() { _ = sqlRows.Close() }
 	}
@@ -1123,7 +1146,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 	messages := []Message{}
 	for rows.Next() {
 		var message Message
-		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.ReadAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy, &message.ReadAt); err != nil {
 			return nil, err
 		}
 		messages = append([]Message{message}, messages...)
@@ -1131,7 +1154,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.withMessageReactions(s.withMessageReplies(messages), user.ID), nil
+	return s.withMessageReactions(s.withMessageReplies(messages, user.ID), user.ID), nil
 }
 
 func (s *Store) MarkConversationRead(userEmail, otherUserID string) error {
@@ -1172,6 +1195,9 @@ func (s *Store) UpdateMessage(userEmail, id, body string) (Message, error) {
 	}
 	if !strings.EqualFold(existing.SenderEmail, email) {
 		return Message{}, errors.New("message not found")
+	}
+	if existing.DeletedForEveryoneAt != nil {
+		return Message{}, errors.New("message is not editable")
 	}
 	if strings.TrimSpace(existing.Body) == "" {
 		return Message{}, errors.New("message is not editable")
@@ -1214,6 +1240,78 @@ func (s *Store) DeleteMessage(userEmail, id string) error {
 		return errors.New("message not found")
 	}
 	return nil
+}
+
+func (s *Store) DeleteMessageForMe(userEmail, id string) error {
+	if s.db == nil && s.my == nil {
+		return errors.New("database is not configured")
+	}
+	user, err := s.UserByEmail(userEmail)
+	if err != nil {
+		return err
+	}
+	message, err := s.MessageByID(id)
+	if err != nil {
+		return errors.New("message not found")
+	}
+	if message.SenderID != user.ID && message.RecipientID != user.ID {
+		return errors.New("message not found")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			insert into message_deletions (message_type,message_id,user_id,deleted_at)
+			values ('direct',$1,$2,now())
+			on conflict (message_type,message_id,user_id) do update set deleted_at=excluded.deleted_at
+		`, id, user.ID)
+		return err
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		insert into message_deletions (message_type,message_id,user_id,deleted_at)
+		values ('direct',?,?,utc_timestamp())
+		on duplicate key update deleted_at=values(deleted_at)
+	`, id, user.ID)
+	return err
+}
+
+func (s *Store) DeleteMessageForEveryone(userEmail, id string) (Message, error) {
+	if s.db == nil && s.my == nil {
+		return Message{}, errors.New("database is not configured")
+	}
+	user, err := s.UserByEmail(userEmail)
+	if err != nil {
+		return Message{}, err
+	}
+	message, err := s.MessageByID(id)
+	if err != nil {
+		return Message{}, errors.New("message not found")
+	}
+	if message.SenderID != user.ID {
+		return Message{}, errors.New("message not found")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			update messages
+			set body='', attachment_name='', attachment_type='', attachment_kind='', attachment_url='', edited_at=null,
+			    deleted_for_everyone_at=coalesce(deleted_for_everyone_at, now()), deleted_for_everyone_by=$2
+			where id=$1 and sender_id=$2
+		`, id, user.ID)
+		if err != nil {
+			return Message{}, err
+		}
+		_, _ = s.db.Exec(context.Background(), `delete from message_reactions where message_type='direct' and message_id=$1`, id)
+		return s.MessageByID(id)
+	}
+	_, err = s.my.ExecContext(context.Background(), `
+		update messages
+		set body='', attachment_name='', attachment_type='', attachment_kind='', attachment_url='', edited_at=null,
+		    deleted_for_everyone_at=coalesce(deleted_for_everyone_at, utc_timestamp()), deleted_for_everyone_by=?
+		where id=? and sender_id=?
+	`, user.ID, id, user.ID)
+	if err != nil {
+		return Message{}, err
+	}
+	_, _ = s.my.ExecContext(context.Background(), `delete from message_reactions where message_type='direct' and message_id=?`, id)
+	return s.MessageByID(id)
 }
 
 func (s *Store) ClearConversation(userEmail, otherUserID string) error {
@@ -1285,6 +1383,8 @@ func (s *Store) migrate(ctx context.Context) error {
 				reply_to_message_id varchar(64) not null default '',
 				read_at datetime null,
 				edited_at datetime null,
+				deleted_for_everyone_at datetime null,
+				deleted_for_everyone_by varchar(64) not null default '',
 				created_at datetime not null default current_timestamp
 			)`,
 			`
@@ -1385,6 +1485,8 @@ func (s *Store) migrate(ctx context.Context) error {
 				attachment_url mediumtext not null,
 				reply_to_message_id varchar(64) not null default '',
 				edited_at datetime null,
+				deleted_for_everyone_at datetime null,
+				deleted_for_everyone_by varchar(64) not null default '',
 				created_at datetime not null default current_timestamp
 			)`,
 			`
@@ -1394,6 +1496,14 @@ func (s *Store) migrate(ctx context.Context) error {
 				user_id varchar(64) not null,
 				emoji varchar(16) not null,
 				created_at datetime not null default current_timestamp,
+				primary key (message_type, message_id, user_id)
+			)`,
+			`
+			create table if not exists message_deletions (
+				message_type varchar(16) not null,
+				message_id varchar(64) not null,
+				user_id varchar(64) not null,
+				deleted_at datetime not null default current_timestamp,
 				primary key (message_type, message_id, user_id)
 			)`,
 		}
@@ -1422,9 +1532,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column reply_to_message_id varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column read_at datetime null`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column edited_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column deleted_for_everyone_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table messages add column deleted_for_everyone_by varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table messages add column created_at datetime not null default current_timestamp`)
 		_, _ = s.my.ExecContext(ctx, `alter table group_messages add column reply_to_message_id varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table group_messages add column edited_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table group_messages add column deleted_for_everyone_at datetime null`)
+		_, _ = s.my.ExecContext(ctx, `alter table group_messages add column deleted_for_everyone_by varchar(64) not null default ''`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column size_bytes bigint not null default 0`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_url text null`)
 		_, _ = s.my.ExecContext(ctx, `alter table attachments add column cloudinary_public_id varchar(255) null`)
@@ -1500,6 +1614,8 @@ func (s *Store) migrate(ctx context.Context) error {
 			reply_to_message_id text not null default '',
 			read_at timestamptz null,
 			edited_at timestamptz null,
+			deleted_for_everyone_at timestamptz null,
+			deleted_for_everyone_by text not null default '',
 			created_at timestamptz not null default now()
 		);
 		create index if not exists idx_messages_conversation_created on messages (conversation_id, created_at);
@@ -1594,6 +1710,8 @@ func (s *Store) migrate(ctx context.Context) error {
 			attachment_url text not null default '',
 			reply_to_message_id text not null default '',
 			edited_at timestamptz null,
+			deleted_for_everyone_at timestamptz null,
+			deleted_for_everyone_by text not null default '',
 			created_at timestamptz not null default now()
 		);
 		create index if not exists group_messages_group_created on group_messages(group_id, created_at);
@@ -1606,6 +1724,13 @@ func (s *Store) migrate(ctx context.Context) error {
 			primary key (message_type, message_id, user_id)
 		);
 		create index if not exists idx_message_reactions_message on message_reactions(message_type, message_id);
+		create table if not exists message_deletions (
+			message_type text not null,
+			message_id text not null,
+			user_id text not null,
+			deleted_at timestamptz not null default now(),
+			primary key (message_type, message_id, user_id)
+		);
 	`)
 	if err != nil {
 		return err
@@ -1623,9 +1748,13 @@ func (s *Store) migrate(ctx context.Context) error {
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists attachment_kind text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists reply_to_message_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists edited_at timestamptz null`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists deleted_for_everyone_at timestamptz null`)
+	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists deleted_for_everyone_by text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table messages add column if not exists created_at timestamptz not null default now()`)
 	_, _ = s.db.Exec(ctx, `alter table group_messages add column if not exists reply_to_message_id text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table group_messages add column if not exists edited_at timestamptz null`)
+	_, _ = s.db.Exec(ctx, `alter table group_messages add column if not exists deleted_for_everyone_at timestamptz null`)
+	_, _ = s.db.Exec(ctx, `alter table group_messages add column if not exists deleted_for_everyone_by text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists first_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists last_name text not null default ''`)
 	_, _ = s.db.Exec(ctx, `alter table app_users add column if not exists password_hash text not null default ''`)
@@ -1850,23 +1979,23 @@ func (s *Store) searchUsersDB(query string, includeBlocked bool, limit int) ([]U
 func (s *Store) MessageByID(id string) (Message, error) {
 	id = strings.TrimSpace(id)
 	query := `
-		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.read_at
+		select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.deleted_for_everyone_at, coalesce(m.deleted_for_everyone_by, ''), m.read_at
 		from messages m
 		left join app_users u on u.email = m.sender_email
 		where m.id = %s
 	`
 	var message Message
 	if s.db != nil {
-		err := s.db.QueryRow(context.Background(), fmt.Sprintf(query, "$1"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.ReadAt)
+		err := s.db.QueryRow(context.Background(), fmt.Sprintf(query, "$1"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy, &message.ReadAt)
 		if err == nil {
-			message = s.withMessageReplies([]Message{message})[0]
+			message = s.withMessageReplies([]Message{message}, "")[0]
 		}
 		return message, err
 	}
 	if s.my != nil {
-		err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.ReadAt)
+		err := s.my.QueryRowContext(context.Background(), fmt.Sprintf(query, "?"), id).Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy, &message.ReadAt)
 		if err == nil {
-			message = s.withMessageReplies([]Message{message})[0]
+			message = s.withMessageReplies([]Message{message}, "")[0]
 		}
 		return message, err
 	}
@@ -1883,6 +2012,9 @@ func (s *Store) ToggleMessageReaction(messageID, userID, emoji string) (Message,
 		return Message{}, nil, nil, err
 	}
 	if message.SenderID != user.ID && message.RecipientID != user.ID && !strings.EqualFold(message.SenderEmail, user.Email) {
+		return Message{}, nil, nil, errors.New("message not found")
+	}
+	if message.DeletedForEveryoneAt != nil {
 		return Message{}, nil, nil, errors.New("message not found")
 	}
 	if err := s.toggleReaction("direct", message.ID, user.ID, emoji); err != nil {
@@ -1903,6 +2035,9 @@ func (s *Store) ToggleGroupMessageReaction(groupID, messageID, userID, emoji str
 	if err != nil {
 		return GroupMessage{}, nil, nil, err
 	}
+	if message.DeletedForEveryoneAt != nil {
+		return GroupMessage{}, nil, nil, errors.New("message not found")
+	}
 	if err := s.toggleReaction("group", message.ID, userID, emoji); err != nil {
 		return GroupMessage{}, nil, nil, err
 	}
@@ -1921,13 +2056,13 @@ func (s *Store) ToggleGroupMessageReaction(groupID, messageID, userID, emoji str
 	return message, summaries[message.ID], targets, nil
 }
 
-func (s *Store) withMessageReplies(messages []Message) []Message {
+func (s *Store) withMessageReplies(messages []Message, viewerID string) []Message {
 	for index := range messages {
 		replyID := strings.TrimSpace(messages[index].ReplyToMessageID)
 		if replyID == "" {
 			continue
 		}
-		reply, err := s.directReplyByID(replyID, messages[index].ConversationID)
+		reply, err := s.directReplyByID(replyID, messages[index].ConversationID, viewerID)
 		if err == nil {
 			messages[index].ReplyTo = reply
 		}
@@ -1935,7 +2070,7 @@ func (s *Store) withMessageReplies(messages []Message) []Message {
 	return messages
 }
 
-func (s *Store) directReplyByID(messageID, conversationID string) (*MessageReply, error) {
+func (s *Store) directReplyByID(messageID, conversationID, viewerID string) (*MessageReply, error) {
 	messageID = strings.TrimSpace(messageID)
 	conversationID = strings.TrimSpace(conversationID)
 	if messageID == "" || conversationID == "" {
@@ -1945,11 +2080,14 @@ func (s *Store) directReplyByID(messageID, conversationID string) (*MessageReply
 	var senderEmail string
 	if s.db != nil {
 		err := s.db.QueryRow(context.Background(), `
-			select m.id, coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), coalesce(m.sender_email, '')), coalesce(m.body, ''), coalesce(m.attachment_kind, ''), coalesce(m.sender_email, '')
+			select m.id, coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), coalesce(m.sender_email, '')),
+			       case when m.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=$3) then '' else coalesce(m.body, '') end,
+			       case when m.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=$3) then '' else coalesce(m.attachment_kind, '') end,
+			       coalesce(m.sender_email, ''), (m.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=$3))
 			from messages m
 			left join app_users u on u.email = m.sender_email
 			where m.id=$1 and coalesce(m.conversation_id, '')=$2
-		`, messageID, conversationID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &senderEmail)
+		`, messageID, conversationID, viewerID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &senderEmail, &reply.Unavailable)
 		if err != nil {
 			return nil, err
 		}
@@ -1957,11 +2095,14 @@ func (s *Store) directReplyByID(messageID, conversationID string) (*MessageReply
 	}
 	if s.my != nil {
 		err := s.my.QueryRowContext(context.Background(), `
-			select m.id, coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(nullif(trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,''))), ''), coalesce(m.sender_email, '')), coalesce(m.body, ''), coalesce(m.attachment_kind, ''), coalesce(m.sender_email, '')
+			select m.id, coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(nullif(trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,''))), ''), coalesce(m.sender_email, '')),
+			       case when m.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=?) then '' else coalesce(m.body, '') end,
+			       case when m.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=?) then '' else coalesce(m.attachment_kind, '') end,
+			       coalesce(m.sender_email, ''), (m.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=?))
 			from messages m
 			left join app_users u on u.email = m.sender_email
 			where m.id=? and coalesce(m.conversation_id, '')=?
-		`, messageID, conversationID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &senderEmail)
+		`, viewerID, viewerID, viewerID, messageID, conversationID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &senderEmail, &reply.Unavailable)
 		if err != nil {
 			return nil, err
 		}
@@ -2050,13 +2191,13 @@ func (s *Store) withGroupMessageReactions(messages []GroupMessage, viewerID stri
 	return messages
 }
 
-func (s *Store) withGroupMessageReplies(messages []GroupMessage) []GroupMessage {
+func (s *Store) withGroupMessageReplies(messages []GroupMessage, viewerID string) []GroupMessage {
 	for index := range messages {
 		replyID := strings.TrimSpace(messages[index].ReplyToMessageID)
 		if replyID == "" {
 			continue
 		}
-		reply, err := s.groupReplyByID(messages[index].GroupID, replyID)
+		reply, err := s.groupReplyByID(messages[index].GroupID, replyID, viewerID)
 		if err == nil {
 			messages[index].ReplyTo = reply
 		}
@@ -2064,7 +2205,7 @@ func (s *Store) withGroupMessageReplies(messages []GroupMessage) []GroupMessage 
 	return messages
 }
 
-func (s *Store) groupReplyByID(groupID, messageID string) (*MessageReply, error) {
+func (s *Store) groupReplyByID(groupID, messageID, viewerID string) (*MessageReply, error) {
 	groupID = strings.TrimSpace(groupID)
 	messageID = strings.TrimSpace(messageID)
 	if groupID == "" || messageID == "" {
@@ -2073,11 +2214,14 @@ func (s *Store) groupReplyByID(groupID, messageID string) (*MessageReply, error)
 	var reply MessageReply
 	if s.db != nil {
 		err := s.db.QueryRow(context.Background(), `
-			select gm.id, gm.sender_id, coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), coalesce(gm.sender_email, '')), coalesce(gm.body, ''), coalesce(gm.attachment_kind, '')
+			select gm.id, gm.sender_id, coalesce(nullif(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,'')), ''), coalesce(gm.sender_email, '')),
+			       case when gm.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=$3) then '' else coalesce(gm.body, '') end,
+			       case when gm.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=$3) then '' else coalesce(gm.attachment_kind, '') end,
+			       (gm.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=$3))
 			from group_messages gm
 			left join app_users u on u.id = gm.sender_id
 			where gm.group_id=$1 and gm.id=$2
-		`, groupID, messageID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind)
+		`, groupID, messageID, viewerID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &reply.Unavailable)
 		if err != nil {
 			return nil, err
 		}
@@ -2085,11 +2229,14 @@ func (s *Store) groupReplyByID(groupID, messageID string) (*MessageReply, error)
 	}
 	if s.my != nil {
 		err := s.my.QueryRowContext(context.Background(), `
-			select gm.id, gm.sender_id, coalesce(nullif(trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,''))), ''), coalesce(gm.sender_email, '')), coalesce(gm.body, ''), coalesce(gm.attachment_kind, '')
+			select gm.id, gm.sender_id, coalesce(nullif(trim(concat(coalesce(u.first_name,''), ' ', coalesce(u.last_name,''))), ''), coalesce(gm.sender_email, '')),
+			       case when gm.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=?) then '' else coalesce(gm.body, '') end,
+			       case when gm.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=?) then '' else coalesce(gm.attachment_kind, '') end,
+			       (gm.deleted_for_everyone_at is not null or exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=?))
 			from group_messages gm
 			left join app_users u on u.id = gm.sender_id
 			where gm.group_id=? and gm.id=?
-		`, groupID, messageID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind)
+		`, viewerID, viewerID, viewerID, groupID, messageID).Scan(&reply.ID, &reply.SenderID, &reply.SenderName, &reply.Body, &reply.AttachmentKind, &reply.Unavailable)
 		if err != nil {
 			return nil, err
 		}
@@ -2100,6 +2247,11 @@ func (s *Store) groupReplyByID(groupID, messageID string) (*MessageReply, error)
 	for _, message := range s.data.GroupMessages {
 		if message.GroupID == groupID && message.ID == messageID {
 			reply = MessageReply{ID: message.ID, SenderID: message.SenderID, SenderName: message.SenderEmail, Body: message.Body, AttachmentKind: message.AttachmentKind}
+			if message.DeletedForEveryoneAt != nil || s.messageDeletedForUserLocked("group", message.ID, viewerID) {
+				reply.Body = ""
+				reply.AttachmentKind = ""
+				reply.Unavailable = true
+			}
 			for _, user := range s.data.Users {
 				if user.ID == message.SenderID {
 					reply.SenderName = strings.TrimSpace(user.FirstName + " " + user.LastName)
@@ -2233,17 +2385,17 @@ func (s *Store) groupMessageByID(groupID, messageID string) (GroupMessage, error
 	messageID = strings.TrimSpace(messageID)
 	if s.db != nil {
 		var message GroupMessage
-		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at from group_messages where group_id=$1 and id=$2`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt)
+		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at,deleted_for_everyone_at,coalesce(deleted_for_everyone_by,'') from group_messages where group_id=$1 and id=$2`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy)
 		if err == nil {
-			message = s.withGroupMessageReplies([]GroupMessage{message})[0]
+			message = s.withGroupMessageReplies([]GroupMessage{message}, "")[0]
 		}
 		return message, err
 	}
 	if s.my != nil {
 		var message GroupMessage
-		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at from group_messages where group_id=? and id=?`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt)
+		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at,deleted_for_everyone_at,coalesce(deleted_for_everyone_by,'') from group_messages where group_id=? and id=?`, groupID, messageID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy)
 		if err == nil {
-			message = s.withGroupMessageReplies([]GroupMessage{message})[0]
+			message = s.withGroupMessageReplies([]GroupMessage{message}, "")[0]
 		}
 		return message, err
 	}
@@ -3028,26 +3180,26 @@ func (s *Store) groupByID(groupID string) (Group, error) {
 func (s *Store) groupLatestMessage(groupID string) (*GroupMessage, error) {
 	if s.db != nil {
 		var message GroupMessage
-		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at from group_messages where group_id=$1 order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt)
+		err := s.db.QueryRow(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at,deleted_for_everyone_at,coalesce(deleted_for_everyone_by,'') from group_messages where group_id=$1 order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		message = s.withGroupMessageReplies([]GroupMessage{message})[0]
+		message = s.withGroupMessageReplies([]GroupMessage{message}, "")[0]
 		return &message, nil
 	}
 	if s.my != nil {
 		var message GroupMessage
-		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at from group_messages where group_id=? order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt)
+		err := s.my.QueryRowContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at,deleted_for_everyone_at,coalesce(deleted_for_everyone_by,'') from group_messages where group_id=? order by created_at desc,id desc limit 1`, groupID).Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		message = s.withGroupMessageReplies([]GroupMessage{message})[0]
+		message = s.withGroupMessageReplies([]GroupMessage{message}, "")[0]
 		return &message, nil
 	}
 	var latest *GroupMessage
@@ -3061,7 +3213,7 @@ func (s *Store) groupLatestMessage(groupID string) (*GroupMessage, error) {
 	}
 	s.mu.Unlock()
 	if latest != nil {
-		hydrated := s.withGroupMessageReplies([]GroupMessage{*latest})
+		hydrated := s.withGroupMessageReplies([]GroupMessage{*latest}, "")
 		latest = &hydrated[0]
 	}
 	return latest, nil
@@ -3365,7 +3517,7 @@ func (s *Store) SaveGroupMessage(clientMessageID, groupID, senderID, body, attac
 		return GroupMessage{}, errors.New("message is empty")
 	}
 	if message.ReplyToMessageID != "" {
-		reply, err := s.groupReplyByID(groupID, message.ReplyToMessageID)
+		reply, err := s.groupReplyByID(groupID, message.ReplyToMessageID, senderID)
 		if err != nil {
 			return GroupMessage{}, errors.New("reply message not found")
 		}
@@ -3410,6 +3562,9 @@ func (s *Store) UpdateGroupMessage(groupID, messageID, userID, body string) (Gro
 	if message.SenderID != strings.TrimSpace(userID) {
 		return GroupMessage{}, errors.New("message not found")
 	}
+	if message.DeletedForEveryoneAt != nil {
+		return GroupMessage{}, errors.New("message is not editable")
+	}
 	if strings.TrimSpace(message.Body) == "" {
 		return GroupMessage{}, errors.New("message is not editable")
 	}
@@ -3438,7 +3593,110 @@ func (s *Store) UpdateGroupMessage(groupID, messageID, userID, body string) (Gro
 			if err := s.saveLocked(); err != nil {
 				return GroupMessage{}, err
 			}
-			return s.withGroupMessageReplies([]GroupMessage{message})[0], nil
+			return s.withGroupMessageReplies([]GroupMessage{message}, userID)[0], nil
+		}
+	}
+	return GroupMessage{}, errors.New("message not found")
+}
+
+func (s *Store) DeleteGroupMessageForMe(groupID, messageID, userID string) error {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return errors.New("group membership required")
+	}
+	if _, err := s.groupMessageByID(groupID, messageID); err != nil {
+		return errors.New("message not found")
+	}
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `
+			insert into message_deletions (message_type,message_id,user_id,deleted_at)
+			values ('group',$1,$2,now())
+			on conflict (message_type,message_id,user_id) do update set deleted_at=excluded.deleted_at
+		`, messageID, userID)
+		return err
+	}
+	if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `
+			insert into message_deletions (message_type,message_id,user_id,deleted_at)
+			values ('group',?,?,utc_timestamp())
+			on duplicate key update deleted_at=values(deleted_at)
+		`, messageID, userID)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	for index := range s.data.Deletions {
+		if s.data.Deletions[index].MessageType == "group" && s.data.Deletions[index].MessageID == messageID && s.data.Deletions[index].UserID == userID {
+			s.data.Deletions[index].DeletedAt = now
+			return s.saveLocked()
+		}
+	}
+	s.data.Deletions = append(s.data.Deletions, MessageDeletion{MessageType: "group", MessageID: messageID, UserID: userID, DeletedAt: now})
+	return s.saveLocked()
+}
+
+func (s *Store) DeleteGroupMessageForEveryone(groupID, messageID, userID string) (GroupMessage, error) {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return GroupMessage{}, errors.New("group membership required")
+	}
+	message, err := s.groupMessageByID(groupID, messageID)
+	if err != nil {
+		return GroupMessage{}, errors.New("message not found")
+	}
+	if message.SenderID != strings.TrimSpace(userID) {
+		return GroupMessage{}, errors.New("message not found")
+	}
+	if s.db != nil {
+		_, err = s.db.Exec(context.Background(), `
+			update group_messages
+			set body='', attachment_name='', attachment_type='', attachment_kind='', attachment_url='', edited_at=null,
+			    deleted_for_everyone_at=coalesce(deleted_for_everyone_at, now()), deleted_for_everyone_by=$3
+			where group_id=$1 and id=$2 and sender_id=$3
+		`, groupID, messageID, userID)
+		if err != nil {
+			return GroupMessage{}, err
+		}
+		_, _ = s.db.Exec(context.Background(), `delete from message_reactions where message_type='group' and message_id=$1`, messageID)
+		return s.groupMessageByID(groupID, messageID)
+	}
+	if s.my != nil {
+		_, err = s.my.ExecContext(context.Background(), `
+			update group_messages
+			set body='', attachment_name='', attachment_type='', attachment_kind='', attachment_url='', edited_at=null,
+			    deleted_for_everyone_at=coalesce(deleted_for_everyone_at, utc_timestamp()), deleted_for_everyone_by=?
+			where group_id=? and id=? and sender_id=?
+		`, userID, groupID, messageID, userID)
+		if err != nil {
+			return GroupMessage{}, err
+		}
+		_, _ = s.my.ExecContext(context.Background(), `delete from message_reactions where message_type='group' and message_id=?`, messageID)
+		return s.groupMessageByID(groupID, messageID)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.data.GroupMessages {
+		if s.data.GroupMessages[index].GroupID == groupID && s.data.GroupMessages[index].ID == messageID && s.data.GroupMessages[index].SenderID == userID {
+			now := time.Now().UTC()
+			s.data.GroupMessages[index].Body = ""
+			s.data.GroupMessages[index].AttachmentName = ""
+			s.data.GroupMessages[index].AttachmentType = ""
+			s.data.GroupMessages[index].AttachmentKind = ""
+			s.data.GroupMessages[index].AttachmentURL = ""
+			s.data.GroupMessages[index].EditedAt = nil
+			s.data.GroupMessages[index].DeletedForEveryoneAt = &now
+			s.data.GroupMessages[index].DeletedForEveryoneBy = userID
+			message = s.data.GroupMessages[index]
+			filtered := s.data.Reactions[:0]
+			for _, reaction := range s.data.Reactions {
+				if reaction.MessageType != "group" || reaction.MessageID != messageID {
+					filtered = append(filtered, reaction)
+				}
+			}
+			s.data.Reactions = filtered
+			if err := s.saveLocked(); err != nil {
+				return GroupMessage{}, err
+			}
+			return s.withGroupMessageReplies([]GroupMessage{message}, userID)[0], nil
 		}
 	}
 	return GroupMessage{}, errors.New("message not found")
@@ -3452,7 +3710,14 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		limit = 50
 	}
 	if s.db != nil {
-		rows, err := s.db.Query(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at from group_messages where group_id=$1 order by created_at desc,id desc limit $2`, groupID, limit)
+		rows, err := s.db.Query(context.Background(), `
+			select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at,deleted_for_everyone_at,coalesce(deleted_for_everyone_by,'')
+			from group_messages
+			where group_id=$1
+			  and not exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=group_messages.id and md.user_id=$2)
+			order by created_at desc,id desc
+			limit $3
+		`, groupID, userID, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -3460,7 +3725,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		var result []GroupMessage
 		for rows.Next() {
 			var message GroupMessage
-			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt); err != nil {
+			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy); err != nil {
 				return nil, err
 			}
 			result = append(result, message)
@@ -3469,10 +3734,17 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		return s.withGroupMessageReactions(s.withGroupMessageReplies(result), userID), nil
+		return s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), nil
 	}
 	if s.my != nil {
-		rows, err := s.my.QueryContext(context.Background(), `select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at from group_messages where group_id=? order by created_at desc,id desc limit ?`, groupID, limit)
+		rows, err := s.my.QueryContext(context.Background(), `
+			select id,group_id,sender_id,sender_email,body,attachment_name,attachment_type,attachment_kind,attachment_url,coalesce(reply_to_message_id,''),created_at,edited_at,deleted_for_everyone_at,coalesce(deleted_for_everyone_by,'')
+			from group_messages
+			where group_id=?
+			  and not exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=group_messages.id and md.user_id=?)
+			order by created_at desc,id desc
+			limit ?
+		`, groupID, userID, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -3480,7 +3752,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		var result []GroupMessage
 		for rows.Next() {
 			var message GroupMessage
-			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt); err != nil {
+			if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy); err != nil {
 				return nil, err
 			}
 			result = append(result, message)
@@ -3489,22 +3761,34 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		return s.withGroupMessageReactions(s.withGroupMessageReplies(result), userID), nil
+		return s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), nil
 	}
 	var result []GroupMessage
 	s.mu.Lock()
 	for i := len(s.data.GroupMessages) - 1; i >= 0 && len(result) < limit; i-- {
-		if s.data.GroupMessages[i].GroupID == groupID {
+		if s.data.GroupMessages[i].GroupID == groupID && !s.messageDeletedForUserLocked("group", s.data.GroupMessages[i].ID, userID) {
 			result = append(result, s.data.GroupMessages[i])
 		}
 	}
 	s.mu.Unlock()
 	reverseGroupMessages(result)
-	return s.withGroupMessageReactions(s.withGroupMessageReplies(result), userID), nil
+	return s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), nil
 }
 
 func reverseGroupMessages(messages []GroupMessage) {
 	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
 		messages[left], messages[right] = messages[right], messages[left]
 	}
+}
+
+func (s *Store) messageDeletedForUserLocked(messageType, messageID, userID string) bool {
+	if strings.TrimSpace(userID) == "" {
+		return false
+	}
+	for _, deletion := range s.data.Deletions {
+		if deletion.MessageType == messageType && deletion.MessageID == messageID && deletion.UserID == userID {
+			return true
+		}
+	}
+	return false
 }

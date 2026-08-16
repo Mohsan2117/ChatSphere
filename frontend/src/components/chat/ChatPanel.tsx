@@ -48,6 +48,7 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   onOpenContactInfo: () => void;
   onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
   onCancelReply: () => void;
+  onDelete: (message: TMessage) => void;
   onEdit: (message: TMessage) => void;
   onReact: (target: ReactionTarget, emoji: string) => void;
   onReply: (message: TMessage) => void;
@@ -107,6 +108,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   onOpenContactInfo,
   onOpenReactionDetails,
   onCancelReply,
+  onDelete,
   onEdit,
   onReact,
   onReply,
@@ -238,6 +240,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
                 highlighted={highlightedMessageId === message.id}
                 onOpenReactionDetails={onOpenReactionDetails}
                 onQuoteClick={scrollToOriginal}
+                onDelete={onDelete}
                 onEdit={onEdit}
                 onReact={onReact}
                 onReply={onReply}

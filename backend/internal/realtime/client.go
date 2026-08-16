@@ -548,6 +548,14 @@ func mapPublicMessage(message store.Message, viewerEmail string) map[string]any 
 		"readAt":      message.ReadAt,
 		"reactions":   message.Reactions,
 	}
+	if message.DeletedForEveryoneAt != nil {
+		result["body"] = ""
+		result["deletedForEveryone"] = true
+		result["deletedForEveryoneAt"] = message.DeletedForEveryoneAt
+		result["deletedForEveryoneBy"] = message.DeletedForEveryoneBy
+		result["reactions"] = []store.ReactionSummary{}
+		return result
+	}
 	if message.AttachmentName != "" {
 		result["attachment"] = map[string]any{
 			"name": message.AttachmentName,
@@ -568,6 +576,14 @@ func mapPublicGroupMessage(message store.GroupMessage) map[string]any {
 		"senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt, "editedAt": message.EditedAt,
 		"time":      message.CreatedAt.Format("3:04 PM"),
 		"reactions": message.Reactions,
+	}
+	if message.DeletedForEveryoneAt != nil {
+		result["body"] = ""
+		result["deletedForEveryone"] = true
+		result["deletedForEveryoneAt"] = message.DeletedForEveryoneAt
+		result["deletedForEveryoneBy"] = message.DeletedForEveryoneBy
+		result["reactions"] = []store.ReactionSummary{}
+		return result
 	}
 	if message.AttachmentName != "" {
 		result["attachment"] = map[string]string{"name": message.AttachmentName, "type": message.AttachmentType, "kind": message.AttachmentKind, "url": message.AttachmentURL}

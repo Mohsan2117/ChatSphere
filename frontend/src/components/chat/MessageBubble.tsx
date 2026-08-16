@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, MouseEvent, ReactNode, TouchEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, Edit3, FileText, MoreVertical, Pause, Play, Reply } from "lucide-react";
+import { Ban, Check, CheckCheck, Edit3, FileText, MoreVertical, Pause, Play, Reply, Trash2 } from "lucide-react";
 import { MessageReactions, type ReactionSummary, type ReactionTarget, type ReactionUser } from "./MessageReactions";
 
 export type BubbleAttachment = {
@@ -17,6 +17,7 @@ export type MessageReply = {
   senderName: string;
   body?: string;
   attachmentKind?: BubbleAttachment["kind"] | string;
+  unavailable?: boolean;
 };
 
 export type BubbleMessage = {
@@ -26,6 +27,9 @@ export type BubbleMessage = {
   mine?: boolean;
   createdAt?: string;
   editedAt?: string | null;
+  deletedForEveryone?: boolean;
+  deletedForEveryoneAt?: string | null;
+  deletedForEveryoneBy?: string;
   readAt?: string | null;
   attachment?: BubbleAttachment;
   status?: "uploading" | "sending" | "sent" | "failed";
@@ -41,6 +45,7 @@ type MessageBubbleProps<TMessage extends BubbleMessage> = {
   onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
   onQuoteClick?: (messageId: string) => void;
   onEdit?: (message: TMessage) => void;
+  onDelete?: (message: TMessage) => void;
   onReact: (target: ReactionTarget, emoji: string) => void;
   onReply?: (message: TMessage) => void;
   onRetry?: (message: TMessage) => void;
@@ -62,6 +67,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   onOpenReactionDetails,
   onQuoteClick,
   onEdit,
+  onDelete,
   onReact,
   onReply,
   onRetry,
@@ -86,12 +92,27 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   const bubbleClass = isDirect
     ? `max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`
     : `min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`;
-  const canEdit = own && Boolean(message.body?.trim()) && message.status !== "uploading" && message.status !== "sending" && message.status !== "failed";
+  const isDeletedForEveryone = Boolean(message.deletedForEveryone || message.deletedForEveryoneAt);
+  const canUseServerActions = message.status !== "uploading" && message.status !== "sending";
+  const canEdit = !isDeletedForEveryone && own && Boolean(message.body?.trim()) && canUseServerActions && message.status !== "failed";
+  const canDelete = !isDeletedForEveryone && Boolean(onDelete) && canUseServerActions;
 
   return (
     <div className={outerClass} data-message-id={message.id}>
       <div className={innerClass}>
-        {isDirect && message.attachment?.kind === "audio" ? (
+        {isDeletedForEveryone ? (
+          <div className={bubbleClass}>
+            <div className="flex items-center gap-2 text-sm italic leading-6 text-[#64748b]">
+              <Ban size={15} />
+              <span>{own ? "You deleted this message" : "This message was deleted"}</span>
+            </div>
+            {isDirect ? (
+              <DirectMessageMeta message={message} onRetry={onRetry} selectedChatOnline={selectedChatOnline} timestamp={timestamp} />
+            ) : (
+              <div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{timestamp}</div>
+            )}
+          </div>
+        ) : isDirect && message.attachment?.kind === "audio" ? (
           <VoiceMessageBubble
             authToken={authToken}
             highlighted={highlighted}
@@ -115,8 +136,8 @@ export function MessageBubble<TMessage extends BubbleMessage>({
             )}
           </div>
         )}
-        <div className={`flex items-start gap-1 ${own ? "flex-row-reverse" : ""}`}>
-          {canEdit && onEdit ? <MessageActionMenu onEdit={() => onEdit(message)} /> : null}
+        {!isDeletedForEveryone ? <div className={`flex items-start gap-1 ${own ? "flex-row-reverse" : ""}`}>
+          {canEdit || canDelete ? <MessageActionMenu onDelete={canDelete ? () => onDelete?.(message) : undefined} onEdit={canEdit ? () => onEdit?.(message) : undefined} /> : null}
           {onReply ? (
             <button
               aria-label="Reply to message"
@@ -136,13 +157,14 @@ export function MessageBubble<TMessage extends BubbleMessage>({
             setPickerTarget={setReactionPicker}
             target={reactionTarget}
           />
-        </div>
+        </div> : null}
       </div>
     </div>
   );
 }
 
 function replyPreviewText(reply: MessageReply) {
+  if (reply.unavailable) return "Original message unavailable";
   const body = reply.body?.trim();
   if (body) return body;
   if (reply.attachmentKind) {
@@ -165,7 +187,7 @@ function QuotedMessage({ reply, onQuoteClick }: { reply: MessageReply; onQuoteCl
   );
 }
 
-function MessageActionMenu({ onEdit }: { onEdit: () => void }) {
+function MessageActionMenu({ onDelete, onEdit }: { onDelete?: () => void; onEdit?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative mt-1">
@@ -179,7 +201,7 @@ function MessageActionMenu({ onEdit }: { onEdit: () => void }) {
       </button>
       {open ? (
         <div className="absolute bottom-8 right-0 z-20 min-w-28 overflow-hidden rounded-xl border border-[#dce1e8] bg-white py-1 text-sm font-bold text-[#334155] shadow-[0_14px_35px_rgba(15,23,42,.14)]">
-          <button
+          {onEdit ? <button
             className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
             onClick={() => {
               setOpen(false);
@@ -189,7 +211,18 @@ function MessageActionMenu({ onEdit }: { onEdit: () => void }) {
           >
             <Edit3 size={14} />
             Edit
-          </button>
+          </button> : null}
+          {onDelete ? <button
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#b42318] hover:bg-[#fff5f5]"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            type="button"
+          >
+            <Trash2 size={14} />
+            Delete
+          </button> : null}
         </div>
       ) : null}
     </div>
