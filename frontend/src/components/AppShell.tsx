@@ -5139,7 +5139,7 @@ function AvatarSelection({
               type="button"
             >
               <span className="grid h-[86%] w-[86%] place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
-                <AvatarImage alt={`ChatSphere avatar ${index + 1}`} className="h-full w-full object-cover" fallback={String(index + 1).padStart(2, "0")} src={avatar.src} />
+                <AvatarImage alt={`ChatSphere avatar ${index + 1}`} className="h-full w-full object-cover" fallback={<Image size={20} />} src={avatar.src} />
               </span>
               {selected ? <span className="absolute bottom-0 right-0 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-[#00a884] text-white"><Check size={14} strokeWidth={3} /></span> : null}
             </button>
