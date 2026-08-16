@@ -41,7 +41,8 @@ import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 import { AIChat, AIMessage } from "@/components/AIChat";
 import { useAudioCall, AudioCallOverlay } from "./AudioCall";
 import { handleImageCompressionLoop, handleVideoCompressionLoop, AppConfig } from "@/lib/mediaCompression";
-import { MessageBubble, type BubbleAttachment, type ReactionSummary, type ReactionTarget, type ReactionUser } from "@/components/chat/MessageBubble";
+import { MessageBubble, type BubbleAttachment } from "@/components/chat/MessageBubble";
+import type { ReactionSummary, ReactionTarget, ReactionUser } from "@/components/chat/MessageReactions";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
