@@ -477,7 +477,6 @@ export function AppShell() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
   const [isInboxLoading, setIsInboxLoading] = useState(true);
-  const [isDirectoryLoading, setIsDirectoryLoading] = useState(true);
   const [inboxError, setInboxError] = useState("");
   const [directoryError, setDirectoryError] = useState("");
   const [isRestoring, setIsRestoring] = useState(true);
@@ -1025,7 +1024,6 @@ export function AppShell() {
 
     let cancelled = false;
     const loadUsers = () => {
-      setIsDirectoryLoading(true);
       setDirectoryError("");
       fetch(`${apiUrl()}/api/v1/users`, {
         headers: authHeaders(authToken)
@@ -1061,9 +1059,6 @@ export function AppShell() {
         .catch((error) => {
           if (cancelled) return;
           setDirectoryError(error instanceof Error ? error.message : "Could not load users");
-        })
-        .finally(() => {
-          if (!cancelled) setIsDirectoryLoading(false);
         });
     };
 
@@ -1260,7 +1255,6 @@ export function AppShell() {
         })
       );
       setIsInboxLoading(true);
-      setIsDirectoryLoading(true);
       setInboxError("");
       setDirectoryError("");
       setIsAuthed(true);
@@ -1648,7 +1642,6 @@ export function AppShell() {
       setSelectedChatSnapshot(null);
       setChatSearch("");
       setIsInboxLoading(true);
-      setIsDirectoryLoading(true);
       setInboxError("");
       setDirectoryError("");
       setIsAuthed(true);
@@ -2353,7 +2346,6 @@ export function AppShell() {
     setChatMessageSearch("");
     setIsChatMenuOpen(false);
     setIsInboxLoading(false);
-    setIsDirectoryLoading(false);
     setInboxError("");
     setDirectoryError("");
   }
@@ -3379,22 +3371,6 @@ export function AppShell() {
                   userInitials
                 )}
               </button>
-            </div>
-            <div className="mt-5 hidden lg:grid grid-cols-2 gap-2">
-              {[
-                ["Me", "0"],
-                ["Open", String(inboxChats.length)],
-                ["All", String(directoryChats.length)]
-              ].map(([label, count], index) => (
-                <button key={label} className={`rounded-xl border px-3 py-2 text-left ${index === 1 ? "border-[#00a884] bg-[#e7f8f2]" : "border-[#e5e9f0] bg-[#f7f9fb]"}`} type="button">
-                  <div className="text-xs font-bold text-[#64748b]">{label}</div>
-                  {isInboxLoading || isDirectoryLoading ? (
-                    <div className="cs-skeleton mt-1.5 h-5 w-8" />
-                  ) : (
-                    <div className="mt-1 text-lg font-black">{count}</div>
-                  )}
-                </button>
-              ))}
             </div>
             <label className="mt-3 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b] lg:mt-5">
               <Search size={19} />
