@@ -3684,7 +3684,7 @@ export function AppShell() {
                       }`}
                       type="button"
                     >
-                      <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
+                      <ChatAvatar chat={chat} className="h-11 w-11 rounded-full text-sm" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
                           <strong className="truncate text-sm">{chat.name}</strong>
@@ -3709,7 +3709,7 @@ export function AppShell() {
                         selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                     >
-                      <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
+                      <ChatAvatar chat={chat} className="h-11 w-11 rounded-full text-sm" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
                           <strong className="truncate text-sm">{chat.name}</strong>
@@ -3763,7 +3763,7 @@ export function AppShell() {
                         }`}
                         type="button"
                       >
-                        <ChatAvatar chat={chat} className="h-11 w-11 rounded-xl text-sm" />
+                        <ChatAvatar chat={chat} className="h-11 w-11 rounded-full text-sm" />
                         <span className="min-w-0 flex-1 overflow-hidden">
                           <span className="flex items-center justify-between gap-2">
                             <strong className="truncate text-sm">{chat.name}</strong>
@@ -3869,7 +3869,7 @@ export function AppShell() {
               <ChatPanel
                 attachment={currentAttachmentDraft}
                 authToken={authToken}
-                avatar={<ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-2xl text-base" />}
+                avatar={<ChatAvatar chat={selectedChat} className="h-12 w-12 rounded-full text-base" />}
                 chat={selectedChat}
                 chatMessageSearch={chatMessageSearch}
                 chatMessageSearchRef={chatMessageSearchRef}
@@ -4825,7 +4825,7 @@ function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, o
   const onlineByUserId = new Map(users.map((user) => [user.id, Boolean(user.online)]));
   const candidates = users.filter((user) => user.id !== currentUserId && !memberIDs.has(user.id));
   const update = async (action: () => Promise<void>) => { try { await action(); } catch (error) { window.alert(error instanceof Error ? error.message : "Group action failed"); } };
-  return <div className="fixed inset-0 z-[60] flex justify-end bg-[#0f172a]/35"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">Group info</p><h2 className="mt-1 text-xl font-black">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-black">{details.memberCount} members</div><div className="text-sm text-[#64748b]">You are {details.role}</div></div></div>{canManage ? <><label className="mt-5 block text-sm font-bold text-[#334155]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#e7f8f2] px-3 py-2 text-sm font-black text-[#008f70]" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Members</h3><div className="mt-2 divide-y divide-[#edf1f5]">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><span className="relative inline-flex shrink-0"><GroupAvatar avatarUrl={member.avatarUrl} name={member.name} className="h-10 w-10 rounded-xl text-xs" />{member.id !== currentUserId && onlineByUserId.get(member.id) ? <OnlineStatusBadge /> : null}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{member.name}</div><div className="text-xs capitalize text-[#64748b]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-black text-[#008f70]" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-black text-red-600" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-[#edf1f5]">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc] ${selected.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#00a884]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-[#00a884] px-3 py-2 text-sm font-black text-white disabled:opacity-50" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl bg-red-50 px-3 py-2.5 text-sm font-black text-red-700" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs leading-5 text-[#64748b]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
+  return <div className="fixed inset-0 z-[60] flex justify-end bg-[#0f172a]/35"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">Group info</p><h2 className="mt-1 text-xl font-black">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-black">{details.memberCount} members</div><div className="text-sm text-[#64748b]">You are {details.role}</div></div></div>{canManage ? <><label className="mt-5 block text-sm font-bold text-[#334155]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#e7f8f2] px-3 py-2 text-sm font-black text-[#008f70]" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Members</h3><div className="mt-2 divide-y divide-[#edf1f5]">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><span className="relative inline-flex h-10 w-10 shrink-0"><span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">{member.avatarUrl ? <AvatarImage alt={member.name} className="h-full w-full rounded-full object-cover" fallback={chatInitials(member.name)} src={member.avatarUrl} /> : chatInitials(member.name)}</span>{member.id !== currentUserId && onlineByUserId.get(member.id) ? <OnlineStatusBadge /> : null}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{member.name}</div><div className="text-xs capitalize text-[#64748b]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-black text-[#008f70]" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-black text-red-600" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-[#edf1f5]">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc] ${selected.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#00a884]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-[#00a884] px-3 py-2 text-sm font-black text-white disabled:opacity-50" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl bg-red-50 px-3 py-2.5 text-sm font-black text-red-700" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs leading-5 text-[#64748b]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
 }
 
 
@@ -5077,12 +5077,15 @@ function attachmentSource(url: string, token: string) {
 }
 
 function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) {
+  const wrapperClassName = className.replace(/\brounded-\S+/g, "").trim();
+  const fallback = <span className={`grid h-full w-full place-items-center rounded-full ${chat.color} font-black text-white`}>{chat.avatar}</span>;
+
   return (
-    <span className={`relative grid shrink-0 place-items-center overflow-hidden ${chat.color} font-black text-white ${className}`}>
+    <span className={`relative inline-grid shrink-0 place-items-center overflow-visible ${wrapperClassName}`}>
       {chat.avatarUrl ? (
-        <AvatarImage alt={chat.name} className="h-full w-full object-cover" fallback={chat.avatar} src={chat.avatarUrl} />
+        <AvatarImage alt={chat.name} className="h-full w-full rounded-full object-cover" fallback={fallback} src={chat.avatarUrl} />
       ) : (
-        chat.avatar
+        fallback
       )}
       {chat.online ? <OnlineStatusBadge /> : null}
     </span>
