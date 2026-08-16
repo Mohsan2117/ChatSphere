@@ -28,7 +28,6 @@ import {
   Phone,
   Video,
   Play,
-  Pause,
   Radio,
   Camera,
   ChevronLeft,
@@ -42,6 +41,7 @@ import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
 import { AIChat, AIMessage } from "@/components/AIChat";
 import { useAudioCall, AudioCallOverlay } from "./AudioCall";
 import { handleImageCompressionLoop, handleVideoCompressionLoop, AppConfig } from "@/lib/mediaCompression";
+import { MessageBubble, type BubbleAttachment, type ReactionSummary, type ReactionTarget, type ReactionUser } from "@/components/chat/MessageBubble";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
@@ -54,20 +54,12 @@ type ChatMessage = {
   recipientId?: string;
   createdAt?: string;
   readAt?: string | null;
-  attachment?: {
-    name: string;
-    type: string;
-    url: string;
-    kind: "image" | "video" | "file" | "audio";
-  };
+  attachment?: BubbleAttachment;
   localSeq?: number;
   status?: "uploading" | "sending" | "sent" | "failed";
   progressMsg?: string;
   reactions?: ReactionSummary[];
 };
-type ReactionUser = { id: string; name: string };
-type ReactionSummary = { emoji: string; count: number; reactedByMe?: boolean; users?: ReactionUser[] };
-type ReactionTarget = { type: "direct" | "group"; messageId: string; groupId?: string };
 type SharedAttachmentItem = { message: ChatMessage; attachment: NonNullable<ChatMessage["attachment"]>; source: string };
 type SharedLinkItem = { message: ChatMessage; url: string };
 type ContactInfoMediaTab = "media" | "links" | "files";
@@ -174,8 +166,6 @@ const BUILT_IN_AVATARS = Array.from({ length: 10 }, (_, index) => {
   const id = `avatar-${String(index + 1).padStart(2, "0")}`;
   return { id, src: `/avatars/${id}.png` };
 });
-const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
-
 function isBuiltInAvatar(value?: string) {
   return BUILT_IN_AVATARS.some((avatar) => avatar.src === value);
 }
@@ -3731,53 +3721,21 @@ export function AppShell() {
                 {visibleSelectedMessages.length ? (
                   <div className="space-y-4">
                     {visibleSelectedMessages.map((message) => (
-                      <div key={message.id} className={`cs-message-in flex ${message.mine ? "justify-end" : "justify-start"}`}>
-                        <div className={`flex max-w-[72%] flex-col ${message.mine ? "items-end" : "items-start"}`}>
-                          {message.attachment && message.attachment.kind === "audio" ? (
-                            <VoiceMessageBubble message={message} authToken={authToken} selectedChat={selectedChat} onRetry={retryMessage} />
-                          ) : (
-                            <div className={`max-w-full rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
-                              {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}
-                              {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
-                              <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
-                                {formatMessageTime(message)}
-                                {message.mine ? (
-                                  <div className="flex items-center gap-1">
-                                    {message.status === "uploading" ? (
-                                      <span>{message.progressMsg || "Uploading..."}</span>
-                                    ) : message.status === "sending" ? (
-                                      <span>{message.progressMsg || "Sending..."}</span>
-                                    ) : message.status === "failed" ? (
-                                      <span className="text-[#b42318] flex items-center gap-1">
-                                        <span>{message.progressMsg || "⚠ Failed"}</span>
-                                        <button
-                                          onClick={() => retryMessage(message)}
-                                          className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
-                                          type="button"
-                                        >
-                                          Retry
-                                        </button>
-                                      </span>
-                                    ) : (
-                                      <>
-                                        <span>{message.readAt ? "Seen" : "Sent"}</span>
-                                        {message.readAt ? (
-                                          <CheckCheck size={15} className="text-[#00a884]" />
-                                        ) : selectedChat?.online ? (
-                                          <CheckCheck size={15} className="text-[#94a3b8]" />
-                                        ) : (
-                                          <Check size={15} className="text-[#94a3b8]" />
-                                        )}
-                                      </>
-                                    )}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          )}
-                          <MessageReactions align={message.mine ? "right" : "left"} onReact={reactToMessage} onShowDetails={setReactionDetails} pickerTarget={reactionPicker} reactions={message.reactions} setPickerTarget={setReactionPicker} target={{ type: "direct", messageId: message.id }} />
-                        </div>
-                      </div>
+                      <MessageBubble
+                        authToken={authToken}
+                        key={message.id}
+                        message={message}
+                        onOpenReactionDetails={setReactionDetails}
+                        onReact={reactToMessage}
+                        onRetry={retryMessage}
+                        reactionPicker={reactionPicker}
+                        reactionTarget={{ type: "direct", messageId: message.id }}
+                        resolveAttachmentSource={attachmentSource}
+                        selectedChatOnline={selectedChat?.online}
+                        setReactionPicker={setReactionPicker}
+                        timestamp={formatMessageTime(message)}
+                        variant="direct"
+                      />
                     ))}
                   </div>
                 ) : (
@@ -4720,7 +4678,7 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <div className={`flex w-full min-w-0 items-start ${message.mine ? "justify-end" : "justify-start"}`} key={message.id}><div className={`flex min-w-0 max-w-[78%] flex-col ${message.mine ? "items-end" : "items-start"}`}><div className={`min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>{!message.mine ? <div className="mb-1 text-xs font-black text-[#008f70]">{group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member"}</div> : null}{message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} /> : null}{message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}<div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{formatGroupTime(message.createdAt || "")}</div></div><MessageReactions align={message.mine ? "right" : "left"} onReact={onReact} onShowDetails={onReactionDetails} pickerTarget={reactionPicker} reactions={message.reactions} setPickerTarget={setReactionPicker} target={{ type: "group", groupId: group.id, messageId: message.id }} /></div></div>)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={send}>{file ? <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">{filePreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={filePreview} /> : <span>{file.name}</span>}<button className="text-[#64748b]" onClick={() => { setFile(null); setFilePreview(""); }} type="button">Remove</button></div> : null}<div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2"><label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white"><Paperclip size={20} /><input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value=""; }} type="file" /></label>{isRecording ? <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={stopRecording} type="button"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop</button> : <input className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Write a group message" value={draft} />}{!draft.trim() && !file && !isRecording ? <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={startRecording} type="button"><Mic size={20} /></button> : null}<button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!draft.trim() && !file)} type="submit"><Send size={17} /></button></div></form>{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} key={message.id} message={message} onOpenReactionDetails={onReactionDetails} onReact={onReact} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={send}>{file ? <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">{filePreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={filePreview} /> : <span>{file.name}</span>}<button className="text-[#64748b]" onClick={() => { setFile(null); setFilePreview(""); }} type="button">Remove</button></div> : null}<div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2"><label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white"><Paperclip size={20} /><input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value=""; }} type="file" /></label>{isRecording ? <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={stopRecording} type="button"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop</button> : <input className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Write a group message" value={draft} />}{!draft.trim() && !file && !isRecording ? <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={startRecording} type="button"><Mic size={20} /></button> : null}<button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!draft.trim() && !file)} type="submit"><Send size={17} /></button></div></form>{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
 }
 
 function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
@@ -4971,517 +4929,6 @@ function SharedEmptyState({ label }: { label: string }) {
   return <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-10 text-center text-sm font-bold text-[#94a3b8]">{label}</div>;
 }
 
-function AttachmentPreview({ attachment, authToken }: { attachment: NonNullable<ChatMessage["attachment"]>; authToken: string }) {
-  const [failed, setFailed] = useState(false);
-  const source = attachmentSource(attachment.url, authToken);
-  const canPreview = Boolean(source && /^(https?:|data:|blob:)/i.test(source) && !failed);
-
-  if (attachment.kind === "image" && canPreview) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img alt={attachment.name} className="mb-3 max-h-64 rounded-md object-cover" onError={() => setFailed(true)} src={source} />
-    );
-  }
-
-  if (attachment.kind === "video" && canPreview) {
-    return <video className="mb-3 max-h-64 rounded-md" controls onError={() => setFailed(true)} src={source} />;
-  }
-
-  if (attachment.kind === "audio" && canPreview) {
-    return <AudioPlayer source={source} name={attachment.name} />;
-  }
-
-  return (
-    <a className="mb-3 flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
-      <FileText size={20} />
-      <span className="min-w-0 truncate">{attachment.name}</span>
-    </a>
-  );
-}
-
-function AudioPlayer({ source, name }: { source: string; name: string }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-
-  const parsedDuration = useMemo(() => {
-    const match = name.match(/voice-message_(\d+(\.\d+)?)s\./);
-    return match ? parseFloat(match[1]) : 0;
-  }, [name]);
-
-  useEffect(() => {
-    if (parsedDuration > 0) {
-      setDuration(parsedDuration);
-    }
-  }, [parsedDuration]);
-
-  const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      audio.play().then(() => {
-        setIsPlaying(true);
-      }).catch((err) => {
-        console.error("Audio playback failed:", err);
-      });
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setCurrentTime(audio.currentTime);
-  };
-
-  const handleLoadedMetadata = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setDuration(audio.duration || parsedDuration);
-  };
-
-  const handleEnded = () => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-  };
-
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const time = parseFloat(e.target.value);
-    setCurrentTime(time);
-    audio.currentTime = time;
-  };
-
-  const formatTime = (time: number) => {
-    if (isNaN(time) || !isFinite(time)) return "0:00";
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-  };
-
-  return (
-    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-[#dce1e8] bg-white/90 p-3 text-sm text-[#334155] w-[calc(72vw-70px)] sm:w-[280px] max-w-[280px] min-w-0 shadow-sm">
-      <audio
-        ref={audioRef}
-        src={source}
-        preload="metadata"
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleEnded}
-      />
-      <button
-        aria-label={isPlaying ? "Pause" : "Play"}
-        className="cs-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white hover:bg-[#008f70]"
-        onClick={togglePlay}
-        type="button"
-      >
-        {isPlaying ? (
-          <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-          </svg>
-        ) : (
-          <svg className="h-5 w-5 fill-current translate-x-[1px]" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        )}
-      </button>
-      <div className="flex-1 min-w-0">
-        <input
-          type="range"
-          min="0"
-          max={duration || 100}
-          value={currentTime}
-          onChange={handleSliderChange}
-          className="w-full accent-[#00a884] cursor-pointer"
-        />
-        <div className="flex justify-between text-[10px] font-bold text-[#64748b] mt-1">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const peaksCache = new Map<string, number[]>();
-
-function getFallbackPeaks(seed: string, count: number): number[] {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  
-  const peaks: number[] = [];
-  for (let i = 0; i < count; i++) {
-    const angle = (i / (count - 1)) * Math.PI;
-    const shape = Math.sin(angle);
-    const rand = Math.abs(Math.sin(hash + i * 13.7)) * 0.5 + 0.3;
-    const val = shape * rand + 0.15;
-    peaks.push(Math.min(1.0, Math.max(0.15, val)));
-  }
-  return peaks;
-}
-
-async function getPeaksFromAudio(url: string, count: number): Promise<number[]> {
-  try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("Fetch failed");
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const rawData = audioBuffer.getChannelData(0);
-    const blockSize = Math.floor(rawData.length / count);
-    const peaks: number[] = [];
-    for (let i = 0; i < count; i++) {
-      let max = 0;
-      const start = i * blockSize;
-      for (let j = 0; j < blockSize; j++) {
-        const val = Math.abs(rawData[start + j]);
-        if (val > max) {
-          max = val;
-        }
-      }
-      peaks.push(max);
-    }
-    const maxPeak = Math.max(...peaks) || 1;
-    return peaks.map(p => Math.max(0.15, p / maxPeak));
-  } catch (err) {
-    console.warn("Could not decode audio peaks, falling back to deterministic peaks:", err);
-    return getFallbackPeaks(url, count);
-  }
-}
-
-const pauseAllOtherAudios = (currentAudio: HTMLAudioElement) => {
-  if (typeof document === "undefined") return;
-  const audios = document.querySelectorAll("audio");
-  audios.forEach((audio) => {
-    if (audio !== currentAudio) {
-      audio.pause();
-    }
-  });
-};
-
-function VoiceMessageBubble({
-  message,
-  authToken,
-  selectedChat,
-  onRetry
-}: {
-  message: ChatMessage;
-  authToken: string;
-  selectedChat: any;
-  onRetry?: (message: ChatMessage) => void;
-}) {
-  const attachment = message.attachment!;
-  const [failed, setFailed] = useState(false);
-  const source = attachmentSource(attachment.url, authToken);
-  const canPreview = Boolean(source && /^(https?:|data:|blob:)/i.test(source) && !failed);
-
-  if (!canPreview) {
-    return (
-      <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
-        <a className="flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
-          <FileText size={20} />
-          <span className="min-w-0 truncate">{attachment.name}</span>
-        </a>
-        <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
-          {formatMessageTime(message)}
-          {message.mine && (
-            <div className="flex items-center gap-1">
-              {message.status === "uploading" ? (
-                <span>{message.progressMsg || "Uploading..."}</span>
-              ) : message.status === "sending" ? (
-                <span>{message.progressMsg || "Sending..."}</span>
-              ) : message.status === "failed" ? (
-                <span className="text-[#b42318] flex items-center gap-1">
-                  <span>{message.progressMsg || "⚠ Failed"}</span>
-                  {onRetry && (
-                    <button
-                      onClick={() => onRetry(message)}
-                      className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
-                      type="button"
-                    >
-                      Retry
-                    </button>
-                  )}
-                </span>
-              ) : (
-                <>
-                  <span>{message.readAt ? "Seen" : "Sent"}</span>
-                  {message.readAt ? (
-                    <CheckCheck size={15} className="text-[#00a884]" />
-                  ) : selectedChat?.online ? (
-                    <CheckCheck size={15} className="text-[#94a3b8]" />
-                  ) : (
-                    <Check size={15} className="text-[#94a3b8]" />
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <VoiceMessagePlayer
-      source={source}
-      name={attachment.name}
-      message={message}
-      selectedChat={selectedChat}
-      onRetry={onRetry}
-    />
-  );
-}
-
-function VoiceMessagePlayer({
-  source,
-  name,
-  message,
-  selectedChat,
-  onRetry
-}: {
-  source: string;
-  name: string;
-  message: ChatMessage;
-  selectedChat: any;
-  onRetry?: (message: ChatMessage) => void;
-}) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [peaks, setPeaks] = useState<number[]>([]);
-  const barsCount = 35;
-
-  const parsedDuration = useMemo(() => {
-    const match = name.match(/voice-message_(\d+(\.\d+)?)s\./);
-    return match ? parseFloat(match[1]) : 0;
-  }, [name]);
-
-  useEffect(() => {
-    if (parsedDuration > 0) {
-      setDuration(parsedDuration);
-    }
-  }, [parsedDuration]);
-
-  useEffect(() => {
-    if (!source) return;
-    if (peaksCache.has(source)) {
-      setPeaks(peaksCache.get(source)!);
-      return;
-    }
-
-    let isMounted = true;
-    getPeaksFromAudio(source, barsCount).then((data) => {
-      if (isMounted) {
-        peaksCache.set(source, data);
-        setPeaks(data);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [source]);
-
-  const displayPeaks = useMemo(() => {
-    if (peaks.length === barsCount) return peaks;
-    return getFallbackPeaks(source || name, barsCount);
-  }, [peaks, source, name]);
-
-  const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.pause();
-    } else {
-      pauseAllOtherAudios(audio);
-      audio.play().catch((err) => {
-        console.error("Audio playback failed:", err);
-      });
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setCurrentTime(audio.currentTime);
-  };
-
-  const handleLoadedMetadata = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setDuration(audio.duration || parsedDuration);
-  };
-
-  const handleEnded = () => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-  };
-
-  const handlePlay = () => {
-    setIsPlaying(true);
-  };
-
-  const handlePause = () => {
-    setIsPlaying(false);
-  };
-
-  const handleSeek = (ratio: number) => {
-    const audio = audioRef.current;
-    if (!audio || !duration) return;
-    const newTime = ratio * duration;
-    setCurrentTime(newTime);
-    audio.currentTime = newTime;
-  };
-
-  const handleWaveformClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const container = e.currentTarget;
-    const rect = container.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-    handleSeek(ratio);
-  };
-
-  const handleWaveformTouch = (e: React.TouchEvent<HTMLDivElement>) => {
-    const container = e.currentTarget;
-    const rect = container.getBoundingClientRect();
-    const touch = e.touches[0];
-    if (!touch) return;
-    const clickX = touch.clientX - rect.left;
-    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-    handleSeek(ratio);
-  };
-
-  const formatTime = (time: number) => {
-    if (isNaN(time) || !isFinite(time)) return "0:00";
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-  };
-
-  const progressRatio = duration > 0 ? currentTime / duration : 0;
-  const activeBarsCount = Math.floor(progressRatio * barsCount);
-  const displayTime = isPlaying || currentTime > 0 ? currentTime : duration;
-
-  return (
-    <div className={`relative flex items-center gap-3 p-3 pl-4 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.12)] border select-none w-full max-w-[280px] sm:max-w-[320px] min-w-[240px] ${
-      message.mine 
-        ? "bg-[#dff8ef] border-[#00a884]/15 rounded-bl-2xl rounded-br-none" 
-        : "bg-white border-[#e5e9f0] rounded-2xl rounded-bl-none ml-2"
-    }`}>
-      {/* SVG Tail */}
-      <svg
-        className={`absolute bottom-0 left-[-7px] h-[13px] w-[8px] fill-current ${
-          message.mine ? "text-[#dff8ef]" : "text-white"
-        }`}
-        viewBox="0 0 8 13"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path d="M8 13V0C6 3 2 7.5 0 13H8Z" />
-      </svg>
-
-      <audio
-        ref={audioRef}
-        src={source}
-        preload="metadata"
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleLoadedMetadata}
-        onEnded={handleEnded}
-        onPlay={handlePlay}
-        onPause={handlePause}
-      />
-
-      {/* Play/Pause Button */}
-      <button
-        aria-label={isPlaying ? "Pause" : "Play"}
-        className="cs-press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#0284c7] hover:bg-[#0369a1] text-white transition-colors shadow-sm"
-        onClick={togglePlay}
-        type="button"
-      >
-        {isPlaying ? (
-          <Pause className="h-5 w-5 fill-white text-white" />
-        ) : (
-          <Play className="h-5 w-5 fill-white text-white translate-x-[1.5px]" />
-        )}
-      </button>
-
-      {/* Waveform & Info */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div
-          onClick={handleWaveformClick}
-          onTouchStart={handleWaveformTouch}
-          onTouchMove={handleWaveformTouch}
-          className="h-8 flex items-center gap-[2.5px] cursor-pointer w-full select-none"
-        >
-          {displayPeaks.map((peak, idx) => {
-            const isPlayed = idx < activeBarsCount;
-            return (
-              <div
-                key={idx}
-                className="flex-1 rounded-full transition-colors duration-100"
-                style={{
-                  height: `${peak * 100}%`,
-                  maxHeight: "100%",
-                  backgroundColor: isPlayed ? "#0284c7" : "#cbd5e1",
-                  minHeight: "4px"
-                }}
-              />
-            );
-          })}
-        </div>
-
-        {/* Metadata row */}
-        <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-medium text-[#64748b] mt-1 select-none">
-          <span>{formatTime(displayTime)}</span>
-          <div className="flex items-center gap-1">
-            <span>{formatMessageTime(message)}</span>
-            {message.mine && (
-              <div className="flex items-center gap-1">
-                {message.status === "uploading" ? (
-                  <span>{message.progressMsg || "Uploading..."}</span>
-                ) : message.status === "sending" ? (
-                  <span>{message.progressMsg || "Sending..."}</span>
-                ) : message.status === "failed" ? (
-                  <span className="text-[#b42318] flex items-center gap-1">
-                    <span>{message.progressMsg || "⚠ Failed"}</span>
-                    {onRetry && (
-                      <button
-                        onClick={() => onRetry(message)}
-                        className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
-                        type="button"
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </span>
-                ) : (
-                  <>
-                    <span>{message.readAt ? "Seen" : "Sent"}</span>
-                    {message.readAt ? (
-                      <CheckCheck size={14} className="text-[#00a884]" />
-                    ) : selectedChat?.online ? (
-                      <CheckCheck size={14} className="text-[#94a3b8]" />
-                    ) : (
-                      <Check size={14} className="text-[#94a3b8]" />
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function attachmentSource(url: string, token: string) {
   if (!url) return "";
   if (url.startsWith("attachment:")) {
@@ -5500,71 +4947,6 @@ function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) 
         chat.avatar
       )}
     </span>
-  );
-}
-
-function MessageReactions({
-  align,
-  onReact,
-  onShowDetails,
-  pickerTarget,
-  reactions,
-  setPickerTarget,
-  target
-}: {
-  align: "left" | "right";
-  onReact: (target: ReactionTarget, emoji: string) => void;
-  onShowDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
-  pickerTarget: ReactionTarget | null;
-  reactions?: ReactionSummary[];
-  setPickerTarget: (target: ReactionTarget | null) => void;
-  target: ReactionTarget;
-}) {
-  const isPickerOpen = pickerTarget?.type === target.type && pickerTarget.messageId === target.messageId && pickerTarget.groupId === target.groupId;
-  return (
-    <div className={`relative mt-1 flex flex-wrap items-center gap-1 ${align === "right" ? "justify-end" : "justify-start"}`} data-reaction-picker={isPickerOpen ? "true" : undefined}>
-      <button
-        aria-label="React to message"
-        className="grid h-7 w-7 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884] hover:text-[#00a884]"
-        onClick={(event) => {
-          event.stopPropagation();
-          setPickerTarget(isPickerOpen ? null : target);
-        }}
-        type="button"
-      >
-        <Smile size={14} />
-      </button>
-      {(reactions ?? []).map((reaction) => (
-        <button
-          className={`inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-black ${
-            reaction.reactedByMe ? "border-[#00a884]/40 bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] bg-white text-[#334155]"
-          }`}
-          key={reaction.emoji}
-          onClick={() => onShowDetails({ emoji: reaction.emoji, users: reaction.users ?? [] })}
-          type="button"
-        >
-          <span>{reaction.emoji}</span>
-          <span>{reaction.count}</span>
-        </button>
-      ))}
-      {isPickerOpen ? (
-        <div className={`absolute bottom-9 z-40 flex gap-1 rounded-full border border-[#dce1e8] bg-white p-1 shadow-[0_14px_35px_rgba(15,23,42,.16)] ${align === "right" ? "right-0" : "left-0"}`}>
-          {REACTION_EMOJIS.map((emoji) => (
-            <button
-              className="grid h-9 w-9 place-items-center rounded-full text-lg transition hover:bg-[#e7f8f2]"
-              key={emoji}
-              onClick={(event) => {
-                event.stopPropagation();
-                onReact(target, emoji);
-              }}
-              type="button"
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
