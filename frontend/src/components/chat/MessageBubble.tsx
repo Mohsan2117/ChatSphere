@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, MouseEvent, ReactNode, TouchEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Ban, Check, CheckCheck, Edit3, FileText, MoreVertical, Pause, Play, Reply, Star, Trash2 } from "lucide-react";
 import { MessageReactions, type ReactionSummary, type ReactionTarget, type ReactionUser } from "./MessageReactions";
 
@@ -141,7 +142,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
           </div>
         )}
         {!isDeletedForEveryone ? <div className={`flex items-start gap-1 ${own ? "flex-row-reverse" : ""}`}>
-          {canEdit || canDelete || canStar ? <MessageActionMenu isStarred={message.isStarred} onDelete={canDelete ? () => onDelete?.(message) : undefined} onEdit={canEdit ? () => onEdit?.(message) : undefined} onToggleStar={canStar ? () => onToggleStar?.(message) : undefined} /> : null}
+          {canEdit || canDelete || canStar ? <MessageActionMenu isStarred={message.isStarred} onDelete={canDelete ? () => onDelete?.(message) : undefined} onEdit={canEdit ? () => onEdit?.(message) : undefined} onToggleStar={canStar ? () => onToggleStar?.(message) : undefined} placement={own ? "left" : "right"} /> : null}
           {onReply ? (
             <button
               aria-label="Reply to message"
@@ -191,55 +192,108 @@ function QuotedMessage({ reply, onQuoteClick }: { reply: MessageReply; onQuoteCl
   );
 }
 
-function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar }: { isStarred?: boolean; onDelete?: () => void; onEdit?: () => void; onToggleStar?: () => void }) {
+function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar, placement }: { isStarred?: boolean; onDelete?: () => void; onEdit?: () => void; onToggleStar?: () => void; placement: "left" | "right" }) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      const button = buttonRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      const margin = 8;
+      const menuWidth = menuRef.current?.offsetWidth ?? 128;
+      const menuHeight = menuRef.current?.offsetHeight ?? 120;
+      const preferredLeft = placement === "right" ? rect.left : rect.right - menuWidth;
+      const fallbackLeft = placement === "right" ? rect.right - menuWidth : rect.left;
+      let left = preferredLeft;
+
+      if (placement === "right" && left + menuWidth > window.innerWidth - margin) {
+        left = fallbackLeft;
+      } else if (placement === "left" && left < margin) {
+        left = fallbackLeft;
+      }
+
+      left = Math.min(Math.max(left, margin), Math.max(margin, window.innerWidth - menuWidth - margin));
+
+      let top = rect.top - menuHeight - margin;
+      if (top < margin) {
+        top = rect.bottom + margin;
+      }
+      top = Math.min(Math.max(top, margin), Math.max(margin, window.innerHeight - menuHeight - margin));
+
+      setPosition({ left, top });
+    };
+
+    setPosition(null);
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, placement]);
+
+  const menu = open && typeof document !== "undefined" ? createPortal(
+    <div
+      className="fixed z-[60] min-w-28 overflow-hidden rounded-xl border border-[#dce1e8] bg-white py-1 text-sm font-bold text-[#334155] shadow-[0_14px_35px_rgba(15,23,42,.14)]"
+      ref={menuRef}
+      style={{ left: position?.left ?? -9999, top: position?.top ?? -9999, visibility: position ? "visible" : "hidden" }}
+    >
+      {onToggleStar ? <button
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+        onClick={() => {
+          setOpen(false);
+          onToggleStar();
+        }}
+        type="button"
+      >
+        <Star size={14} className={isStarred ? "fill-[#f59e0b] text-[#f59e0b]" : ""} />
+        {isStarred ? "Unstar" : "Star"}
+      </button> : null}
+      {onEdit ? <button
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+        onClick={() => {
+          setOpen(false);
+          onEdit();
+        }}
+        type="button"
+      >
+        <Edit3 size={14} />
+        Edit
+      </button> : null}
+      {onDelete ? <button
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#b42318] hover:bg-[#fff5f5]"
+        onClick={() => {
+          setOpen(false);
+          onDelete();
+        }}
+        type="button"
+      >
+        <Trash2 size={14} />
+        Delete
+      </button> : null}
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <div className="relative mt-1">
       <button
         aria-label="Message actions"
         className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884]/30 hover:text-[#00a884]"
         onClick={() => setOpen((current) => !current)}
+        ref={buttonRef}
         type="button"
       >
         <MoreVertical size={14} />
       </button>
-      {open ? (
-        <div className="absolute bottom-8 right-0 z-20 min-w-28 overflow-hidden rounded-xl border border-[#dce1e8] bg-white py-1 text-sm font-bold text-[#334155] shadow-[0_14px_35px_rgba(15,23,42,.14)]">
-          {onToggleStar ? <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
-            onClick={() => {
-              setOpen(false);
-              onToggleStar();
-            }}
-            type="button"
-          >
-            <Star size={14} className={isStarred ? "fill-[#f59e0b] text-[#f59e0b]" : ""} />
-            {isStarred ? "Unstar" : "Star"}
-          </button> : null}
-          {onEdit ? <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
-            onClick={() => {
-              setOpen(false);
-              onEdit();
-            }}
-            type="button"
-          >
-            <Edit3 size={14} />
-            Edit
-          </button> : null}
-          {onDelete ? <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#b42318] hover:bg-[#fff5f5]"
-            onClick={() => {
-              setOpen(false);
-              onDelete();
-            }}
-            type="button"
-          >
-            <Trash2 size={14} />
-            Delete
-          </button> : null}
-        </div>
-      ) : null}
+      {menu}
     </div>
   );
 }
