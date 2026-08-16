@@ -596,6 +596,37 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 		}
 		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
 	})
+	group.PATCH("/:id/messages/:messageId", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Body string `json:"body"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Body) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "message body is required"})
+			return
+		}
+		message, err := dataStore.UpdateGroupMessage(c.Param("id"), c.Param("messageId"), authUser.ID, body.Body)
+		if err != nil {
+			if strings.Contains(err.Error(), "body is required") || strings.Contains(err.Error(), "not editable") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusForbidden, gin.H{"error": "message not found"})
+			return
+		}
+		if details, detailsErr := dataStore.GetGroupDetails(c.Param("id"), authUser.ID); detailsErr == nil {
+			targets := make([]string, 0, len(details.Members))
+			for _, member := range details.Members {
+				targets = append(targets, member.UserID)
+			}
+			payload, _ := json.Marshal(gin.H{"messageType": "group", "messageId": message.ID, "groupId": message.GroupID, "body": message.Body, "editedAt": message.EditedAt})
+			hub.Broadcast(realtime.Event{Type: "message.edited", ConversationID: message.GroupID, UserID: authUser.ID, TargetUserIDs: targets, Payload: payload})
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
+	})
 	group.POST("/:id/messages/:messageId/reactions", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -645,6 +676,9 @@ func publicGroupMessage(message store.GroupMessage) gin.H {
 	}
 	if message.ReplyTo != nil {
 		result["replyTo"] = message.ReplyTo
+	}
+	if message.EditedAt != nil {
+		result["editedAt"] = message.EditedAt
 	}
 	result["reactions"] = message.Reactions
 	return result
@@ -995,9 +1029,15 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		message, err := dataStore.UpdateMessage(authUser.Email, c.Param("id"), body.Body)
 		if err != nil {
+			if strings.Contains(err.Error(), "body is required") || strings.Contains(err.Error(), "not editable") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 			return
 		}
+		payload, _ := json.Marshal(gin.H{"messageType": "direct", "messageId": message.ID, "conversationId": message.ConversationID, "body": message.Body, "editedAt": message.EditedAt})
+		hub.Broadcast(realtime.Event{Type: "message.edited", ConversationID: message.ConversationID, UserID: authUser.ID, TargetUserIDs: []string{message.SenderID, message.RecipientID}, Payload: payload})
 		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
 	})
 	group.DELETE("/conversation/:recipientId", func(c *gin.Context) {
@@ -1134,6 +1174,9 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 	}
 	if message.ReplyTo != nil {
 		result["replyTo"] = message.ReplyTo
+	}
+	if message.EditedAt != nil {
+		result["editedAt"] = message.EditedAt
 	}
 	result["reactions"] = message.Reactions
 	return result

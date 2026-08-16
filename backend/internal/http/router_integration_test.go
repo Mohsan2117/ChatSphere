@@ -66,11 +66,65 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	if replyTo["id"] != messageID || replyTo["senderName"] == "" {
 		t.Fatalf("direct reply metadata missing: %+v", replyPayload.Message)
 	}
+	replyMessageID, _ := replyPayload.Message["id"].(string)
+	if replyMessageID == "" {
+		t.Fatalf("direct reply has no id: %+v", replyPayload.Message)
+	}
 	requestJSON(t, router, http.MethodPost, "/api/v1/messages", mohsin.Token, map[string]any{
 		"recipientId":      hamza.ID,
 		"body":             "Invalid cross-conversation reply",
 		"replyToMessageId": messageID,
 	}, http.StatusBadRequest)
+	editResp := requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+messageID, ali.Token, map[string]any{"body": "Edited private message from Ali"}, http.StatusOK)
+	var editPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(editResp.Body.Bytes(), &editPayload); err != nil {
+		t.Fatalf("decode direct edit: %v", err)
+	}
+	if editPayload.Message["body"] != "Edited private message from Ali" || editPayload.Message["editedAt"] == nil {
+		t.Fatalf("direct edit response missing body/editedAt: %+v", editPayload.Message)
+	}
+	requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+messageID, hamza.Token, map[string]any{"body": "Recipient edit attempt"}, http.StatusNotFound)
+	replyEditResp := requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+replyMessageID, hamza.Token, map[string]any{"body": "Edited reply to Ali"}, http.StatusOK)
+	var replyEditPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(replyEditResp.Body.Bytes(), &replyEditPayload); err != nil {
+		t.Fatalf("decode direct reply edit: %v", err)
+	}
+	editedReplyTo, _ := replyEditPayload.Message["replyTo"].(map[string]any)
+	if editedReplyTo["id"] != messageID || replyEditPayload.Message["editedAt"] == nil {
+		t.Fatalf("direct edit should preserve reply metadata and set editedAt: %+v", replyEditPayload.Message)
+	}
+	attachmentResp := requestJSON(t, router, http.MethodPost, "/api/v1/messages", ali.Token, map[string]any{
+		"recipientId": hamza.ID,
+		"body":        "Text with direct attachment",
+		"attachment": map[string]any{
+			"name": "direct-note.txt",
+			"type": "text/plain",
+			"kind": "file",
+			"url":  "https://cdn.example.com/direct-note.txt",
+		},
+	}, http.StatusOK)
+	var attachmentPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(attachmentResp.Body.Bytes(), &attachmentPayload); err != nil {
+		t.Fatalf("decode direct attachment message: %v", err)
+	}
+	attachmentMessageID, _ := attachmentPayload.Message["id"].(string)
+	attachmentEditResp := requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+attachmentMessageID, ali.Token, map[string]any{"body": "Edited direct attachment text"}, http.StatusOK)
+	var attachmentEditPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(attachmentEditResp.Body.Bytes(), &attachmentEditPayload); err != nil {
+		t.Fatalf("decode direct attachment edit: %v", err)
+	}
+	attachment, _ := attachmentEditPayload.Message["attachment"].(map[string]any)
+	if attachment["name"] != "direct-note.txt" || attachment["url"] != "https://cdn.example.com/direct-note.txt" {
+		t.Fatalf("direct edit changed attachment metadata: %+v", attachmentEditPayload.Message)
+	}
 
 	aliInbox := getMessages(t, router, "/api/v1/messages/inbox", ali.Token)
 	if len(aliInbox) == 0 {
@@ -93,14 +147,21 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+messageID, hamza.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
 	readback := getMessages(t, router, "/api/v1/messages/"+ali.ID, hamza.Token)
 	foundReaction := false
+	foundEditedReply := false
 	for _, message := range readback {
 		if message["id"] == messageID {
 			foundReaction = len(reactionsFromMap(message)) == 1
-			break
+		}
+		if message["id"] == replyMessageID {
+			replyTo, _ := message["replyTo"].(map[string]any)
+			foundEditedReply = message["body"] == "Edited reply to Ali" && message["editedAt"] != nil && replyTo["id"] == messageID
 		}
 	}
 	if !foundReaction {
 		t.Fatalf("expected direct message reactions in readback: %+v", readback)
+	}
+	if !foundEditedReply {
+		t.Fatalf("expected edited direct reply metadata in readback: %+v", readback)
 	}
 
 	mohsinInbox := getMessages(t, router, "/api/v1/messages/inbox", mohsin.Token)
@@ -323,7 +384,60 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	if groupReplyTo["id"] != groupMessageID || groupReplyTo["senderName"] == "" {
 		t.Fatalf("group reply metadata missing: %+v", groupReplyPayload.Message)
 	}
+	groupReplyID, _ := groupReplyPayload.Message["id"].(string)
+	if groupReplyID == "" {
+		t.Fatalf("group reply has no id: %+v", groupReplyPayload.Message)
+	}
 	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", stranger.Token, map[string]any{"body": "Unauthorized reply", "replyToMessageId": groupMessageID}, http.StatusForbidden)
+	groupEditResp := requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID, owner.Token, map[string]any{"body": "Edited welcome to the group"}, http.StatusOK)
+	var groupEditPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupEditResp.Body.Bytes(), &groupEditPayload); err != nil {
+		t.Fatalf("decode group edit: %v", err)
+	}
+	if groupEditPayload.Message["body"] != "Edited welcome to the group" || groupEditPayload.Message["editedAt"] == nil {
+		t.Fatalf("group edit response missing body/editedAt: %+v", groupEditPayload.Message)
+	}
+	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID, outsider.Token, map[string]any{"body": "Other member edit attempt"}, http.StatusForbidden)
+	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupReplyID, owner.Token, map[string]any{"body": "Owner edits member reply"}, http.StatusForbidden)
+	otherGroupResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups", owner.Token, map[string]any{"name": "Other group", "memberIds": []string{member.ID}}, http.StatusOK)
+	var otherGroupPayload struct {
+		Group struct {
+			ID string `json:"id"`
+		} `json:"group"`
+	}
+	if err := json.Unmarshal(otherGroupResp.Body.Bytes(), &otherGroupPayload); err != nil {
+		t.Fatalf("decode other group: %v", err)
+	}
+	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+otherGroupPayload.Group.ID+"/messages/"+groupMessageID, owner.Token, map[string]any{"body": "Cross-group edit attempt"}, http.StatusForbidden)
+	groupAttachmentResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages", owner.Token, map[string]any{
+		"body": "Text with group attachment",
+		"attachment": map[string]any{
+			"name": "group-note.txt",
+			"type": "text/plain",
+			"kind": "file",
+			"url":  "https://cdn.example.com/group-note.txt",
+		},
+	}, http.StatusOK)
+	var groupAttachmentPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupAttachmentResp.Body.Bytes(), &groupAttachmentPayload); err != nil {
+		t.Fatalf("decode group attachment message: %v", err)
+	}
+	groupAttachmentID, _ := groupAttachmentPayload.Message["id"].(string)
+	groupAttachmentEditResp := requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupAttachmentID, owner.Token, map[string]any{"body": "Edited group attachment text"}, http.StatusOK)
+	var groupAttachmentEditPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupAttachmentEditResp.Body.Bytes(), &groupAttachmentEditPayload); err != nil {
+		t.Fatalf("decode group attachment edit: %v", err)
+	}
+	groupAttachment, _ := groupAttachmentEditPayload.Message["attachment"].(map[string]any)
+	if groupAttachment["name"] != "group-note.txt" || groupAttachment["url"] != "https://cdn.example.com/group-note.txt" {
+		t.Fatalf("group edit changed attachment metadata: %+v", groupAttachmentEditPayload.Message)
+	}
 	reactions := decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "❤️"}, http.StatusOK))
 	assertReaction(t, reactions, "❤️", 1, true)
 	reactions = decodeReactionResponse(t, requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/reactions", member.Token, map[string]any{"emoji": "👍"}, http.StatusOK))
@@ -337,14 +451,18 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	getGroup(member, "/api/v1/groups/"+groupID+"/messages", http.StatusOK)
 	groupReadback := getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", member.Token)
 	foundReaction := false
+	foundEditedGroupMessage := false
 	for _, message := range groupReadback {
 		if message["id"] == groupMessageID {
 			foundReaction = len(reactionsFromMap(message)) == 1
-			break
+			foundEditedGroupMessage = message["body"] == "Edited welcome to the group" && message["editedAt"] != nil
 		}
 	}
 	if !foundReaction {
 		t.Fatalf("expected group message reactions in readback: %+v", groupReadback)
+	}
+	if !foundEditedGroupMessage {
+		t.Fatalf("expected edited group message in readback: %+v", groupReadback)
 	}
 	postJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/members/"+outsider.ID, owner.Token, map[string]any{}, http.StatusOK)
 	getGroup(outsider, "/api/v1/groups/"+groupID+"/messages", http.StatusForbidden)

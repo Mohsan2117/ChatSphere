@@ -33,8 +33,10 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   isClearingChat: boolean;
   isContactInfoOpen: boolean;
   isRecording: boolean;
+  isSavingEdit?: boolean;
   messages: TMessage[];
   onBlock: () => void;
+  onCancelEdit: () => void;
   onCancelRecording: () => void;
   onChangeDraft: (value: string) => void;
   onClear: () => void;
@@ -46,6 +48,7 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   onOpenContactInfo: () => void;
   onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
   onCancelReply: () => void;
+  onEdit: (message: TMessage) => void;
   onReact: (target: ReactionTarget, emoji: string) => void;
   onReply: (message: TMessage) => void;
   onRemoveAttachment: () => void;
@@ -63,6 +66,7 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   onUnblock: () => void;
   reactionPicker: ReactionTarget | null;
   recordingDuration: number;
+  editMode?: { originalBody: string } | null;
   replyTo?: MessageReply | null;
   resolveAttachmentSource: (url: string, token: string) => string;
   scrollContainerRef: RefObject<HTMLDivElement | null>;
@@ -88,8 +92,10 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   isClearingChat,
   isContactInfoOpen,
   isRecording,
+  isSavingEdit,
   messages,
   onBlock,
+  onCancelEdit,
   onCancelRecording,
   onChangeDraft,
   onClear,
@@ -101,6 +107,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   onOpenContactInfo,
   onOpenReactionDetails,
   onCancelReply,
+  onEdit,
   onReact,
   onReply,
   onRemoveAttachment,
@@ -118,6 +125,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   onUnblock,
   reactionPicker,
   recordingDuration,
+  editMode,
   replyTo,
   resolveAttachmentSource,
   scrollContainerRef,
@@ -230,6 +238,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
                 highlighted={highlightedMessageId === message.id}
                 onOpenReactionDetails={onOpenReactionDetails}
                 onQuoteClick={scrollToOriginal}
+                onEdit={onEdit}
                 onReact={onReact}
                 onReply={onReply}
                 onRetry={onRetry}
@@ -268,6 +277,9 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
           onMediaAttachment={onMediaAttachment}
           onRemoveAttachment={onRemoveAttachment}
           onCancelReply={onCancelReply}
+          onCancelEdit={onCancelEdit}
+          editMode={editMode}
+          isSavingEdit={isSavingEdit}
           onSend={onSend}
           onSendRecording={onSendRecording}
           onStartRecording={onStartRecording}

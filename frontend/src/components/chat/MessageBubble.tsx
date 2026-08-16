@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, MouseEvent, ReactNode, TouchEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, FileText, Pause, Play, Reply } from "lucide-react";
+import { Check, CheckCheck, Edit3, FileText, MoreVertical, Pause, Play, Reply } from "lucide-react";
 import { MessageReactions, type ReactionSummary, type ReactionTarget, type ReactionUser } from "./MessageReactions";
 
 export type BubbleAttachment = {
@@ -25,6 +25,7 @@ export type BubbleMessage = {
   time?: string;
   mine?: boolean;
   createdAt?: string;
+  editedAt?: string | null;
   readAt?: string | null;
   attachment?: BubbleAttachment;
   status?: "uploading" | "sending" | "sent" | "failed";
@@ -39,6 +40,7 @@ type MessageBubbleProps<TMessage extends BubbleMessage> = {
   message: TMessage;
   onOpenReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
   onQuoteClick?: (messageId: string) => void;
+  onEdit?: (message: TMessage) => void;
   onReact: (target: ReactionTarget, emoji: string) => void;
   onReply?: (message: TMessage) => void;
   onRetry?: (message: TMessage) => void;
@@ -59,6 +61,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   message,
   onOpenReactionDetails,
   onQuoteClick,
+  onEdit,
   onReact,
   onReply,
   onRetry,
@@ -83,6 +86,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   const bubbleClass = isDirect
     ? `max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`
     : `min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`;
+  const canEdit = own && Boolean(message.body?.trim()) && message.status !== "uploading" && message.status !== "sending" && message.status !== "failed";
 
   return (
     <div className={outerClass} data-message-id={message.id}>
@@ -107,11 +111,12 @@ export function MessageBubble<TMessage extends BubbleMessage>({
             {isDirect ? (
               <DirectMessageMeta message={message} onRetry={onRetry} selectedChatOnline={selectedChatOnline} timestamp={timestamp} />
             ) : (
-              <div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{timestamp}</div>
+              <div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{timestamp}{message.editedAt ? " · Edited" : ""}</div>
             )}
           </div>
         )}
         <div className={`flex items-start gap-1 ${own ? "flex-row-reverse" : ""}`}>
+          {canEdit && onEdit ? <MessageActionMenu onEdit={() => onEdit(message)} /> : null}
           {onReply ? (
             <button
               aria-label="Reply to message"
@@ -160,6 +165,37 @@ function QuotedMessage({ reply, onQuoteClick }: { reply: MessageReply; onQuoteCl
   );
 }
 
+function MessageActionMenu({ onEdit }: { onEdit: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative mt-1">
+      <button
+        aria-label="Message actions"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884]/30 hover:text-[#00a884]"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <MoreVertical size={14} />
+      </button>
+      {open ? (
+        <div className="absolute bottom-8 right-0 z-20 min-w-28 overflow-hidden rounded-xl border border-[#dce1e8] bg-white py-1 text-sm font-bold text-[#334155] shadow-[0_14px_35px_rgba(15,23,42,.14)]">
+          <button
+            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+            type="button"
+          >
+            <Edit3 size={14} />
+            Edit
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function DirectMessageMeta<TMessage extends BubbleMessage>({
   message,
   onRetry,
@@ -174,6 +210,7 @@ function DirectMessageMeta<TMessage extends BubbleMessage>({
   return (
     <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
       {timestamp}
+      {message.editedAt ? <span>· Edited</span> : null}
       {message.mine ? (
         <div className="flex items-center gap-1">
           {message.status === "uploading" ? (
@@ -671,6 +708,7 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
           <span>{formatTime(displayTime)}</span>
           <div className="flex items-center gap-1">
             <span>{timestamp}</span>
+            {message.editedAt ? <span>· Edited</span> : null}
             {message.mine && (
               <div className="flex items-center gap-1">
                 {message.status === "uploading" ? (

@@ -53,6 +53,7 @@ type ChatMessage = {
   senderId?: string;
   recipientId?: string;
   createdAt?: string;
+  editedAt?: string | null;
   readAt?: string | null;
   attachment?: BubbleAttachment;
   localSeq?: number;
@@ -134,6 +135,7 @@ type GroupChatMessage = {
   senderEmail?: string;
   body: string;
   createdAt?: string;
+  editedAt?: string | null;
   time?: string;
   mine?: boolean;
   attachment?: NonNullable<ChatMessage["attachment"]>;
@@ -146,6 +148,12 @@ type ActiveReply = {
   mode: "direct" | "group";
   conversationId: string;
   message: MessageReply;
+};
+type ActiveEdit = {
+  mode: "direct";
+  conversationId: string;
+  messageId: string;
+  originalBody: string;
 };
 
 type StatusEntry = {
@@ -254,6 +262,9 @@ export function AppShell() {
   const [reactionPicker, setReactionPicker] = useState<ReactionTarget | null>(null);
   const [reactionDetails, setReactionDetails] = useState<{ emoji: string; users: ReactionUser[] } | null>(null);
   const [activeReply, setActiveReply] = useState<ActiveReply | null>(null);
+  const [activeEdit, setActiveEdit] = useState<ActiveEdit | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isContactInfoOpen, setIsContactInfoOpen] = useState(false);
   const [contactInfoMediaTab, setContactInfoMediaTab] = useState<ContactInfoMediaTab | null>(null);
   const [appConfig, setAppConfig] = useState<AppConfig>({
@@ -526,6 +537,8 @@ export function AppShell() {
   const currentMessageDraft = selectedChatId ? (drafts[selectedChatId]?.text ?? "") : "";
   const currentAttachmentDraft = selectedChatId ? (drafts[selectedChatId]?.attachment ?? null) : null;
   const activeDirectReply = activeReply?.mode === "direct" && activeReply.conversationId === selectedChatId ? activeReply.message : null;
+  const activeDirectEdit = activeEdit?.mode === "direct" && activeEdit.conversationId === selectedChatId ? activeEdit : null;
+  const composerValue = activeDirectEdit ? editDraft : currentMessageDraft;
   const selectedMessages = selectedChatId ? (chatMessages[selectedChatId] ?? []) : [];
   const selectedSharedMedia = useMemo<SharedAttachmentItem[]>(() => {
     return selectedMessages
@@ -577,6 +590,8 @@ export function AppShell() {
   }), [selectedChat]);
   useEffect(() => {
     setActiveReply(null);
+    setActiveEdit(null);
+    setEditDraft("");
   }, [selectedChatId, selectedGroupId]);
   const contactResults = useMemo(() => {
     const query = chatSearch.trim().toLowerCase();
@@ -926,6 +941,34 @@ export function AppShell() {
           }
           return;
         }
+        if (data.type === "message.edited" && data.payload?.messageId && typeof data.payload.body === "string") {
+          const payload = data.payload as { messageType?: string; messageId: string; groupId?: string; body: string; editedAt?: string | null };
+          const editedAt = payload.editedAt ?? new Date().toISOString();
+          if (payload.messageType === "group" && payload.groupId) {
+            setGroupMessages((current) => ({
+              ...current,
+              [payload.groupId as string]: (current[payload.groupId as string] ?? []).map((message) =>
+                message.id === payload.messageId ? { ...message, body: payload.body, editedAt } : message
+              )
+            }));
+            setGroups((current) => current.map((group) =>
+              group.latestMessage?.id === payload.messageId ? { ...group, latestMessage: { ...group.latestMessage, body: payload.body, editedAt } } : group
+            ));
+            return;
+          }
+          if (payload.messageType === "direct") {
+            setChatMessages((current) => {
+              const next = { ...current };
+              Object.keys(next).forEach((chatId) => {
+                next[chatId] = (next[chatId] ?? []).map((message) =>
+                  message.id === payload.messageId ? { ...message, body: payload.body, editedAt } : message
+                );
+              });
+              return next;
+            });
+            return;
+          }
+        }
         const groupPayload = data.payload as unknown as GroupChatMessage;
         if (data.type === "group.message" && groupPayload?.id && groupPayload?.groupId) {
           const payload = groupPayload;
@@ -958,6 +1001,7 @@ export function AppShell() {
             recipientId: data.payload?.recipientId,
             attachment: data.payload?.attachment,
             createdAt: data.payload?.createdAt,
+            editedAt: data.payload?.editedAt,
             readAt,
             reactions: data.payload?.reactions ?? [],
             replyTo: data.payload?.replyTo,
@@ -2075,6 +2119,10 @@ export function AppShell() {
   }
 
   const handleInputChange = (value: string) => {
+    if (activeDirectEdit) {
+      setEditDraft(value);
+      return;
+    }
     if (!selectedChatId) return;
     setDraftText(selectedChatId, value);
 
@@ -2106,7 +2154,61 @@ export function AppShell() {
     }
   };
 
+  const startDirectEdit = (message: ChatMessage) => {
+    if (!selectedChatId || !message.mine || !message.body.trim()) return;
+    setActiveReply(null);
+    setActiveEdit({ mode: "direct", conversationId: selectedChatId, messageId: message.id, originalBody: message.body });
+    setEditDraft(message.body);
+    setIsEmojiOpen(false);
+  };
+
+  const cancelDirectEdit = () => {
+    setActiveEdit(null);
+    setEditDraft("");
+    setChatNotice("");
+  };
+
+  async function saveDirectEdit() {
+    if (!activeDirectEdit || !authToken) return;
+    const body = editDraft.trim();
+    if (!body) {
+      setChatNotice("Message body is required");
+      return;
+    }
+    setIsSavingEdit(true);
+    setChatNotice("");
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/messages/${activeDirectEdit.messageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders(authToken) },
+        body: JSON.stringify({ body })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not edit message");
+      const editedAt = data.message?.editedAt ?? new Date().toISOString();
+      setChatMessages((current) => {
+        const messages = current[activeDirectEdit.conversationId] ?? [];
+        return {
+          ...current,
+          [activeDirectEdit.conversationId]: messages.map((message) =>
+            message.id === activeDirectEdit.messageId ? { ...message, body: data.message?.body ?? body, editedAt } : message
+          )
+        };
+      });
+      setActiveEdit(null);
+      setEditDraft("");
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not edit message");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
+
   async function sendChatMessage() {
+    if (activeDirectEdit) {
+      await saveDirectEdit();
+      return;
+    }
     const body = currentMessageDraft.trim();
     if ((!body && !currentAttachmentDraft) || !selectedChatId || !authToken) return;
     if (selectedChatBlocked) {
@@ -3631,6 +3733,13 @@ export function AppShell() {
               onReactionDetails={setReactionDetails}
               onRefresh={async () => { await fetchGroups(); if (selectedGroupId) { const response = await fetch(`${apiUrl()}/api/v1/groups/${selectedGroupId}`, { headers: authHeaders(authToken) }); if (response.ok) { const data = await response.json(); setSelectedGroupDetails(data.group ?? null); } } }}
               onMessage={(message) => setGroupMessages((current) => { const existing = current[selectedGroupId] ?? []; return existing.some((item) => item.id === message.id) ? current : { ...current, [selectedGroupId]: [...existing, message] }; })}
+              onEditMessage={(message) => {
+                setGroupMessages((current) => {
+                  const existing = current[message.groupId] ?? [];
+                  return { ...current, [message.groupId]: existing.map((item) => item.id === message.id ? { ...item, ...message } : item) };
+                });
+                setGroups((current) => current.map((group) => group.latestMessage?.id === message.id ? { ...group, latestMessage: { ...group.latestMessage, ...message } } : group));
+              }}
               onLeave={() => { closeCurrentGroup(); fetchGroups(); }}
             />
           ) : selectedChat ? (
@@ -3644,6 +3753,7 @@ export function AppShell() {
                 chatMessageSearchRef={chatMessageSearchRef}
                 chatNotice={chatNotice}
                 disabled={selectedChatBlocked}
+                editMode={activeDirectEdit ? { originalBody: activeDirectEdit.originalBody } : null}
                 emojiPickerOpen={isEmojiOpen}
                 formatLastSeen={formatLastSeen}
                 isChatMenuOpen={isChatMenuOpen}
@@ -3653,6 +3763,7 @@ export function AppShell() {
                 isRecording={isRecording}
                 messages={visibleSelectedMessages}
                 onBlock={blockCurrentChat}
+                onCancelEdit={cancelDirectEdit}
                 onCancelRecording={cancelRecording}
                 onChangeDraft={handleInputChange}
                 onClear={clearCurrentChat}
@@ -3664,9 +3775,12 @@ export function AppShell() {
                 onOpenContactInfo={() => setIsContactInfoOpen(true)}
                 onOpenReactionDetails={setReactionDetails}
                 onCancelReply={() => setActiveReply(null)}
+                onEdit={startDirectEdit}
                 onReact={reactToMessage}
                 onReply={(message) => {
                   if (!selectedChatId) return;
+                  setActiveEdit(null);
+                  setEditDraft("");
                   setActiveReply({ mode: "direct", conversationId: selectedChatId, message: directReplyForMessage(message) });
                 }}
                 onRemoveAttachment={() => { if (selectedChatId) setDraftAttachment(selectedChatId, null); }}
@@ -3685,12 +3799,13 @@ export function AppShell() {
                 reactionPicker={reactionPicker}
                 recordingDuration={recordingDuration}
                 replyTo={activeDirectReply}
+                isSavingEdit={isSavingEdit}
                 resolveAttachmentSource={attachmentSource}
                 scrollContainerRef={scrollContainerRef}
                 setReactionPicker={setReactionPicker}
                 timestamp={formatMessageTime}
                 typingUser={typingUser}
-                value={currentMessageDraft}
+                value={composerValue}
               />
               <ContactInfoPanel
                 blocked={selectedChatBlocked}
@@ -4496,10 +4611,11 @@ type GroupChatPanelProps = {
   onReactionDetails: (details: { emoji: string; users: ReactionUser[] }) => void;
   onRefresh: () => Promise<void>;
   onMessage: (message: GroupChatMessage) => void;
+  onEditMessage: (message: GroupChatMessage) => void;
   onLeave: () => void;
 };
 
-function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, reactionPicker, setReactionPicker, users, onBack, onReact, onReactionDetails, onRefresh, onMessage, onLeave }: GroupChatPanelProps) {
+function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, reactionPicker, setReactionPicker, users, onBack, onReact, onReactionDetails, onRefresh, onMessage, onEditMessage, onLeave }: GroupChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState("");
@@ -4508,6 +4624,9 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const [infoError, setInfoError] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageReply | null>(null);
+  const [editingMessage, setEditingMessage] = useState<{ id: string; originalBody: string } | null>(null);
+  const [editText, setEditText] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -4517,7 +4636,7 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const canManage = group?.role === "owner" || group?.role === "admin";
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages.length]);
-  useEffect(() => { setReplyTo(null); setHighlightedMessageId(""); }, [group?.id]);
+  useEffect(() => { setReplyTo(null); setEditingMessage(null); setEditText(""); setHighlightedMessageId(""); }, [group?.id]);
   useEffect(() => () => { if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current); }, []);
   const chooseFile = (next: File | undefined) => { if (!next) return; setFile(next); setFilePreview(next.type.startsWith("image/") ? URL.createObjectURL(next) : ""); };
   const upload = async (next: File) => { const form = new FormData(); form.append("file", next); const response = await fetch(`${apiUrl()}/api/v1/upload`, { method: "POST", headers: authHeaders(authToken), body: form }); const data = await response.json(); if (!response.ok || !data.url) throw new Error(data.error || "Could not upload attachment"); return { name: next.name, type: next.type, kind: next.type.startsWith("image/") ? "image" : next.type.startsWith("video/") ? "video" : next.type.startsWith("audio/") ? "audio" : "file", url: data.url } as NonNullable<ChatMessage["attachment"]>; };
@@ -4536,13 +4655,16 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
     if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
     highlightTimeoutRef.current = window.setTimeout(() => setHighlightedMessageId(""), 1400);
   };
-  const send = async (event?: FormEvent) => { event?.preventDefault(); if ((!draft.trim() && !file) || !group || isSending) return; setIsSending(true); try { const attachment = file ? await upload(file) : undefined; const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages`, { method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body: draft.trim(), attachment, replyToMessageId: replyTo?.id }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send group message"); onMessage({ ...data.message, mine: true }); setDraft(""); setFile(null); setFilePreview(""); setReplyTo(null); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not send message"); } finally { setIsSending(false); } };
+  const startEdit = (message: GroupChatMessage) => { if (!message.mine || !message.body.trim()) return; setReplyTo(null); setEditingMessage({ id: message.id, originalBody: message.body }); setEditText(message.body); };
+  const cancelEdit = () => { setEditingMessage(null); setEditText(""); setInfoError(""); };
+  const saveEdit = async () => { if (!group || !editingMessage) return; const body = editText.trim(); if (!body) { setInfoError("Message body is required"); return; } setIsSavingEdit(true); setInfoError(""); try { const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages/${editingMessage.id}`, { method: "PATCH", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body }) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not edit group message"); const editedAt = data.message?.editedAt ?? new Date().toISOString(); onEditMessage({ ...data.message, body: data.message?.body ?? body, editedAt, mine: true }); setEditingMessage(null); setEditText(""); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not edit message"); } finally { setIsSavingEdit(false); } };
+  const send = async (event?: FormEvent) => { event?.preventDefault(); if (editingMessage) { await saveEdit(); return; } if ((!draft.trim() && !file) || !group || isSending) return; setIsSending(true); try { const attachment = file ? await upload(file) : undefined; const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages`, { method: "POST", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body: draft.trim(), attachment, replyToMessageId: replyTo?.id }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not send group message"); onMessage({ ...data.message, mine: true }); setDraft(""); setFile(null); setFilePreview(""); setReplyTo(null); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not send message"); } finally { setIsSending(false); } };
   const startRecording = async () => { if (!navigator.mediaDevices?.getUserMedia) return; const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); const recorder = new MediaRecorder(stream); chunksRef.current = []; recorder.ondataavailable = (event) => chunksRef.current.push(event.data); recorder.onstop = () => { stream.getTracks().forEach((track) => track.stop()); const voice = new File([new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" })], `voice-${Date.now()}.webm`, { type: recorder.mimeType || "audio/webm" }); setFile(voice); setFilePreview(""); setIsRecording(false); }; recorderRef.current = recorder; recorder.start(); setIsRecording(true); };
   const stopRecording = () => recorderRef.current?.stop();
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => setReplyTo(replyForMessage(item))} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} isRecording={isRecording} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelReply={() => setReplyTo(null)} onChange={setDraft} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={replyTo} value={draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onEdit={startEdit} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => { setEditingMessage(null); setEditText(""); setReplyTo(replyForMessage(item)); }} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} editMode={editingMessage ? { originalBody: editingMessage.originalBody } : null} isRecording={isRecording} isSavingEdit={isSavingEdit} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelEdit={cancelEdit} onCancelReply={() => setReplyTo(null)} onChange={(value) => editingMessage ? setEditText(value) : setDraft(value)} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={editingMessage ? null : replyTo} value={editingMessage ? editText : draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
 }
 
 function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {

@@ -544,6 +544,7 @@ func mapPublicMessage(message store.Message, viewerEmail string) map[string]any 
 		"senderId":    message.SenderID,
 		"recipientId": message.RecipientID,
 		"createdAt":   message.CreatedAt,
+		"editedAt":    message.EditedAt,
 		"readAt":      message.ReadAt,
 		"reactions":   message.Reactions,
 	}
@@ -564,7 +565,7 @@ func mapPublicMessage(message store.Message, viewerEmail string) map[string]any 
 func mapPublicGroupMessage(message store.GroupMessage) map[string]any {
 	result := map[string]any{
 		"id": message.ID, "groupId": message.GroupID, "senderId": message.SenderID,
-		"senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt,
+		"senderEmail": message.SenderEmail, "body": message.Body, "createdAt": message.CreatedAt, "editedAt": message.EditedAt,
 		"time":      message.CreatedAt.Format("3:04 PM"),
 		"reactions": message.Reactions,
 	}

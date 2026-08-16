@@ -15,9 +15,12 @@ type ComposerAttachment = {
 type DirectMessageComposerProps = {
   attachment: ComposerAttachment | null;
   disabled?: boolean;
+  editMode?: { originalBody: string } | null;
   emojiPickerOpen: boolean;
   isRecording: boolean;
+  isSavingEdit?: boolean;
   notice?: string;
+  onCancelEdit?: () => void;
   onCancelRecording: () => void;
   onChange: (value: string) => void;
   onEmojiSelect: (emoji: EmojiClickData) => void;
@@ -39,10 +42,13 @@ type DirectMessageComposerProps = {
 type GroupMessageComposerProps = {
   attachmentFile: File | null;
   attachmentPreview: string;
+  editMode?: { originalBody: string } | null;
   isRecording: boolean;
   isSending: boolean;
+  isSavingEdit?: boolean;
   onAttachment: (file: File | undefined) => void;
   onChange: (value: string) => void;
+  onCancelEdit?: () => void;
   onRemoveAttachment: () => void;
   onCancelReply?: () => void;
   onSend: (event?: FormEvent) => void;
@@ -84,6 +90,23 @@ function ComposerReplyPreview({ reply, onCancel }: { reply?: MessageReply | null
   );
 }
 
+function ComposerEditPreview({ body, onCancel }: { body?: string; onCancel?: () => void }) {
+  if (!body) return null;
+  return (
+    <div className="mb-3 flex min-w-0 items-center gap-3 rounded-xl border border-[#dce1e8] border-l-4 border-l-[#00a884] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs font-black text-[#008f70]">Editing message</div>
+        <div className="mt-0.5 truncate text-xs font-semibold text-[#64748b]">{body}</div>
+      </div>
+      {onCancel ? (
+        <button aria-label="Cancel edit" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#64748b] hover:bg-white hover:text-[#18212f]" onClick={onCancel} type="button">
+          <X size={16} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function MessageComposer(props: MessageComposerProps) {
   if (props.mode === "group") {
     return <GroupMessageComposer {...props} />;
@@ -95,9 +118,12 @@ export function MessageComposer(props: MessageComposerProps) {
 function DirectMessageComposer({
   attachment,
   disabled,
+  editMode,
   emojiPickerOpen,
   isRecording,
+  isSavingEdit,
   notice,
+  onCancelEdit,
   onCancelRecording,
   onChange,
   onEmojiSelect,
@@ -116,6 +142,8 @@ function DirectMessageComposer({
   value
 }: DirectMessageComposerProps) {
   const mediaInputRef = useRef<HTMLInputElement>(null);
+  const isEditing = Boolean(editMode);
+  const hasSubmittableAttachment = !isEditing && Boolean(attachment);
   const sendOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
@@ -125,13 +153,13 @@ function DirectMessageComposer({
   return (
     <>
       {notice ? <div className="mb-3 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm font-semibold text-[#64748b]">{notice}</div> : null}
-      {emojiPickerOpen ? (
+      {emojiPickerOpen && !isEditing ? (
         <div className="cs-scale-in absolute bottom-[78px] left-3 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl sm:left-5">
           <EmojiPicker height={390} onEmojiClick={onEmojiSelect} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
         </div>
       ) : null}
-      <ComposerReplyPreview reply={replyTo} onCancel={onCancelReply} />
-      {attachment ? (
+      {isEditing ? <ComposerEditPreview body={editMode?.originalBody} onCancel={onCancelEdit} /> : <ComposerReplyPreview reply={replyTo} onCancel={onCancelReply} />}
+      {attachment && !isEditing ? (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
           <div className="min-w-0 truncate">
             <span className="font-black text-[#00a884]">{attachment.kind.toUpperCase()}</span> {attachment.name}
@@ -172,18 +200,18 @@ function DirectMessageComposer({
         </div>
       ) : (
         <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
-          <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${emojiPickerOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={onEmojiToggle} type="button">
+          {!isEditing ? <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${emojiPickerOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={onEmojiToggle} type="button">
             <Smile size={22} />
-          </button>
-          <button
+          </button> : null}
+          {!isEditing ? <button
             type="button"
             aria-label="Attach image or video"
             className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]"
             onClick={() => mediaInputRef.current?.click()}
           >
             <Image size={22} />
-          </button>
-          <input
+          </button> : null}
+          {!isEditing ? <input
             type="file"
             accept="image/*,video/*"
             className="hidden"
@@ -194,8 +222,8 @@ function DirectMessageComposer({
                 event.target.value = "";
               }
             }}
-          />
-          <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
+          /> : null}
+          {!isEditing ? <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
             <Paperclip size={22} />
             <input
               accept={FILE_ACCEPT}
@@ -207,7 +235,7 @@ function DirectMessageComposer({
               }}
               type="file"
             />
-          </label>
+          </label> : null}
           <input
             className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
             onChange={(event) => onChange(event.target.value)}
@@ -216,7 +244,7 @@ function DirectMessageComposer({
             value={value}
             disabled={disabled}
           />
-          {!value.trim() && !attachment && !disabled ? (
+          {!isEditing && !value.trim() && !attachment && !disabled ? (
             <button
               aria-label="Record voice message"
               className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]"
@@ -226,8 +254,8 @@ function DirectMessageComposer({
               <Mic size={22} />
             </button>
           ) : null}
-          <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={disabled || (!value.trim() && !attachment)} onClick={onSend}>
-            <span className="hidden sm:inline">Send</span>
+          <button aria-label={isEditing ? "Save edit" : "Send"} className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={disabled || isSavingEdit || (!value.trim() && !hasSubmittableAttachment)} onClick={onSend}>
+            <span className="hidden sm:inline">{isEditing ? (isSavingEdit ? "Saving..." : "Save") : "Send"}</span>
             <Send size={18} />
           </button>
         </div>
@@ -239,10 +267,13 @@ function DirectMessageComposer({
 function GroupMessageComposer({
   attachmentFile,
   attachmentPreview,
+  editMode,
   isRecording,
   isSending,
+  isSavingEdit,
   onAttachment,
   onChange,
+  onCancelEdit,
   onCancelReply,
   onRemoveAttachment,
   onSend,
@@ -251,6 +282,8 @@ function GroupMessageComposer({
   replyTo,
   value
 }: GroupMessageComposerProps) {
+  const isEditing = Boolean(editMode);
+  const hasSubmittableAttachment = !isEditing && Boolean(attachmentFile);
   const sendOnEnter = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -260,15 +293,15 @@ function GroupMessageComposer({
 
   return (
     <form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={onSend}>
-      <ComposerReplyPreview reply={replyTo} onCancel={onCancelReply} />
-      {attachmentFile ? (
+      {isEditing ? <ComposerEditPreview body={editMode?.originalBody} onCancel={onCancelEdit} /> : <ComposerReplyPreview reply={replyTo} onCancel={onCancelReply} />}
+      {attachmentFile && !isEditing ? (
         <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">
           {attachmentPreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={attachmentPreview} /> : <span>{attachmentFile.name}</span>}
           <button className="text-[#64748b]" onClick={onRemoveAttachment} type="button">Remove</button>
         </div>
       ) : null}
       <div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2">
-        <label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white">
+        {!isEditing ? <label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white">
           <Paperclip size={20} />
           <input
             accept={FILE_ACCEPT}
@@ -279,7 +312,7 @@ function GroupMessageComposer({
             }}
             type="file"
           />
-        </label>
+        </label> : null}
         {isRecording ? (
           <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={onStopRecording} type="button">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop
@@ -293,12 +326,12 @@ function GroupMessageComposer({
             value={value}
           />
         )}
-        {!value.trim() && !attachmentFile && !isRecording ? (
+        {!isEditing && !value.trim() && !attachmentFile && !isRecording ? (
           <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={onStartRecording} type="button">
             <Mic size={20} />
           </button>
         ) : null}
-        <button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!value.trim() && !attachmentFile)} type="submit">
+        <button aria-label={isEditing ? "Save group message edit" : "Send group message"} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || isSavingEdit || (!value.trim() && !hasSubmittableAttachment)} type="submit">
           <Send size={17} />
         </button>
       </div>
