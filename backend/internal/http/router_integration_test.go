@@ -85,6 +85,23 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	if editPayload.Message["body"] != "Edited private message from Ali" || editPayload.Message["editedAt"] == nil {
 		t.Fatalf("direct edit response missing body/editedAt: %+v", editPayload.Message)
 	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+messageID, ali.Token, nil, http.StatusOK)
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+messageID, ali.Token, nil, http.StatusOK)
+	aliStarred := getMessages(t, router, "/api/v1/messages/starred/"+hamza.ID, ali.Token)
+	aliStarredMessage := foundMessage(aliStarred, messageID)
+	if aliStarredMessage == nil || aliStarredMessage["isStarred"] != true || aliStarredMessage["body"] != "Edited private message from Ali" {
+		t.Fatalf("direct starred list should include current edited content for starring user: %+v", aliStarred)
+	}
+	hamzaReadbackStar := foundMessage(getMessages(t, router, "/api/v1/messages/"+ali.ID, hamza.Token), messageID)
+	if hamzaReadbackStar == nil || hamzaReadbackStar["isStarred"] == true {
+		t.Fatalf("direct star state leaked to other participant: %+v", hamzaReadbackStar)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+messageID, mohsin.Token, nil, http.StatusNotFound)
+	requestJSON(t, router, http.MethodDelete, "/api/v1/messages/stars/"+messageID, ali.Token, nil, http.StatusOK)
+	if foundMessage(getMessages(t, router, "/api/v1/messages/starred/"+hamza.ID, ali.Token), messageID) != nil {
+		t.Fatal("direct unstar should remove message from starred list")
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+messageID, ali.Token, nil, http.StatusOK)
 	requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+messageID, hamza.Token, map[string]any{"body": "Recipient edit attempt"}, http.StatusNotFound)
 	replyEditResp := requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+replyMessageID, hamza.Token, map[string]any{"body": "Edited reply to Ali"}, http.StatusOK)
 	var replyEditPayload struct {
@@ -136,10 +153,15 @@ func TestPrivateMessagingFlow(t *testing.T) {
 		t.Fatalf("decode direct delete-for-me message: %v", err)
 	}
 	privateDeleteID, _ := privateDeletePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+privateDeleteID, hamza.Token, nil, http.StatusOK)
 	requestJSON(t, router, http.MethodDelete, "/api/v1/messages/"+privateDeleteID+"/me", hamza.Token, nil, http.StatusOK)
 	if foundMessage(getMessages(t, router, "/api/v1/messages/"+ali.ID, hamza.Token), privateDeleteID) != nil {
 		t.Fatal("direct delete for me should hide message from deleting recipient")
 	}
+	if foundMessage(getMessages(t, router, "/api/v1/messages/starred/"+ali.ID, hamza.Token), privateDeleteID) != nil {
+		t.Fatal("direct delete for me should hide message from starred results")
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+privateDeleteID, hamza.Token, nil, http.StatusNotFound)
 	if foundMessage(getMessages(t, router, "/api/v1/messages/"+hamza.ID, ali.Token), privateDeleteID) == nil {
 		t.Fatal("direct delete for me should not hide message from other participant")
 	}
@@ -160,6 +182,7 @@ func TestPrivateMessagingFlow(t *testing.T) {
 		t.Fatalf("decode direct delete-everyone message: %v", err)
 	}
 	deleteEveryoneID, _ := deleteEveryonePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodPost, "/api/v1/messages/stars/"+deleteEveryoneID, ali.Token, nil, http.StatusOK)
 	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+deleteEveryoneID, hamza.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
 	requestJSON(t, router, http.MethodDelete, "/api/v1/messages/"+deleteEveryoneID+"/everyone", hamza.Token, nil, http.StatusNotFound)
 	deleteEveryoneResult := requestJSON(t, router, http.MethodDelete, "/api/v1/messages/"+deleteEveryoneID+"/everyone", ali.Token, nil, http.StatusOK)
@@ -171,6 +194,9 @@ func TestPrivateMessagingFlow(t *testing.T) {
 	}
 	if deletedDirect.Message["deletedForEveryone"] != true || deletedDirect.Message["body"] != "" || deletedDirect.Message["attachment"] != nil || len(reactionsFromMap(deletedDirect.Message)) != 0 {
 		t.Fatalf("direct tombstone leaked content/reactions: %+v", deletedDirect.Message)
+	}
+	if foundMessage(getMessages(t, router, "/api/v1/messages/starred/"+hamza.ID, ali.Token), deleteEveryoneID) != nil {
+		t.Fatal("direct delete for everyone should not expose content through starred results")
 	}
 	requestJSON(t, router, http.MethodPatch, "/api/v1/messages/"+deleteEveryoneID, ali.Token, map[string]any{"body": "Edit deleted message"}, http.StatusBadRequest)
 	requestJSON(t, router, http.MethodPost, "/api/v1/messages/reactions/"+deleteEveryoneID, hamza.Token, map[string]any{"emoji": "🙏"}, http.StatusNotFound)
@@ -463,6 +489,32 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	if groupEditPayload.Message["body"] != "Edited welcome to the group" || groupEditPayload.Message["editedAt"] == nil {
 		t.Fatalf("group edit response missing body/editedAt: %+v", groupEditPayload.Message)
 	}
+	groupStarResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/star", member.Token, nil, http.StatusOK)
+	var groupStarPayload struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(groupStarResp.Body.Bytes(), &groupStarPayload); err != nil {
+		t.Fatalf("decode group star response: %v", err)
+	}
+	if groupStarPayload.Message["isStarred"] != true {
+		t.Fatalf("group star response missing private star state: %+v", groupStarPayload.Message)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/star", member.Token, nil, http.StatusOK)
+	memberStarredGroup := getMessages(t, router, "/api/v1/groups/"+groupID+"/messages/starred", member.Token)
+	memberStarredGroupMessage := foundMessage(memberStarredGroup, groupMessageID)
+	if memberStarredGroupMessage == nil || memberStarredGroupMessage["isStarred"] != true || memberStarredGroupMessage["body"] != "Edited welcome to the group" {
+		t.Fatalf("group starred list should include current edited content for starring member: %+v", memberStarredGroup)
+	}
+	ownerGroupReadbackStar := foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", owner.Token), groupMessageID)
+	if ownerGroupReadbackStar == nil || ownerGroupReadbackStar["isStarred"] == true {
+		t.Fatalf("group star state leaked to another member: %+v", ownerGroupReadbackStar)
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/star", stranger.Token, nil, http.StatusForbidden)
+	requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/star", member.Token, nil, http.StatusOK)
+	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages/starred", member.Token), groupMessageID) != nil {
+		t.Fatal("group unstar should remove message from starred list")
+	}
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID+"/star", member.Token, nil, http.StatusOK)
 	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupMessageID, outsider.Token, map[string]any{"body": "Other member edit attempt"}, http.StatusForbidden)
 	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupReplyID, owner.Token, map[string]any{"body": "Owner edits member reply"}, http.StatusForbidden)
 	otherGroupResp := requestJSON(t, router, http.MethodPost, "/api/v1/groups", owner.Token, map[string]any{"name": "Other group", "memberIds": []string{member.ID}}, http.StatusOK)
@@ -510,9 +562,13 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 		t.Fatalf("decode group delete-for-me message: %v", err)
 	}
 	groupPrivateDeleteID, _ := groupPrivateDeletePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupPrivateDeleteID+"/star", member.Token, nil, http.StatusOK)
 	requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupPrivateDeleteID+"/me", member.Token, nil, http.StatusOK)
 	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", member.Token), groupPrivateDeleteID) != nil {
 		t.Fatal("group delete for me should hide message from deleting member")
+	}
+	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages/starred", member.Token), groupPrivateDeleteID) != nil {
+		t.Fatal("group delete for me should hide message from starred results")
 	}
 	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages", owner.Token), groupPrivateDeleteID) == nil {
 		t.Fatal("group delete for me should not hide message from other members")
@@ -533,6 +589,7 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 		t.Fatalf("decode group delete-everyone message: %v", err)
 	}
 	groupDeleteEveryoneID, _ := groupDeleteEveryonePayload.Message["id"].(string)
+	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/star", member.Token, nil, http.StatusOK)
 	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/reactions", owner.Token, map[string]any{"emoji": "❤️"}, http.StatusOK)
 	requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/everyone", owner.Token, nil, http.StatusForbidden)
 	groupDeleteEveryoneResult := requestJSON(t, router, http.MethodDelete, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/everyone", member.Token, nil, http.StatusOK)
@@ -544,6 +601,9 @@ func TestGroupsLifecycleAndAuthorization(t *testing.T) {
 	}
 	if deletedGroup.Message["deletedForEveryone"] != true || deletedGroup.Message["body"] != "" || deletedGroup.Message["attachment"] != nil || len(reactionsFromMap(deletedGroup.Message)) != 0 {
 		t.Fatalf("group tombstone leaked content/reactions: %+v", deletedGroup.Message)
+	}
+	if foundMessage(getMessages(t, router, "/api/v1/groups/"+groupID+"/messages/starred", member.Token), groupDeleteEveryoneID) != nil {
+		t.Fatal("group delete for everyone should not expose content through starred results")
 	}
 	requestJSON(t, router, http.MethodPatch, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID, member.Token, map[string]any{"body": "Edit deleted group message"}, http.StatusBadRequest)
 	requestJSON(t, router, http.MethodPost, "/api/v1/groups/"+groupID+"/messages/"+groupDeleteEveryoneID+"/reactions", owner.Token, map[string]any{"emoji": "🙏"}, http.StatusForbidden)

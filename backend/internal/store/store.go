@@ -46,6 +46,7 @@ type dataFile struct {
 	GroupMessages []GroupMessage            `json:"groupMessages,omitempty"`
 	Reactions     []MessageReaction         `json:"messageReactions,omitempty"`
 	Deletions     []MessageDeletion         `json:"messageDeletions,omitempty"`
+	Starred       []StarredMessage          `json:"starredMessages,omitempty"`
 }
 
 type User struct {
@@ -79,6 +80,7 @@ type Message struct {
 	DeletedForEveryoneBy string            `json:"deletedForEveryoneBy,omitempty"`
 	ReadAt               *time.Time        `json:"readAt,omitempty"`
 	Reactions            []ReactionSummary `json:"reactions,omitempty"`
+	IsStarred            bool              `json:"isStarred,omitempty"`
 }
 
 type MessageReply struct {
@@ -164,6 +166,7 @@ type GroupMessage struct {
 	DeletedForEveryoneAt *time.Time        `json:"deletedForEveryoneAt,omitempty"`
 	DeletedForEveryoneBy string            `json:"deletedForEveryoneBy,omitempty"`
 	Reactions            []ReactionSummary `json:"reactions,omitempty"`
+	IsStarred            bool              `json:"isStarred,omitempty"`
 }
 
 type MessageReaction struct {
@@ -179,6 +182,13 @@ type MessageDeletion struct {
 	MessageID   string    `json:"messageId"`
 	UserID      string    `json:"userId"`
 	DeletedAt   time.Time `json:"deletedAt"`
+}
+
+type StarredMessage struct {
+	MessageType string    `json:"messageType"`
+	MessageID   string    `json:"messageId"`
+	UserID      string    `json:"userId"`
+	StarredAt   time.Time `json:"starredAt"`
 }
 
 type ReactionUser struct {
@@ -1101,7 +1111,7 @@ func (s *Store) ListMessages(userEmail, otherUserID string, limit int) ([]Messag
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.withMessageReactions(s.withMessageReplies(messages, user.ID), user.ID), nil
+	return s.withMessageStars(s.withMessageReactions(s.withMessageReplies(messages, user.ID), user.ID), user.ID), nil
 }
 
 func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error) {
@@ -1154,7 +1164,7 @@ func (s *Store) ListInboxMessages(userEmail string, limit int) ([]Message, error
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.withMessageReactions(s.withMessageReplies(messages, user.ID), user.ID), nil
+	return s.withMessageStars(s.withMessageReactions(s.withMessageReplies(messages, user.ID), user.ID), user.ID), nil
 }
 
 func (s *Store) MarkConversationRead(userEmail, otherUserID string) error {
@@ -1263,6 +1273,7 @@ func (s *Store) DeleteMessageForMe(userEmail, id string) error {
 			values ('direct',$1,$2,now())
 			on conflict (message_type,message_id,user_id) do update set deleted_at=excluded.deleted_at
 		`, id, user.ID)
+		_, _ = s.db.Exec(context.Background(), `delete from starred_messages where message_type='direct' and message_id=$1 and user_id=$2`, id, user.ID)
 		return err
 	}
 	_, err = s.my.ExecContext(context.Background(), `
@@ -1270,6 +1281,7 @@ func (s *Store) DeleteMessageForMe(userEmail, id string) error {
 		values ('direct',?,?,utc_timestamp())
 		on duplicate key update deleted_at=values(deleted_at)
 	`, id, user.ID)
+	_, _ = s.my.ExecContext(context.Background(), `delete from starred_messages where message_type='direct' and message_id=? and user_id=?`, id, user.ID)
 	return err
 }
 
@@ -1299,6 +1311,7 @@ func (s *Store) DeleteMessageForEveryone(userEmail, id string) (Message, error) 
 			return Message{}, err
 		}
 		_, _ = s.db.Exec(context.Background(), `delete from message_reactions where message_type='direct' and message_id=$1`, id)
+		_, _ = s.db.Exec(context.Background(), `delete from starred_messages where message_type='direct' and message_id=$1`, id)
 		return s.MessageByID(id)
 	}
 	_, err = s.my.ExecContext(context.Background(), `
@@ -1311,6 +1324,7 @@ func (s *Store) DeleteMessageForEveryone(userEmail, id string) (Message, error) 
 		return Message{}, err
 	}
 	_, _ = s.my.ExecContext(context.Background(), `delete from message_reactions where message_type='direct' and message_id=?`, id)
+	_, _ = s.my.ExecContext(context.Background(), `delete from starred_messages where message_type='direct' and message_id=?`, id)
 	return s.MessageByID(id)
 }
 
@@ -1506,6 +1520,14 @@ func (s *Store) migrate(ctx context.Context) error {
 				deleted_at datetime not null default current_timestamp,
 				primary key (message_type, message_id, user_id)
 			)`,
+			`
+			create table if not exists starred_messages (
+				message_type varchar(16) not null,
+				message_id varchar(64) not null,
+				user_id varchar(64) not null,
+				starred_at datetime not null default current_timestamp,
+				primary key (user_id, message_type, message_id)
+			)`,
 		}
 		for _, statement := range statements {
 			if _, err := s.my.ExecContext(ctx, statement); err != nil {
@@ -1585,6 +1607,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		_, _ = s.my.ExecContext(ctx, `create index idx_call_history_caller on call_history(caller_id)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_call_history_recipient on call_history(recipient_id)`)
 		_, _ = s.my.ExecContext(ctx, `create index idx_message_reactions_message on message_reactions (message_type, message_id)`)
+		_, _ = s.my.ExecContext(ctx, `create index idx_starred_messages_user on starred_messages (user_id, message_type, starred_at)`)
 		return nil
 	}
 	_, err := s.db.Exec(ctx, `
@@ -1731,6 +1754,14 @@ func (s *Store) migrate(ctx context.Context) error {
 			deleted_at timestamptz not null default now(),
 			primary key (message_type, message_id, user_id)
 		);
+		create table if not exists starred_messages (
+			message_type text not null,
+			message_id text not null,
+			user_id text not null,
+			starred_at timestamptz not null default now(),
+			primary key (user_id, message_type, message_id)
+		);
+		create index if not exists idx_starred_messages_user on starred_messages(user_id, message_type, starred_at);
 	`)
 	if err != nil {
 		return err
@@ -2056,6 +2087,279 @@ func (s *Store) ToggleGroupMessageReaction(groupID, messageID, userID, emoji str
 	return message, summaries[message.ID], targets, nil
 }
 
+func (s *Store) StarMessage(messageID, userID string) (Message, error) {
+	message, err := s.MessageByID(messageID)
+	if err != nil {
+		return Message{}, errors.New("message not found")
+	}
+	user, err := s.UserByID(userID)
+	if err != nil {
+		return Message{}, err
+	}
+	if message.SenderID != user.ID && message.RecipientID != user.ID && !strings.EqualFold(message.SenderEmail, user.Email) {
+		return Message{}, errors.New("message not found")
+	}
+	if message.DeletedForEveryoneAt != nil || s.messageDeletedForUser("direct", message.ID, user.ID) {
+		return Message{}, errors.New("message not found")
+	}
+	if err := s.setStarred("direct", message.ID, user.ID, true); err != nil {
+		return Message{}, err
+	}
+	message.IsStarred = true
+	return message, nil
+}
+
+func (s *Store) UnstarMessage(messageID, userID string) (Message, error) {
+	message, err := s.MessageByID(messageID)
+	if err != nil {
+		return Message{}, errors.New("message not found")
+	}
+	user, err := s.UserByID(userID)
+	if err != nil {
+		return Message{}, err
+	}
+	if message.SenderID != user.ID && message.RecipientID != user.ID && !strings.EqualFold(message.SenderEmail, user.Email) {
+		return Message{}, errors.New("message not found")
+	}
+	if err := s.setStarred("direct", message.ID, user.ID, false); err != nil {
+		return Message{}, err
+	}
+	message.IsStarred = false
+	return message, nil
+}
+
+func (s *Store) StarGroupMessage(groupID, messageID, userID string) (GroupMessage, error) {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return GroupMessage{}, errors.New("group membership required")
+	}
+	message, err := s.groupMessageByID(groupID, messageID)
+	if err != nil {
+		return GroupMessage{}, errors.New("message not found")
+	}
+	if message.DeletedForEveryoneAt != nil || s.messageDeletedForUser("group", message.ID, userID) {
+		return GroupMessage{}, errors.New("message not found")
+	}
+	if err := s.setStarred("group", message.ID, userID, true); err != nil {
+		return GroupMessage{}, err
+	}
+	message.IsStarred = true
+	return message, nil
+}
+
+func (s *Store) UnstarGroupMessage(groupID, messageID, userID string) (GroupMessage, error) {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return GroupMessage{}, errors.New("group membership required")
+	}
+	message, err := s.groupMessageByID(groupID, messageID)
+	if err != nil {
+		return GroupMessage{}, errors.New("message not found")
+	}
+	if err := s.setStarred("group", message.ID, userID, false); err != nil {
+		return GroupMessage{}, err
+	}
+	message.IsStarred = false
+	return message, nil
+}
+
+func (s *Store) ListStarredMessages(userID, otherUserID string, limit int) ([]Message, error) {
+	user, err := s.UserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	other, err := s.UserByID(otherUserID)
+	if err != nil {
+		return nil, errors.New("other user not found")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	messages, err := s.ListMessages(user.Email, other.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Message, 0, len(messages))
+	for _, message := range messages {
+		if message.IsStarred {
+			result = append(result, message)
+		}
+	}
+	return result, nil
+	convID := conversationID(user.ID, other.ID)
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `
+			select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, now()), m.edited_at, m.deleted_for_everyone_at, coalesce(m.deleted_for_everyone_by, ''), m.read_at
+			from starred_messages sm
+			join messages m on m.id=sm.message_id
+			left join app_users u on u.email=m.sender_email
+			where sm.user_id=$1 and sm.message_type='direct'
+			  and m.deleted_for_everyone_at is null
+			  and not exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=$1)
+			  and (
+			   coalesce(m.conversation_id, '') = $2
+			   or (coalesce(m.sender_id, '') = $1 and coalesce(m.recipient_id, '') = $3)
+			   or (coalesce(m.sender_id, '') = $3 and coalesce(m.recipient_id, '') = $1)
+			   or (lower(coalesce(m.sender_email, '')) = lower($4) and coalesce(m.recipient_id, '') = $3)
+			   or (lower(coalesce(m.sender_email, '')) = lower($5) and coalesce(m.recipient_id, '') = $1)
+			  )
+			order by sm.starred_at desc
+			limit $6
+		`, user.ID, convID, other.ID, user.Email, other.Email, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		result, err := scanDirectMessageRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		return s.withMessageStars(s.withMessageReactions(s.withMessageReplies(result, user.ID), user.ID), user.ID), nil
+	}
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `
+			select m.id, coalesce(m.conversation_id, ''), coalesce(m.sender_email, ''), coalesce(nullif(m.sender_id, ''), u.id, ''), coalesce(m.recipient_id, ''), coalesce(m.body, ''), coalesce(m.attachment_name, ''), coalesce(m.attachment_type, ''), coalesce(m.attachment_kind, ''), coalesce(m.attachment_url, ''), coalesce(m.reply_to_message_id, ''), coalesce(m.created_at, utc_timestamp()), m.edited_at, m.deleted_for_everyone_at, coalesce(m.deleted_for_everyone_by, ''), m.read_at
+			from starred_messages sm
+			join messages m on m.id=sm.message_id
+			left join app_users u on u.email=m.sender_email
+			where sm.user_id=? and sm.message_type='direct'
+			  and m.deleted_for_everyone_at is null
+			  and not exists (select 1 from message_deletions md where md.message_type='direct' and md.message_id=m.id and md.user_id=?)
+			  and (
+			   coalesce(m.conversation_id, '') = ?
+			   or (coalesce(m.sender_id, '') = ? and coalesce(m.recipient_id, '') = ?)
+			   or (coalesce(m.sender_id, '') = ? and coalesce(m.recipient_id, '') = ?)
+			   or (lower(coalesce(m.sender_email, '')) = lower(?) and coalesce(m.recipient_id, '') = ?)
+			   or (lower(coalesce(m.sender_email, '')) = lower(?) and coalesce(m.recipient_id, '') = ?)
+			  )
+			order by sm.starred_at desc
+			limit ?
+		`, user.ID, user.ID, convID, user.ID, other.ID, other.ID, user.ID, user.Email, other.ID, other.Email, user.ID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		result, err := scanDirectMessageRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		return s.withMessageStars(s.withMessageReactions(s.withMessageReplies(result, user.ID), user.ID), user.ID), nil
+	}
+	return []Message{}, nil
+}
+
+func (s *Store) ListStarredGroupMessages(groupID, userID string, limit int) ([]GroupMessage, error) {
+	if _, err := s.groupRole(groupID, userID); err != nil {
+		return nil, errors.New("group membership required")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	messages, err := s.ListGroupMessages(groupID, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]GroupMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.IsStarred {
+			result = append(result, message)
+		}
+	}
+	return result, nil
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `
+			select gm.id,gm.group_id,gm.sender_id,gm.sender_email,gm.body,gm.attachment_name,gm.attachment_type,gm.attachment_kind,gm.attachment_url,coalesce(gm.reply_to_message_id,''),gm.created_at,gm.edited_at,gm.deleted_for_everyone_at,coalesce(gm.deleted_for_everyone_by,'')
+			from group_messages gm
+			where gm.group_id=$1
+			  and exists (select 1 from starred_messages sm where sm.user_id=$2 and sm.message_type='group' and sm.message_id=gm.id)
+			  and gm.deleted_for_everyone_at is null
+			  and not exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=$2)
+			order by (select sm.starred_at from starred_messages sm where sm.user_id=$2 and sm.message_type='group' and sm.message_id=gm.id) desc
+			limit $3
+		`, groupID, userID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		result, err := scanGroupMessageRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		return s.withGroupMessageStars(s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), userID), nil
+	}
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `
+			select gm.id,gm.group_id,gm.sender_id,gm.sender_email,gm.body,gm.attachment_name,gm.attachment_type,gm.attachment_kind,gm.attachment_url,coalesce(gm.reply_to_message_id,''),gm.created_at,gm.edited_at,gm.deleted_for_everyone_at,coalesce(gm.deleted_for_everyone_by,'')
+			from group_messages gm
+			where gm.group_id=?
+			  and exists (select 1 from starred_messages sm where sm.user_id=? and sm.message_type='group' and sm.message_id=gm.id)
+			  and gm.deleted_for_everyone_at is null
+			  and not exists (select 1 from message_deletions md where md.message_type='group' and md.message_id=gm.id and md.user_id=?)
+			order by (select sm.starred_at from starred_messages sm where sm.user_id=? and sm.message_type='group' and sm.message_id=gm.id) desc
+			limit ?
+		`, groupID, userID, userID, userID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		result, err := scanGroupMessageRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		return s.withGroupMessageStars(s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), userID), nil
+	}
+	return []GroupMessage{}, nil
+}
+
+func (s *Store) setStarred(messageType, messageID, userID string, starred bool) error {
+	messageType = strings.TrimSpace(messageType)
+	messageID = strings.TrimSpace(messageID)
+	userID = strings.TrimSpace(userID)
+	if messageType == "" || messageID == "" || userID == "" {
+		return errors.New("message not found")
+	}
+	now := time.Now().UTC()
+	if s.db != nil {
+		if !starred {
+			_, err := s.db.Exec(context.Background(), `delete from starred_messages where message_type=$1 and message_id=$2 and user_id=$3`, messageType, messageID, userID)
+			return err
+		}
+		_, err := s.db.Exec(context.Background(), `
+			insert into starred_messages (message_type,message_id,user_id,starred_at)
+			values ($1,$2,$3,$4)
+			on conflict (user_id,message_type,message_id) do update set starred_at=excluded.starred_at
+		`, messageType, messageID, userID, now)
+		return err
+	}
+	if s.my != nil {
+		if !starred {
+			_, err := s.my.ExecContext(context.Background(), `delete from starred_messages where message_type=? and message_id=? and user_id=?`, messageType, messageID, userID)
+			return err
+		}
+		_, err := s.my.ExecContext(context.Background(), `
+			insert into starred_messages (message_type,message_id,user_id,starred_at)
+			values (?,?,?,?)
+			on duplicate key update starred_at=values(starred_at)
+		`, messageType, messageID, userID, now)
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.data.Starred {
+		item := s.data.Starred[index]
+		if item.MessageType == messageType && item.MessageID == messageID && item.UserID == userID {
+			if !starred {
+				s.data.Starred = append(s.data.Starred[:index], s.data.Starred[index+1:]...)
+			} else {
+				s.data.Starred[index].StarredAt = now
+			}
+			return s.saveLocked()
+		}
+	}
+	if starred {
+		s.data.Starred = append(s.data.Starred, StarredMessage{MessageType: messageType, MessageID: messageID, UserID: userID, StarredAt: now})
+	}
+	return s.saveLocked()
+}
+
 func (s *Store) withMessageReplies(messages []Message, viewerID string) []Message {
 	for index := range messages {
 		replyID := strings.TrimSpace(messages[index].ReplyToMessageID)
@@ -2179,6 +2483,18 @@ func (s *Store) withMessageReactions(messages []Message, viewerID string) []Mess
 	return messages
 }
 
+func (s *Store) withMessageStars(messages []Message, viewerID string) []Message {
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	starred, _ := s.starredMap("direct", ids, viewerID)
+	for index := range messages {
+		messages[index].IsStarred = starred[messages[index].ID]
+	}
+	return messages
+}
+
 func (s *Store) withGroupMessageReactions(messages []GroupMessage, viewerID string) []GroupMessage {
 	ids := make([]string, 0, len(messages))
 	for _, message := range messages {
@@ -2189,6 +2505,55 @@ func (s *Store) withGroupMessageReactions(messages []GroupMessage, viewerID stri
 		messages[index].Reactions = summaries[messages[index].ID]
 	}
 	return messages
+}
+
+func (s *Store) withGroupMessageStars(messages []GroupMessage, viewerID string) []GroupMessage {
+	ids := make([]string, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	starred, _ := s.starredMap("group", ids, viewerID)
+	for index := range messages {
+		messages[index].IsStarred = starred[messages[index].ID]
+	}
+	return messages
+}
+
+func (s *Store) starredMap(messageType string, messageIDs []string, viewerID string) (map[string]bool, error) {
+	result := make(map[string]bool, len(messageIDs))
+	viewerID = strings.TrimSpace(viewerID)
+	if len(messageIDs) == 0 || viewerID == "" {
+		return result, nil
+	}
+	for _, messageID := range messageIDs {
+		if s.db != nil {
+			var exists bool
+			err := s.db.QueryRow(context.Background(), `select exists(select 1 from starred_messages where message_type=$1 and message_id=$2 and user_id=$3)`, messageType, messageID, viewerID).Scan(&exists)
+			if err != nil {
+				return result, err
+			}
+			result[messageID] = exists
+			continue
+		}
+		if s.my != nil {
+			var count int
+			err := s.my.QueryRowContext(context.Background(), `select count(*) from starred_messages where message_type=? and message_id=? and user_id=?`, messageType, messageID, viewerID).Scan(&count)
+			if err != nil {
+				return result, err
+			}
+			result[messageID] = count > 0
+			continue
+		}
+		s.mu.Lock()
+		for _, item := range s.data.Starred {
+			if item.MessageType == messageType && item.MessageID == messageID && item.UserID == viewerID {
+				result[messageID] = true
+				break
+			}
+		}
+		s.mu.Unlock()
+	}
+	return result, nil
 }
 
 func (s *Store) withGroupMessageReplies(messages []GroupMessage, viewerID string) []GroupMessage {
@@ -3612,6 +3977,7 @@ func (s *Store) DeleteGroupMessageForMe(groupID, messageID, userID string) error
 			values ('group',$1,$2,now())
 			on conflict (message_type,message_id,user_id) do update set deleted_at=excluded.deleted_at
 		`, messageID, userID)
+		_, _ = s.db.Exec(context.Background(), `delete from starred_messages where message_type='group' and message_id=$1 and user_id=$2`, messageID, userID)
 		return err
 	}
 	if s.my != nil {
@@ -3620,6 +3986,7 @@ func (s *Store) DeleteGroupMessageForMe(groupID, messageID, userID string) error
 			values ('group',?,?,utc_timestamp())
 			on duplicate key update deleted_at=values(deleted_at)
 		`, messageID, userID)
+		_, _ = s.my.ExecContext(context.Background(), `delete from starred_messages where message_type='group' and message_id=? and user_id=?`, messageID, userID)
 		return err
 	}
 	s.mu.Lock()
@@ -3657,6 +4024,7 @@ func (s *Store) DeleteGroupMessageForEveryone(groupID, messageID, userID string)
 			return GroupMessage{}, err
 		}
 		_, _ = s.db.Exec(context.Background(), `delete from message_reactions where message_type='group' and message_id=$1`, messageID)
+		_, _ = s.db.Exec(context.Background(), `delete from starred_messages where message_type='group' and message_id=$1`, messageID)
 		return s.groupMessageByID(groupID, messageID)
 	}
 	if s.my != nil {
@@ -3670,6 +4038,7 @@ func (s *Store) DeleteGroupMessageForEveryone(groupID, messageID, userID string)
 			return GroupMessage{}, err
 		}
 		_, _ = s.my.ExecContext(context.Background(), `delete from message_reactions where message_type='group' and message_id=?`, messageID)
+		_, _ = s.my.ExecContext(context.Background(), `delete from starred_messages where message_type='group' and message_id=?`, messageID)
 		return s.groupMessageByID(groupID, messageID)
 	}
 	s.mu.Lock()
@@ -3693,6 +4062,13 @@ func (s *Store) DeleteGroupMessageForEveryone(groupID, messageID, userID string)
 				}
 			}
 			s.data.Reactions = filtered
+			starred := s.data.Starred[:0]
+			for _, item := range s.data.Starred {
+				if item.MessageType != "group" || item.MessageID != messageID {
+					starred = append(starred, item)
+				}
+			}
+			s.data.Starred = starred
 			if err := s.saveLocked(); err != nil {
 				return GroupMessage{}, err
 			}
@@ -3734,7 +4110,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		return s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), nil
+		return s.withGroupMessageStars(s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), userID), nil
 	}
 	if s.my != nil {
 		rows, err := s.my.QueryContext(context.Background(), `
@@ -3761,7 +4137,7 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
-		return s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), nil
+		return s.withGroupMessageStars(s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), userID), nil
 	}
 	var result []GroupMessage
 	s.mu.Lock()
@@ -3772,13 +4148,56 @@ func (s *Store) ListGroupMessages(groupID, userID string, limit int) ([]GroupMes
 	}
 	s.mu.Unlock()
 	reverseGroupMessages(result)
-	return s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), nil
+	return s.withGroupMessageStars(s.withGroupMessageReactions(s.withGroupMessageReplies(result, userID), userID), userID), nil
 }
 
 func reverseGroupMessages(messages []GroupMessage) {
 	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
 		messages[left], messages[right] = messages[right], messages[left]
 	}
+}
+
+func scanDirectMessageRows(rows messageRows) ([]Message, error) {
+	messages := []Message{}
+	for rows.Next() {
+		var message Message
+		if err := rows.Scan(&message.ID, &message.ConversationID, &message.SenderEmail, &message.SenderID, &message.RecipientID, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy, &message.ReadAt); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func scanGroupMessageRows(rows messageRows) ([]GroupMessage, error) {
+	messages := []GroupMessage{}
+	for rows.Next() {
+		var message GroupMessage
+		if err := rows.Scan(&message.ID, &message.GroupID, &message.SenderID, &message.SenderEmail, &message.Body, &message.AttachmentName, &message.AttachmentType, &message.AttachmentKind, &message.AttachmentURL, &message.ReplyToMessageID, &message.CreatedAt, &message.EditedAt, &message.DeletedForEveryoneAt, &message.DeletedForEveryoneBy); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, rows.Err()
+}
+
+func (s *Store) messageDeletedForUser(messageType, messageID, userID string) bool {
+	if strings.TrimSpace(userID) == "" {
+		return false
+	}
+	if s.db != nil {
+		var exists bool
+		err := s.db.QueryRow(context.Background(), `select exists(select 1 from message_deletions where message_type=$1 and message_id=$2 and user_id=$3)`, messageType, messageID, userID).Scan(&exists)
+		return err == nil && exists
+	}
+	if s.my != nil {
+		var count int
+		err := s.my.QueryRowContext(context.Background(), `select count(*) from message_deletions where message_type=? and message_id=? and user_id=?`, messageType, messageID, userID).Scan(&count)
+		return err == nil && count > 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.messageDeletedForUserLocked(messageType, messageID, userID)
 }
 
 func (s *Store) messageDeletedForUserLocked(messageType, messageID, userID string) bool {

@@ -555,6 +555,22 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 		}
 		c.JSON(http.StatusOK, gin.H{"messages": result})
 	})
+	group.GET("/:id/messages/starred", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		messages, err := dataStore.ListStarredGroupMessages(c.Param("id"), authUser.ID, queryInt(c, "limit", 100))
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		result := make([]gin.H, 0, len(messages))
+		for _, message := range messages {
+			result = append(result, publicGroupMessage(message))
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": result})
+	})
 	group.POST("/:id/messages", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -658,6 +674,30 @@ func registerGroupRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *re
 		}
 		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
 	})
+	group.POST("/:id/messages/:messageId/star", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		message, err := dataStore.StarGroupMessage(c.Param("id"), c.Param("messageId"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
+	})
+	group.DELETE("/:id/messages/:messageId/star", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		message, err := dataStore.UnstarGroupMessage(c.Param("id"), c.Param("messageId"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicGroupMessage(message)})
+	})
 	group.POST("/:id/messages/:messageId/reactions", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -720,6 +760,7 @@ func publicGroupMessage(message store.GroupMessage) gin.H {
 		result["editedAt"] = message.EditedAt
 	}
 	result["reactions"] = message.Reactions
+	result["isStarred"] = message.IsStarred
 	return result
 }
 
@@ -955,6 +996,22 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		}
 		c.JSON(http.StatusOK, gin.H{"messages": results})
 	})
+	group.GET("/starred/:recipientId", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		messages, err := dataStore.ListStarredMessages(authUser.ID, c.Param("recipientId"), queryInt(c, "limit", 100))
+		if err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		results := make([]gin.H, 0, len(messages))
+		for _, message := range messages {
+			results = append(results, publicMessage(message, authUser.Email))
+		}
+		c.JSON(http.StatusOK, gin.H{"messages": results})
+	})
 	group.POST("", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -1115,6 +1172,30 @@ func registerMessageRoutes(group *gin.RouterGroup, dataStore *store.Store, hub *
 		hub.Broadcast(realtime.Event{Type: "message.deleted", ConversationID: message.ConversationID, UserID: authUser.ID, TargetUserIDs: []string{message.SenderID, message.RecipientID}, Payload: payload})
 		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
 	})
+	group.POST("/stars/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		message, err := dataStore.StarMessage(c.Param("id"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
+	})
+	group.DELETE("/stars/:id", func(c *gin.Context) {
+		authUser, ok := requireUser(c)
+		if !ok {
+			return
+		}
+		message, err := dataStore.UnstarMessage(c.Param("id"), authUser.ID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": publicMessage(message, authUser.Email)})
+	})
 	group.DELETE("/:id", func(c *gin.Context) {
 		authUser, ok := requireUser(c)
 		if !ok {
@@ -1251,6 +1332,7 @@ func publicMessage(message store.Message, viewerEmail string) gin.H {
 		result["editedAt"] = message.EditedAt
 	}
 	result["reactions"] = message.Reactions
+	result["isStarred"] = message.IsStarred
 	return result
 }
 

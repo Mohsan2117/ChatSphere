@@ -64,6 +64,7 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   onStartVideoCall: () => void;
   onToggleChatMenu: () => void;
   onToggleChatSearch: () => void;
+  onToggleStar: (message: TMessage) => void;
   onUnblock: () => void;
   reactionPicker: ReactionTarget | null;
   recordingDuration: number;
@@ -76,6 +77,7 @@ type ChatPanelProps<TMessage extends DirectChatMessage> = {
   typingUser: string | null;
   value: string;
   formatLastSeen: (lastSeenAt?: string) => string;
+  externalHighlightedMessageId?: string;
 };
 
 export function ChatPanel<TMessage extends DirectChatMessage>({
@@ -124,6 +126,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   onStartVideoCall,
   onToggleChatMenu,
   onToggleChatSearch,
+  onToggleStar,
   onUnblock,
   reactionPicker,
   recordingDuration,
@@ -135,7 +138,8 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   timestamp,
   typingUser,
   value,
-  formatLastSeen
+  formatLastSeen,
+  externalHighlightedMessageId
 }: ChatPanelProps<TMessage>) {
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
   const highlightTimeoutRef = useRef<number | null>(null);
@@ -237,7 +241,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
                 authToken={authToken}
                 key={message.id}
                 message={message}
-                highlighted={highlightedMessageId === message.id}
+                highlighted={highlightedMessageId === message.id || externalHighlightedMessageId === message.id}
                 onOpenReactionDetails={onOpenReactionDetails}
                 onQuoteClick={scrollToOriginal}
                 onDelete={onDelete}
@@ -245,6 +249,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
                 onReact={onReact}
                 onReply={onReply}
                 onRetry={onRetry}
+                onToggleStar={onToggleStar}
                 reactionPicker={reactionPicker}
                 reactionTarget={{ type: "direct", messageId: message.id }}
                 resolveAttachmentSource={resolveAttachmentSource}

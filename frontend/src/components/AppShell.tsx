@@ -31,6 +31,7 @@ import {
   ChevronRight,
   Eye,
   Plus,
+  Star,
   Trash2
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
@@ -64,6 +65,7 @@ type ChatMessage = {
   progressMsg?: string;
   reactions?: ReactionSummary[];
   replyTo?: MessageReply;
+  isStarred?: boolean;
 };
 type SharedAttachmentItem = { message: ChatMessage; attachment: NonNullable<ChatMessage["attachment"]>; source: string };
 type SharedLinkItem = { message: ChatMessage; url: string };
@@ -147,6 +149,7 @@ type GroupChatMessage = {
   attachment?: NonNullable<ChatMessage["attachment"]>;
   reactions?: ReactionSummary[];
   replyTo?: MessageReply;
+  isStarred?: boolean;
 };
 
 type GroupMessageStore = Record<string, GroupChatMessage[]>;
@@ -278,6 +281,10 @@ export function AppShell() {
   const [isDeletingMessage, setIsDeletingMessage] = useState(false);
   const [isContactInfoOpen, setIsContactInfoOpen] = useState(false);
   const [contactInfoMediaTab, setContactInfoMediaTab] = useState<ContactInfoMediaTab | null>(null);
+  const [isDirectStarredOpen, setIsDirectStarredOpen] = useState(false);
+  const [directStarredMessages, setDirectStarredMessages] = useState<ChatMessage[]>([]);
+  const [isDirectStarredLoading, setIsDirectStarredLoading] = useState(false);
+  const [directHighlightedMessageId, setDirectHighlightedMessageId] = useState("");
   const [appConfig, setAppConfig] = useState<AppConfig>({
     maxUploadSizeMb: 50,
     imageOptimizeThresholdBytes: 2097152,
@@ -409,6 +416,7 @@ export function AppShell() {
   }, [callState]);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const directHighlightTimeoutRef = useRef<number | null>(null);
   const userIsNearBottomRef = useRef(true);
   const prevMessagesLengthRef = useRef(0);
   const prevChatIdRef = useRef("");
@@ -1632,6 +1640,85 @@ export function AppShell() {
     } catch (error) {
       setChatNotice(error instanceof Error ? error.message : "Could not update reaction");
     }
+  }
+
+  function applyStarUpdate(target: ReactionTarget, isStarred: boolean) {
+    if (target.type === "group" && target.groupId) {
+      setGroupMessages((current) => ({
+        ...current,
+        [target.groupId as string]: (current[target.groupId as string] ?? []).map((message) =>
+          message.id === target.messageId ? { ...message, isStarred } : message
+        )
+      }));
+      setDirectStarredMessages((current) => current.filter((message) => message.id !== target.messageId));
+      return;
+    }
+    setChatMessages((current) => {
+      const next = { ...current };
+      Object.keys(next).forEach((chatId) => {
+        next[chatId] = (next[chatId] ?? []).map((message) =>
+          message.id === target.messageId ? { ...message, isStarred } : message
+        );
+      });
+      return next;
+    });
+    if (!isStarred) {
+      setDirectStarredMessages((current) => current.filter((message) => message.id !== target.messageId));
+    } else {
+      setDirectStarredMessages((current) => current.map((message) => message.id === target.messageId ? { ...message, isStarred } : message));
+    }
+  }
+
+  async function toggleMessageStar(target: ReactionTarget, currentStarred: boolean) {
+    if (!authToken) return;
+    const nextStarred = !currentStarred;
+    const endpoint = target.type === "group" && target.groupId
+      ? `${apiUrl()}/api/v1/groups/${encodeURIComponent(target.groupId)}/messages/${encodeURIComponent(target.messageId)}/star`
+      : `${apiUrl()}/api/v1/messages/stars/${encodeURIComponent(target.messageId)}`;
+    applyStarUpdate(target, nextStarred);
+    try {
+      const response = await fetch(endpoint, {
+        method: nextStarred ? "POST" : "DELETE",
+        headers: authHeaders(authToken)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not update starred message");
+      applyStarUpdate(target, Boolean(data.message?.isStarred ?? nextStarred));
+    } catch (error) {
+      applyStarUpdate(target, currentStarred);
+      setChatNotice(error instanceof Error ? error.message : "Could not update starred message");
+    }
+  }
+
+  async function openDirectStarredMessages() {
+    if (!authToken || !selectedChatId) return;
+    setIsDirectStarredOpen(true);
+    setIsDirectStarredLoading(true);
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/messages/starred/${encodeURIComponent(selectedChatId)}`, {
+        headers: authHeaders(authToken)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not load starred messages");
+      setDirectStarredMessages(Array.isArray(data.messages) ? data.messages : []);
+    } catch (error) {
+      setChatNotice(error instanceof Error ? error.message : "Could not load starred messages");
+      setDirectStarredMessages([]);
+    } finally {
+      setIsDirectStarredLoading(false);
+    }
+  }
+
+  function scrollToDirectMessage(messageId: string) {
+    setIsDirectStarredOpen(false);
+    setIsContactInfoOpen(false);
+    setContactInfoMediaTab(null);
+    const target = scrollContainerRef.current?.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    setDirectHighlightedMessageId(messageId);
+    if (directHighlightTimeoutRef.current) window.clearTimeout(directHighlightTimeoutRef.current);
+    directHighlightTimeoutRef.current = window.setTimeout(() => setDirectHighlightedMessageId(""), 1400);
   }
 
   function handleFileAttachment(file: File) {
@@ -3862,6 +3949,7 @@ export function AppShell() {
                 });
                 setGroups((current) => current.map((group) => group.latestMessage?.id === message.id ? { ...group, latestMessage: { ...group.latestMessage, ...message } } : group));
               }}
+              onToggleStar={(message) => toggleMessageStar({ type: "group", groupId: selectedGroupId, messageId: message.id }, Boolean(message.isStarred))}
               onLeave={() => { closeCurrentGroup(); fetchGroups(); }}
             />
           ) : selectedChat ? (
@@ -3883,6 +3971,7 @@ export function AppShell() {
                 isClearingChat={isClearingChat}
                 isContactInfoOpen={isContactInfoOpen}
                 isRecording={isRecording}
+                externalHighlightedMessageId={directHighlightedMessageId}
                 messages={visibleSelectedMessages}
                 onBlock={blockCurrentChat}
                 onCancelEdit={cancelDirectEdit}
@@ -3918,6 +4007,7 @@ export function AppShell() {
                 onStartVideoCall={() => startCall(selectedChat, "video")}
                 onToggleChatMenu={() => setIsChatMenuOpen((open) => !open)}
                 onToggleChatSearch={toggleChatSearch}
+                onToggleStar={(message) => toggleMessageStar({ type: "direct", messageId: message.id }, Boolean(message.isStarred))}
                 onUnblock={unblockCurrentChat}
                 reactionPicker={reactionPicker}
                 recordingDuration={recordingDuration}
@@ -3938,6 +4028,7 @@ export function AppShell() {
                 links={selectedSharedLinks}
                 media={selectedSharedMedia}
                 mediaTab={contactInfoMediaTab}
+                onOpenStarred={openDirectStarredMessages}
                 onBlock={blockCurrentChat}
                 onClear={clearCurrentChat}
                 onClose={() => { setIsContactInfoOpen(false); setContactInfoMediaTab(null); }}
@@ -3948,6 +4039,15 @@ export function AppShell() {
                 onStartVideo={() => startCall(selectedChat, "video")}
                 onUnblock={unblockCurrentChat}
               />
+              {isDirectStarredOpen ? (
+                <StarredMessagesModal
+                  isLoading={isDirectStarredLoading}
+                  messages={directStarredMessages}
+                  onClose={() => setIsDirectStarredOpen(false)}
+                  onSelect={scrollToDirectMessage}
+                  title="Starred messages"
+                />
+              ) : null}
             </div>
           ) : mobileTab === "calls" ? (
             <div className="flex flex-1 items-center justify-center px-6">
@@ -4763,10 +4863,11 @@ type GroupChatPanelProps = {
   onMessage: (message: GroupChatMessage) => void;
   onDeleteMessage: (message: GroupChatMessage) => void;
   onEditMessage: (message: GroupChatMessage) => void;
+  onToggleStar: (message: GroupChatMessage) => void;
   onLeave: () => void;
 };
 
-function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, reactionPicker, setReactionPicker, users, onBack, onReact, onReactionDetails, onRefresh, onMessage, onDeleteMessage, onEditMessage, onLeave }: GroupChatPanelProps) {
+function GroupChatPanel({ authToken, currentUserId, currentUserName, details, messages, reactionPicker, setReactionPicker, users, onBack, onReact, onReactionDetails, onRefresh, onMessage, onDeleteMessage, onEditMessage, onToggleStar, onLeave }: GroupChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState("");
@@ -4779,6 +4880,9 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const [editText, setEditText] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState("");
+  const [isStarredOpen, setIsStarredOpen] = useState(false);
+  const [starredMessages, setStarredMessages] = useState<GroupChatMessage[]>([]);
+  const [isStarredLoading, setIsStarredLoading] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -4806,6 +4910,22 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
     if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
     highlightTimeoutRef.current = window.setTimeout(() => setHighlightedMessageId(""), 1400);
   };
+  const openStarredMessages = async () => {
+    if (!group) return;
+    setIsStarredOpen(true);
+    setIsStarredLoading(true);
+    try {
+      const response = await fetch(`${apiUrl()}/api/v1/groups/${encodeURIComponent(group.id)}/messages/starred`, { headers: authHeaders(authToken) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not load starred messages");
+      setStarredMessages(Array.isArray(data.messages) ? data.messages.map((message: GroupChatMessage) => ({ ...message, senderEmail: group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail })) : []);
+    } catch (error) {
+      setInfoError(error instanceof Error ? error.message : "Could not load starred messages");
+      setStarredMessages([]);
+    } finally {
+      setIsStarredLoading(false);
+    }
+  };
   const startEdit = (message: GroupChatMessage) => { if (message.deletedForEveryone || message.deletedForEveryoneAt || !message.mine || !message.body.trim()) return; setReplyTo(null); setEditingMessage({ id: message.id, originalBody: message.body }); setEditText(message.body); };
   const cancelEdit = () => { setEditingMessage(null); setEditText(""); setInfoError(""); };
   const saveEdit = async () => { if (!group || !editingMessage) return; const body = editText.trim(); if (!body) { setInfoError("Message body is required"); return; } setIsSavingEdit(true); setInfoError(""); try { const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}/messages/${editingMessage.id}`, { method: "PATCH", headers: { ...authHeaders(authToken), "Content-Type": "application/json" }, body: JSON.stringify({ body }) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Could not edit group message"); const editedAt = data.message?.editedAt ?? new Date().toISOString(); onEditMessage({ ...data.message, body: data.message?.body ?? body, editedAt, mine: true }); setEditingMessage(null); setEditText(""); } catch (error) { setInfoError(error instanceof Error ? error.message : "Could not edit message"); } finally { setIsSavingEdit(false); } };
@@ -4815,17 +4935,17 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onDelete={onDeleteMessage} onEdit={startEdit} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => { setEditingMessage(null); setEditText(""); setReplyTo(replyForMessage(item)); }} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} editMode={editingMessage ? { originalBody: editingMessage.originalBody } : null} isRecording={isRecording} isSavingEdit={isSavingEdit} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelEdit={cancelEdit} onCancelReply={() => setReplyTo(null)} onChange={(value) => editingMessage ? setEditText(value) : setDraft(value)} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={editingMessage ? null : replyTo} value={editingMessage ? editText : draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onDelete={onDeleteMessage} onEdit={startEdit} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => { setEditingMessage(null); setEditText(""); setReplyTo(replyForMessage(item)); }} onToggleStar={onToggleStar} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} editMode={editingMessage ? { originalBody: editingMessage.originalBody } : null} isRecording={isRecording} isSavingEdit={isSavingEdit} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelEdit={cancelEdit} onCancelReply={() => setReplyTo(null)} onChange={(value) => editingMessage ? setEditText(value) : setDraft(value)} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={editingMessage ? null : replyTo} value={editingMessage ? editText : draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} onOpenStarred={openStarredMessages} manage={manage} /> : null}{isStarredOpen ? <StarredMessagesModal isLoading={isStarredLoading} messages={starredMessages} onClose={() => setIsStarredOpen(false)} onSelect={(messageId) => { setIsStarredOpen(false); setIsInfoOpen(false); scrollToOriginal(messageId); }} title="Starred messages" /> : null}</div>;
 }
 
-function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
+function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, onOpenStarred, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; onOpenStarred: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
   const [name, setName] = useState(details.name);
   const [selected, setSelected] = useState<string[]>([]);
   const memberIDs = new Set(details.members.map((member) => member.id));
   const onlineByUserId = new Map(users.map((user) => [user.id, Boolean(user.online)]));
   const candidates = users.filter((user) => user.id !== currentUserId && !memberIDs.has(user.id));
   const update = async (action: () => Promise<void>) => { try { await action(); } catch (error) { window.alert(error instanceof Error ? error.message : "Group action failed"); } };
-  return <div className="fixed inset-0 z-[60] flex justify-end bg-[#0f172a]/35"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">Group info</p><h2 className="mt-1 text-xl font-black">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-black">{details.memberCount} members</div><div className="text-sm text-[#64748b]">You are {details.role}</div></div></div>{canManage ? <><label className="mt-5 block text-sm font-bold text-[#334155]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#e7f8f2] px-3 py-2 text-sm font-black text-[#008f70]" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Members</h3><div className="mt-2 divide-y divide-[#edf1f5]">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><span className="relative inline-flex h-10 w-10 shrink-0"><span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">{member.avatarUrl ? <AvatarImage alt={member.name} className="h-full w-full rounded-full object-cover" fallback={chatInitials(member.name)} src={member.avatarUrl} /> : chatInitials(member.name)}</span>{member.id !== currentUserId && onlineByUserId.get(member.id) ? <OnlineStatusBadge /> : null}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{member.name}</div><div className="text-xs capitalize text-[#64748b]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-black text-[#008f70]" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-black text-red-600" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-[#edf1f5]">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc] ${selected.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#00a884]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-[#00a884] px-3 py-2 text-sm font-black text-white disabled:opacity-50" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl bg-red-50 px-3 py-2.5 text-sm font-black text-red-700" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs leading-5 text-[#64748b]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
+  return <div className="fixed inset-0 z-[60] flex justify-end bg-[#0f172a]/35"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">Group info</p><h2 className="mt-1 text-xl font-black">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-black">{details.memberCount} members</div><div className="text-sm text-[#64748b]">You are {details.role}</div></div></div><button className="mt-5 flex w-full items-center gap-2 rounded-2xl border border-[#e5e9f0] bg-white px-4 py-3 text-left text-sm font-black text-[#008f70] shadow-sm hover:bg-[#f8fafc]" onClick={onOpenStarred} type="button"><Star size={17} />Starred messages</button>{canManage ? <><label className="mt-5 block text-sm font-bold text-[#334155]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#e7f8f2] px-3 py-2 text-sm font-black text-[#008f70]" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Members</h3><div className="mt-2 divide-y divide-[#edf1f5]">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><span className="relative inline-flex h-10 w-10 shrink-0"><span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">{member.avatarUrl ? <AvatarImage alt={member.name} className="h-full w-full rounded-full object-cover" fallback={chatInitials(member.name)} src={member.avatarUrl} /> : chatInitials(member.name)}</span>{member.id !== currentUserId && onlineByUserId.get(member.id) ? <OnlineStatusBadge /> : null}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{member.name}</div><div className="text-xs capitalize text-[#64748b]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-black text-[#008f70]" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-black text-red-600" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-[#edf1f5]">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc] ${selected.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#00a884]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-[#00a884] px-3 py-2 text-sm font-black text-white disabled:opacity-50" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl bg-red-50 px-3 py-2.5 text-sm font-black text-red-700" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs leading-5 text-[#64748b]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
 }
 
 
@@ -4842,6 +4962,7 @@ function ContactInfoPanel({
   onClear,
   onClose,
   onMediaTabChange,
+  onOpenStarred,
   onReport,
   onSearch,
   onStartAudio,
@@ -4859,6 +4980,7 @@ function ContactInfoPanel({
   onClear: () => void;
   onClose: () => void;
   onMediaTabChange: (tab: ContactInfoMediaTab | null) => void;
+  onOpenStarred: () => void;
   onReport: () => void;
   onSearch: () => void;
   onStartAudio: () => void;
@@ -4910,6 +5032,7 @@ function ContactInfoPanel({
         </button>
 
         <section className="mt-4 overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white shadow-sm">
+          <ContactActionRow icon={<Star size={17} />} label="Starred messages" onClick={onOpenStarred} />
           <ContactActionRow danger label="Clear chat" onClick={onClear} />
           {blocked ? (
             <ContactActionRow label={`Unblock ${chat.name}`} onClick={onUnblock} />
@@ -4946,12 +5069,68 @@ function ContactQuickAction({ icon, label, onClick }: { icon: ReactNode; label: 
   );
 }
 
-function ContactActionRow({ danger, label, onClick }: { danger?: boolean; label: string; onClick: () => void }) {
+function ContactActionRow({ danger, icon, label, onClick }: { danger?: boolean; icon?: ReactNode; label: string; onClick: () => void }) {
   return (
     <button className={`flex w-full items-center justify-between border-b border-[#edf1f5] px-4 py-3 text-left text-sm font-black last:border-b-0 ${danger ? "text-[#b42318] hover:bg-[#fff5f5]" : "text-[#008f70] hover:bg-[#f8fafc]"}`} onClick={onClick} type="button">
-      <span className="min-w-0 truncate">{label}</span>
+      <span className="flex min-w-0 items-center gap-2 truncate">{icon}{label}</span>
     </button>
   );
+}
+
+type StarredDisplayMessage = (ChatMessage | GroupChatMessage) & { senderEmail?: string; time?: string; mine?: boolean };
+
+function StarredMessagesModal({ isLoading, messages, onClose, onSelect, title }: { isLoading: boolean; messages: StarredDisplayMessage[]; onClose: () => void; onSelect: (messageId: string) => void; title: string }) {
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-[#0f172a]/40 px-3" onClick={onClose}>
+      <div className="flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#e5e9f0] px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Star size={18} className="fill-[#f59e0b] text-[#f59e0b]" />
+            <h2 className="truncate text-base font-black text-[#18212f]">{title}</h2>
+          </div>
+          <button aria-label="Close starred messages" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {isLoading ? (
+            <div className="space-y-2">{[1, 2, 3].map((item) => <div className="cs-skeleton h-16 rounded-xl" key={item} />)}</div>
+          ) : messages.length ? (
+            <div className="space-y-2">
+              {messages.map((message) => (
+                <button className="flex w-full items-start gap-3 rounded-xl border border-[#e5e9f0] bg-white p-3 text-left transition hover:border-[#00a884]/30 hover:bg-[#fbfefd]" key={message.id} onClick={() => onSelect(message.id)} type="button">
+                  <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fff7ed] text-[#f59e0b]"><Star size={16} className="fill-[#f59e0b]" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-sm font-black text-[#18212f]">{starredSenderLabel(message)}</span>
+                      <span className="shrink-0 text-xs font-bold text-[#94a3b8]">{message.createdAt ? formatGroupTime(message.createdAt) : message.time}</span>
+                    </div>
+                    <p className="mt-1 truncate text-sm font-semibold text-[#64748b]">{starredMessagePreview(message)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-12 text-center text-sm font-bold text-[#94a3b8]">No starred messages</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function starredSenderLabel(message: StarredDisplayMessage) {
+  if (message.mine) return "You";
+  return message.senderEmail || "Message";
+}
+
+function starredMessagePreview(message: StarredDisplayMessage) {
+  const body = message.body?.trim();
+  if (body) return body;
+  const kind = message.attachment?.kind;
+  if (kind === "image") return "Photo";
+  if (kind === "video") return "Video";
+  if (kind === "audio") return "Voice message";
+  if (kind === "file") return message.attachment?.name || "File";
+  return "Message";
 }
 
 function SharedMediaThumb({ item }: { item: SharedAttachmentItem }) {

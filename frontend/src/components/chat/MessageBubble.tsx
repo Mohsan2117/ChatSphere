@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, MouseEvent, ReactNode, TouchEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Check, CheckCheck, Edit3, FileText, MoreVertical, Pause, Play, Reply, Trash2 } from "lucide-react";
+import { Ban, Check, CheckCheck, Edit3, FileText, MoreVertical, Pause, Play, Reply, Star, Trash2 } from "lucide-react";
 import { MessageReactions, type ReactionSummary, type ReactionTarget, type ReactionUser } from "./MessageReactions";
 
 export type BubbleAttachment = {
@@ -36,6 +36,7 @@ export type BubbleMessage = {
   progressMsg?: string;
   reactions?: ReactionSummary[];
   replyTo?: MessageReply;
+  isStarred?: boolean;
 };
 
 type MessageBubbleProps<TMessage extends BubbleMessage> = {
@@ -49,6 +50,7 @@ type MessageBubbleProps<TMessage extends BubbleMessage> = {
   onReact: (target: ReactionTarget, emoji: string) => void;
   onReply?: (message: TMessage) => void;
   onRetry?: (message: TMessage) => void;
+  onToggleStar?: (message: TMessage) => void;
   reactionPicker: ReactionTarget | null;
   reactionTarget: ReactionTarget;
   resolveAttachmentSource: (url: string, token: string) => string;
@@ -71,6 +73,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   onReact,
   onReply,
   onRetry,
+  onToggleStar,
   reactionPicker,
   reactionTarget,
   resolveAttachmentSource,
@@ -96,6 +99,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
   const canUseServerActions = message.status !== "uploading" && message.status !== "sending";
   const canEdit = !isDeletedForEveryone && own && Boolean(message.body?.trim()) && canUseServerActions && message.status !== "failed";
   const canDelete = !isDeletedForEveryone && Boolean(onDelete) && canUseServerActions;
+  const canStar = !isDeletedForEveryone && Boolean(onToggleStar) && canUseServerActions && message.status !== "failed";
 
   return (
     <div className={outerClass} data-message-id={message.id}>
@@ -132,12 +136,12 @@ export function MessageBubble<TMessage extends BubbleMessage>({
             {isDirect ? (
               <DirectMessageMeta message={message} onRetry={onRetry} selectedChatOnline={selectedChatOnline} timestamp={timestamp} />
             ) : (
-              <div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{timestamp}{message.editedAt ? " · Edited" : ""}</div>
+              <GroupMessageMeta message={message} timestamp={timestamp} />
             )}
           </div>
         )}
         {!isDeletedForEveryone ? <div className={`flex items-start gap-1 ${own ? "flex-row-reverse" : ""}`}>
-          {canEdit || canDelete ? <MessageActionMenu onDelete={canDelete ? () => onDelete?.(message) : undefined} onEdit={canEdit ? () => onEdit?.(message) : undefined} /> : null}
+          {canEdit || canDelete || canStar ? <MessageActionMenu isStarred={message.isStarred} onDelete={canDelete ? () => onDelete?.(message) : undefined} onEdit={canEdit ? () => onEdit?.(message) : undefined} onToggleStar={canStar ? () => onToggleStar?.(message) : undefined} /> : null}
           {onReply ? (
             <button
               aria-label="Reply to message"
@@ -187,7 +191,7 @@ function QuotedMessage({ reply, onQuoteClick }: { reply: MessageReply; onQuoteCl
   );
 }
 
-function MessageActionMenu({ onDelete, onEdit }: { onDelete?: () => void; onEdit?: () => void }) {
+function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar }: { isStarred?: boolean; onDelete?: () => void; onEdit?: () => void; onToggleStar?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative mt-1">
@@ -201,6 +205,17 @@ function MessageActionMenu({ onDelete, onEdit }: { onDelete?: () => void; onEdit
       </button>
       {open ? (
         <div className="absolute bottom-8 right-0 z-20 min-w-28 overflow-hidden rounded-xl border border-[#dce1e8] bg-white py-1 text-sm font-bold text-[#334155] shadow-[0_14px_35px_rgba(15,23,42,.14)]">
+          {onToggleStar ? <button
+            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+            onClick={() => {
+              setOpen(false);
+              onToggleStar();
+            }}
+            type="button"
+          >
+            <Star size={14} className={isStarred ? "fill-[#f59e0b] text-[#f59e0b]" : ""} />
+            {isStarred ? "Unstar" : "Star"}
+          </button> : null}
           {onEdit ? <button
             className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
             onClick={() => {
@@ -242,6 +257,7 @@ function DirectMessageMeta<TMessage extends BubbleMessage>({
 }) {
   return (
     <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
+      {message.isStarred ? <Star size={12} className="mt-0.5 fill-[#f59e0b] text-[#f59e0b]" /> : null}
       {timestamp}
       {message.editedAt ? <span>· Edited</span> : null}
       {message.mine ? (
@@ -277,6 +293,16 @@ function DirectMessageMeta<TMessage extends BubbleMessage>({
           )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function GroupMessageMeta<TMessage extends BubbleMessage>({ message, timestamp }: { message: TMessage; timestamp: ReactNode }) {
+  return (
+    <div className="mt-2 flex justify-end gap-1 text-[11px] font-semibold text-[#94a3b8]">
+      {message.isStarred ? <Star size={12} className="mt-0.5 fill-[#f59e0b] text-[#f59e0b]" /> : null}
+      <span>{timestamp}</span>
+      {message.editedAt ? <span>· Edited</span> : null}
     </div>
   );
 }
@@ -740,6 +766,7 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
         <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-medium text-[#64748b] mt-1 select-none">
           <span>{formatTime(displayTime)}</span>
           <div className="flex items-center gap-1">
+            {message.isStarred ? <Star size={12} className="fill-[#f59e0b] text-[#f59e0b]" /> : null}
             <span>{timestamp}</span>
             {message.editedAt ? <span>· Edited</span> : null}
             {message.mine && (
