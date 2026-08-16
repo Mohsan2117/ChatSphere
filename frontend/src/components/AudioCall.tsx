@@ -1012,6 +1012,21 @@ function nameFromEmail(email?: string) {
   );
 }
 
+function CallAvatarImage({ alt, className, fallback, src }: { alt: string; className?: string; fallback: React.ReactNode; src: string }) {
+  const [failedSrc, setFailedSrc] = useState("");
+
+  useEffect(() => {
+    setFailedSrc("");
+  }, [src]);
+
+  if (!src || failedSrc === src) return <>{fallback}</>;
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img alt={alt} className={className} onError={() => setFailedSrc(src)} src={src} />
+  );
+}
+
 function chatInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return `${parts[0]?.[0] ?? "U"}${parts[1]?.[0] ?? ""}`.toUpperCase();
@@ -1190,7 +1205,7 @@ export function AudioCallOverlay({
               }`}
             >
               {remoteUser?.avatarUrl ? (
-                <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                <CallAvatarImage alt={remoteUser.name} className="h-full w-full object-cover" fallback={remoteUser?.avatar || "U"} src={remoteUser.avatarUrl} />
               ) : (
                 remoteUser?.avatar || "U"
               )}
@@ -1240,7 +1255,7 @@ export function AudioCallOverlay({
           ) : (
             <span className={`grid h-full w-full place-items-center text-sm font-black text-white ${remoteUser?.color || "bg-[#0f766e]"}`}>
               {remoteUser?.avatarUrl ? (
-                <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                <CallAvatarImage alt={remoteUser.name} className="h-full w-full object-cover" fallback={remoteUser?.avatar || "U"} src={remoteUser.avatarUrl} />
               ) : (
                 remoteUser?.avatar || "U"
               )}
@@ -1316,7 +1331,7 @@ export function AudioCallOverlay({
                     mainVideo === "remote" ? "h-28 w-28 text-3xl" : "h-12 w-12 text-sm"
                   } ${remoteUser?.color || "bg-[#0f766e]"}`}>
                     {remoteUser?.avatarUrl ? (
-                      <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                      <CallAvatarImage alt={remoteUser.name} className="h-full w-full object-cover" fallback={remoteUser?.avatar || "U"} src={remoteUser.avatarUrl} />
                     ) : (
                       remoteUser?.avatar || "U"
                     )}
@@ -1656,7 +1671,7 @@ export function AudioCallOverlay({
                 }`}
               >
                 {remoteUser?.avatarUrl ? (
-                  <img alt={remoteUser.name} className="h-full w-full object-cover" src={remoteUser.avatarUrl} />
+                  <CallAvatarImage alt={remoteUser.name} className="h-full w-full object-cover" fallback={remoteUser?.avatar || "U"} src={remoteUser.avatarUrl} />
                 ) : (
                   remoteUser?.avatar || "U"
                 )}

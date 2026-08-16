@@ -33,6 +33,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var builtInAvatarPaths = map[string]struct{}{
+	"/avatars/avatar-01.png": {},
+	"/avatars/avatar-02.png": {},
+	"/avatars/avatar-03.png": {},
+	"/avatars/avatar-04.png": {},
+	"/avatars/avatar-05.png": {},
+	"/avatars/avatar-06.png": {},
+	"/avatars/avatar-07.png": {},
+	"/avatars/avatar-08.png": {},
+	"/avatars/avatar-09.png": {},
+	"/avatars/avatar-10.png": {},
+	"/avatars/avatar-11.png": {},
+	"/avatars/avatar-12.png": {},
+}
+
 func NewRouter(cfg config.Config, hub *realtime.Hub, dataStore *store.Store) *gin.Engine {
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -223,6 +238,16 @@ func completeOnboarding(dataStore *store.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if builtInAvatar, ok, err := builtInAvatarPath(c.PostForm("builtInAvatar")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		} else if ok {
+			if avatarUploaded {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "choose either a built-in avatar or a profile photo"})
+				return
+			}
+			avatarURL = builtInAvatar
+		}
 
 		user, err := dataStore.UpsertUser(email, firstName, lastName, password, avatarURL)
 		if err != nil {
@@ -269,6 +294,16 @@ func updateProfile(dataStore *store.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if builtInAvatar, ok, err := builtInAvatarPath(c.PostForm("builtInAvatar")); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		} else if ok {
+			if avatarUploaded {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "choose either a built-in avatar or a profile photo"})
+				return
+			}
+			avatarURL = builtInAvatar
+		}
 
 		user, err := dataStore.UpdateProfile(email, firstName, lastName, avatarURL)
 		if err != nil {
@@ -282,6 +317,17 @@ func updateProfile(dataStore *store.Store) gin.HandlerFunc {
 			"avatarUploaded": avatarUploaded,
 		})
 	}
+}
+
+func builtInAvatarPath(value string) (string, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false, nil
+	}
+	if _, ok := builtInAvatarPaths[value]; !ok {
+		return "", false, fmt.Errorf("invalid built-in avatar")
+	}
+	return value, true, nil
 }
 
 func avatarDataURL(c *gin.Context, field string) (string, bool, error) {

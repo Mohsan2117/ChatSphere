@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -161,6 +161,19 @@ type StatusPanelProps = {
   className?: string;
 };
 
+const BUILT_IN_AVATARS = Array.from({ length: 12 }, (_, index) => {
+  const id = `avatar-${String(index + 1).padStart(2, "0")}`;
+  return { id, src: `/avatars/${id}.png` };
+});
+
+function isBuiltInAvatar(value?: string) {
+  return BUILT_IN_AVATARS.some((avatar) => avatar.src === value);
+}
+
+function randomBuiltInAvatar() {
+  return BUILT_IN_AVATARS[Math.floor(Math.random() * BUILT_IN_AVATARS.length)]?.src ?? BUILT_IN_AVATARS[0].src;
+}
+
 function formatCallDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -206,6 +219,7 @@ export function AppShell() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState("");
+  const [selectedBuiltInAvatar, setSelectedBuiltInAvatar] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
@@ -556,9 +570,11 @@ export function AppShell() {
     if (savedProfile) {
       try {
         const profile = JSON.parse(savedProfile) as { firstName?: string; lastName?: string; avatarPreview?: string };
+        const savedAvatar = profile.avatarPreview ?? "";
         setFirstName(profile.firstName ?? "");
         setLastName(profile.lastName ?? "");
-        setAvatarPreview(profile.avatarPreview ?? "");
+        setAvatarPreview(savedAvatar);
+        setSelectedBuiltInAvatar(isBuiltInAvatar(savedAvatar) ? savedAvatar : "");
       } catch {
         window.localStorage.removeItem("chatsphere-profile");
       }
@@ -1161,7 +1177,9 @@ export function AppShell() {
       setAuthToken(token);
       setFirstName(user.firstName ?? "");
       setLastName(user.lastName ?? "");
-      setAvatarPreview(user.avatarUrl && !String(user.avatarUrl).startsWith("uploaded:") ? user.avatarUrl : "");
+      const nextAvatar = user.avatarUrl && !String(user.avatarUrl).startsWith("uploaded:") ? user.avatarUrl : "";
+      setAvatarPreview(nextAvatar);
+      setSelectedBuiltInAvatar(isBuiltInAvatar(nextAvatar) ? nextAvatar : "");
       window.localStorage.setItem("chatsphere-auth", "true");
       window.localStorage.setItem("chatsphere-email", user.email ?? email);
       window.localStorage.setItem("chatsphere-user-id", user.id ?? "");
@@ -1397,7 +1415,15 @@ export function AppShell() {
     const file = event.target.files?.[0];
     if (!file) return;
     setAvatarFile(file);
+    setSelectedBuiltInAvatar("");
     setAvatarPreview(URL.createObjectURL(file));
+    event.target.value = "";
+  }
+
+  function chooseBuiltInAvatar(src: string) {
+    setSelectedBuiltInAvatar(src);
+    setAvatarFile(null);
+    setAvatarPreview(src);
   }
 
   function handleFileAttachment(file: File) {
@@ -1477,12 +1503,18 @@ export function AppShell() {
     setProfileError("");
 
     try {
+      const finalBuiltInAvatar = avatarFile ? "" : selectedBuiltInAvatar || randomBuiltInAvatar();
+      if (!selectedBuiltInAvatar && finalBuiltInAvatar) {
+        setSelectedBuiltInAvatar(finalBuiltInAvatar);
+        setAvatarPreview(finalBuiltInAvatar);
+      }
       const formData = new FormData();
       formData.set("email", email);
       formData.set("firstName", firstName.trim());
       formData.set("lastName", lastName.trim());
       formData.set("password", password);
       if (avatarFile) formData.set("avatar", avatarFile);
+      if (!avatarFile && finalBuiltInAvatar) formData.set("builtInAvatar", finalBuiltInAvatar);
 
       const response = await fetch(`${apiUrl()}/api/v1/profile/onboarding`, {
         method: "POST",
@@ -1507,9 +1539,11 @@ export function AppShell() {
         JSON.stringify({
           firstName: profile.firstName ?? firstName.trim(),
           lastName: profile.lastName ?? lastName.trim(),
-          avatarPreview
+          avatarPreview: profile.avatarUrl ?? finalBuiltInAvatar
         })
       );
+      setAvatarPreview(profile.avatarUrl ?? finalBuiltInAvatar);
+      setAvatarFile(null);
       setSelectedChatId("");
       setSelectedChatSnapshot(null);
       setChatSearch("");
@@ -1542,6 +1576,7 @@ export function AppShell() {
       formData.set("firstName", firstName.trim());
       formData.set("lastName", lastName.trim());
       if (avatarFile) formData.set("avatar", avatarFile);
+      if (!avatarFile && selectedBuiltInAvatar) formData.set("builtInAvatar", selectedBuiltInAvatar);
 
       const response = await fetch(`${apiUrl()}/api/v1/profile`, {
         method: "PATCH",
@@ -1557,6 +1592,7 @@ export function AppShell() {
       setCurrentUserId(profile.id ?? currentUserId);
       const nextAvatar = profile.avatarUrl && !String(profile.avatarUrl).startsWith("uploaded:") ? profile.avatarUrl : avatarPreview;
       setAvatarPreview(nextAvatar);
+      setSelectedBuiltInAvatar(isBuiltInAvatar(nextAvatar) ? nextAvatar : "");
       setAvatarFile(null);
       window.localStorage.setItem(
         "chatsphere-profile",
@@ -2211,6 +2247,7 @@ export function AppShell() {
     setConfirmPassword("");
     setAvatarFile(null);
     setAvatarPreview("");
+    setSelectedBuiltInAvatar("");
     setProfileError("");
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
@@ -2858,21 +2895,15 @@ export function AppShell() {
                     />
                   </label>
                 </div>
-                <div className="flex items-center gap-4 rounded-md border border-white/10 bg-[#0b141a] p-4">
-                  <label className="grid h-20 w-20 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-full border border-white/10 bg-[#202c33] text-[#00a884]">
-                    {avatarPreview ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img alt="Profile preview" className="h-full w-full object-cover" src={avatarPreview} />
-                    ) : (
-                      <Upload size={28} />
-                    )}
-                    <input accept="image/*" className="hidden" onChange={chooseAvatar} type="file" />
-                  </label>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white">Profile picture</div>
-                    <div className="mt-1 text-sm leading-5 text-[#aebac1]">Upload a photo so contacts can recognize you.</div>
-                  </div>
-                </div>
+                <AvatarSelection
+                  currentPreview={avatarPreview}
+                  inputId="onboarding-avatar-upload"
+                  labelTone="dark"
+                  onChooseBuiltIn={chooseBuiltInAvatar}
+                  onChooseGallery={chooseAvatar}
+                  selectedBuiltInAvatar={selectedBuiltInAvatar}
+                  title="Choose your profile picture"
+                />
                 <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
                   {isSubmitting ? "Saving profile..." : "Continue to chats"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
@@ -2960,8 +2991,7 @@ export function AppShell() {
           type="button"
           >
           {avatarPreview ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img alt="Your profile" className="h-full w-full object-cover" src={avatarPreview} />
+            <AvatarImage alt="Your profile" className="h-full w-full object-cover" fallback={userInitials} src={avatarPreview} />
           ) : (
             userInitials
           )}
@@ -3169,7 +3199,7 @@ export function AppShell() {
                           >
                             <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]">
                               {call.otherUser.avatarUrl ? (
-                                <img alt={call.otherUser.name} className="h-full w-full object-cover" src={call.otherUser.avatarUrl} />
+                                <AvatarImage alt={call.otherUser.name} className="h-full w-full object-cover" fallback={chatInitials(call.otherUser.name)} src={call.otherUser.avatarUrl} />
                               ) : (
                                 chatInitials(call.otherUser.name)
                               )}
@@ -3240,8 +3270,7 @@ export function AppShell() {
                 setProfileMessage("");
               }} title="Edit your profile" type="button">
                 {avatarPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img alt="Your profile" className="h-full w-full object-cover" src={avatarPreview} />
+                  <AvatarImage alt="Your profile" className="h-full w-full object-cover" fallback={userInitials} src={avatarPreview} />
                 ) : (
                   userInitials
                 )}
@@ -3857,7 +3886,7 @@ export function AppShell() {
                         <div key={call.id} className="flex items-center gap-3 rounded-2xl p-3">
                           <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
                             {call.otherUser.avatarUrl ? (
-                              <img alt={call.otherUser.name} className="h-full w-full object-cover" src={call.otherUser.avatarUrl} />
+                              <AvatarImage alt={call.otherUser.name} className="h-full w-full object-cover" fallback={chatInitials(call.otherUser.name)} src={call.otherUser.avatarUrl} />
                             ) : (
                               chatInitials(call.otherUser.name)
                             )}
@@ -3960,21 +3989,16 @@ export function AppShell() {
               </button>
             </div>
 
-            <div className="mt-6 flex items-center gap-4 rounded-2xl border border-[#e5e9f0] bg-[#f8fafc] p-4">
-              <label className="grid h-20 w-20 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-xl font-black text-[#008f70]">
-                {avatarPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img alt="Profile preview" className="h-full w-full object-cover" src={avatarPreview} />
-                ) : (
-                  userInitials
-                )}
-                <input accept="image/*" className="hidden" onChange={chooseAvatar} type="file" />
-              </label>
-              <div className="min-w-0">
-                <div className="text-sm font-black text-[#18212f]">Profile photo</div>
-                <p className="mt-1 text-sm leading-6 text-[#64748b]">Click the photo box to choose a new image.</p>
-              </div>
-            </div>
+            <AvatarSelection
+              currentPreview={avatarPreview}
+              fallback={userInitials}
+              inputId="profile-editor-avatar-upload"
+              labelTone="light"
+              onChooseBuiltIn={chooseBuiltInAvatar}
+              onChooseGallery={chooseAvatar}
+              selectedBuiltInAvatar={selectedBuiltInAvatar}
+              title="Choose your profile picture"
+            />
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="block">
@@ -4184,7 +4208,7 @@ function StatusAvatar({ user, ring = "none", size = "h-14 w-14" }: { user: { nam
   return (
     <div className={`${size} shrink-0 rounded-full p-[2px] ${ring === "unseen" ? "bg-[#00a884]" : ring === "viewed" ? "bg-[#cbd5e1]" : "bg-transparent"}`}>
       <div className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-sm font-black text-[#008f70]">
-        {user.avatarUrl ? <img alt={user.name} className="h-full w-full object-cover" src={user.avatarUrl} /> : chatInitials(user.name)}
+        {user.avatarUrl ? <AvatarImage alt={user.name} className="h-full w-full object-cover" fallback={chatInitials(user.name)} src={user.avatarUrl} /> : chatInitials(user.name)}
       </div>
     </div>
   );
@@ -4435,7 +4459,7 @@ type GroupListPanelProps = {
 };
 
 function GroupAvatar({ name, avatarUrl, className = "h-12 w-12" }: { name: string; avatarUrl?: string; className?: string }) {
-  return <div className={`${className} grid shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]`}>{avatarUrl ? <img alt={name} className="h-full w-full object-cover" src={avatarUrl} /> : chatInitials(name)}</div>;
+  return <div className={`${className} grid shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]`}>{avatarUrl ? <AvatarImage alt={name} className="h-full w-full object-cover" fallback={chatInitials(name)} src={avatarUrl} /> : chatInitials(name)}</div>;
 }
 
 function GroupListPanel({ authToken, currentUserId, groups, users, isLoading, error, className = "", onSelect, onRefresh }: GroupListPanelProps) {
@@ -5054,12 +5078,90 @@ function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) 
   return (
     <span className={`grid shrink-0 place-items-center overflow-hidden ${chat.color} font-black text-white ${className}`}>
       {chat.avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img alt={chat.name} className="h-full w-full object-cover" src={chat.avatarUrl} />
+        <AvatarImage alt={chat.name} className="h-full w-full object-cover" fallback={chat.avatar} src={chat.avatarUrl} />
       ) : (
         chat.avatar
       )}
     </span>
+  );
+}
+
+function AvatarImage({ alt, className, fallback, src }: { alt: string; className?: string; fallback: ReactNode; src: string }) {
+  const [failedSrc, setFailedSrc] = useState("");
+
+  useEffect(() => {
+    setFailedSrc("");
+  }, [src]);
+
+  if (!src || failedSrc === src) return <>{fallback}</>;
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img alt={alt} className={className} onError={() => setFailedSrc(src)} src={src} />
+  );
+}
+
+function AvatarSelection({
+  currentPreview,
+  fallback = <Upload size={28} />,
+  inputId,
+  labelTone,
+  onChooseBuiltIn,
+  onChooseGallery,
+  selectedBuiltInAvatar,
+  title
+}: {
+  currentPreview: string;
+  fallback?: ReactNode;
+  inputId: string;
+  labelTone: "dark" | "light";
+  onChooseBuiltIn: (src: string) => void;
+  onChooseGallery: (event: ChangeEvent<HTMLInputElement>) => void;
+  selectedBuiltInAvatar: string;
+  title: string;
+}) {
+  const isDark = labelTone === "dark";
+  return (
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#0b141a]" : "border-[#e5e9f0] bg-[#f8fafc]"}`}>
+      <div className={`text-sm font-bold ${isDark ? "text-white" : "text-[#18212f]"}`}>{title}</div>
+      <div className="mt-4 grid grid-cols-4 gap-3 sm:grid-cols-6">
+        {BUILT_IN_AVATARS.map((avatar, index) => {
+          const selected = selectedBuiltInAvatar === avatar.src;
+          return (
+            <button
+              aria-label={`Choose ChatSphere avatar ${index + 1}`}
+              aria-pressed={selected}
+              className={`relative grid aspect-square place-items-center rounded-full border-2 transition ${
+                selected ? "border-[#00a884] bg-[#e7f8f2] shadow-[0_0_0_3px_rgba(0,168,132,.18)]" : isDark ? "border-white/10 bg-[#17251f] hover:border-[#00a884]/70" : "border-[#dce1e8] bg-white hover:border-[#00a884]/70"
+              }`}
+              key={avatar.id}
+              onClick={() => onChooseBuiltIn(avatar.src)}
+              type="button"
+            >
+              <span className="grid h-[86%] w-[86%] place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
+                <AvatarImage alt={`ChatSphere avatar ${index + 1}`} className="h-full w-full object-cover" fallback={String(index + 1).padStart(2, "0")} src={avatar.src} />
+              </span>
+              {selected ? <span className="absolute bottom-0 right-0 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-[#00a884] text-white"><Check size={14} strokeWidth={3} /></span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <div className={`my-4 flex items-center gap-3 text-xs font-black uppercase ${isDark ? "text-[#8696a0]" : "text-[#94a3b8]"}`}>
+        <span className={`h-px flex-1 ${isDark ? "bg-white/10" : "bg-[#dce1e8]"}`} />
+        or
+        <span className={`h-px flex-1 ${isDark ? "bg-white/10" : "bg-[#dce1e8]"}`} />
+      </div>
+      <div className="flex flex-wrap items-center gap-4">
+        <span className={`grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full ${isDark ? "bg-[#202c33] text-[#00a884]" : "bg-[#e7f8f2] text-[#008f70]"} text-sm font-black`}>
+          {currentPreview ? <AvatarImage alt="Profile preview" className="h-full w-full object-cover" fallback={fallback} src={currentPreview} /> : fallback}
+        </span>
+        <label className="cs-press inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-[0_12px_28px_rgba(0,168,132,.18)]">
+          <Upload size={17} />
+          Choose from Gallery
+          <input id={inputId} accept="image/*" className="hidden" onChange={onChooseGallery} type="file" />
+        </label>
+      </div>
+    </div>
   );
 }
 
