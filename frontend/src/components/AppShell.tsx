@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, KeyboardEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
@@ -12,14 +12,11 @@ import {
   Loader2,
   LogOut,
   MessageCircle,
-  Mic,
   MoreVertical,
-  Paperclip,
   Mail,
   Search,
   Send,
   ShieldCheck,
-  Smile,
   Upload,
   UserPlus,
   Users,
@@ -37,11 +34,12 @@ import {
   Trash2
 } from "lucide-react";
 import { ChatSeed, DirectoryUser, userToChat } from "@/lib/data";
-import EmojiPicker, { EmojiClickData, Theme } from "emoji-picker-react";
+import type { EmojiClickData } from "emoji-picker-react";
 import { AIChat, AIMessage } from "@/components/AIChat";
 import { useAudioCall, AudioCallOverlay } from "./AudioCall";
 import { handleImageCompressionLoop, handleVideoCompressionLoop, AppConfig } from "@/lib/mediaCompression";
 import { MessageBubble, type BubbleAttachment } from "@/components/chat/MessageBubble";
+import { MessageComposer } from "@/components/chat/MessageComposer";
 import type { ReactionSummary, ReactionTarget, ReactionUser } from "@/components/chat/MessageReactions";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
@@ -262,7 +260,6 @@ export function AppShell() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaInputRef = useRef<HTMLInputElement>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
 
@@ -1547,13 +1544,6 @@ export function AppShell() {
     if (selectedChatId) setDraftAttachment(selectedChatId, attachment);
   }
 
-  function chooseAttachment(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    handleFileAttachment(file);
-  }
-
   function setDraftText(chatId: string, text: string) {
     setDrafts((current) => {
       const existing = current[chatId];
@@ -2154,12 +2144,6 @@ export function AppShell() {
         typingTimeoutRef.current = null;
       }
     }
-  }
-
-  function sendOnEnter(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Enter" || event.shiftKey) return;
-    event.preventDefault();
-    sendChatMessage();
   }
 
   function addEmoji(emoji: EmojiClickData) {
@@ -3749,104 +3733,28 @@ export function AppShell() {
               </div>
 
               <footer className={`fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[600px] xl:left-[660px] ${isContactInfoOpen ? "lg:right-[360px] xl:right-[380px]" : ""}`}>
-                {chatNotice ? <div className="mb-3 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm font-semibold text-[#64748b]">{chatNotice}</div> : null}
-                {isEmojiOpen ? (
-                  <div className="cs-scale-in absolute bottom-[78px] left-3 z-20 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl sm:left-5">
-                    <EmojiPicker height={390} onEmojiClick={addEmoji} previewConfig={{ showPreview: false }} searchDisabled={false} skinTonesDisabled theme={Theme.LIGHT} width={340} />
-                  </div>
-                ) : null}
-                {currentAttachmentDraft ? (
-                  <div className="mb-3 flex items-center justify-between rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 py-2 text-sm text-[#334155]">
-                    <div className="min-w-0 truncate">
-                      <span className="font-black text-[#00a884]">{currentAttachmentDraft.kind.toUpperCase()}</span> {currentAttachmentDraft.name}
-                    </div>
-                    <button className="ml-3 text-[#64748b] hover:text-[#18212f]" onClick={() => { if (selectedChatId) setDraftAttachment(selectedChatId, null); }} type="button">Remove</button>
-                  </div>
-                ) : null}
-                {typingUser ? (
-                  <div className="mb-2 text-xs font-bold text-[#00a884] cs-fade-up">
-                    {typingUser} is typing...
-                  </div>
-                ) : null}
-                {isRecording ? (
-                  <div className="flex w-full items-center justify-between rounded-2xl border border-red-200 bg-red-50/50 p-2 shadow-sm focus-within:border-red-400 sm:gap-3">
-                    <div className="flex items-center gap-2 px-3 text-sm font-bold text-red-600 animate-pulse">
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-600"></span>
-                      <span>Recording: {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, "0")}</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        aria-label="Cancel recording"
-                        className="cs-press rounded-xl px-3 py-2 text-sm font-bold text-[#64748b] hover:bg-white hover:text-[#18212f]"
-                        onClick={cancelRecording}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        aria-label="Send voice message"
-                        className="cs-press flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-700 shadow-sm"
-                        onClick={stopAndSendRecording}
-                        type="button"
-                      >
-                        <span>Send</span>
-                        <Send size={15} />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex w-full items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2 shadow-sm focus-within:border-[#00a884] focus-within:bg-white sm:gap-3">
-                    <button aria-label="Emoji" className={`cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl ${isEmojiOpen ? "bg-[#e7f8f2] text-[#00a884]" : "text-[#64748b] hover:bg-white hover:text-[#18212f]"}`} onClick={() => setIsEmojiOpen((open) => !open)} type="button">
-                      <Smile size={22} />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Attach image or video"
-                      className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]"
-                      onClick={() => mediaInputRef.current?.click()}
-                    >
-                      <Image size={22} />
-                    </button>
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      className="hidden"
-                      ref={mediaInputRef}
-                      onChange={(e) => {
-                        if (e.target.files?.[0]) {
-                          handleFileAttachment(e.target.files[0]);
-                          e.target.value = "";
-                        }
-                      }}
-                    />
-                    <label aria-label="Attach file" className="cs-press grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]">
-                      <Paperclip size={22} />
-                      <input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={chooseAttachment} type="file" />
-                    </label>
-                    <input
-                      className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-[#94a3b8] sm:px-2"
-                      onChange={(event) => handleInputChange(event.target.value)}
-                      onKeyDown={sendOnEnter}
-                      placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
-                      value={currentMessageDraft}
-                      disabled={selectedChatBlocked}
-                    />
-                    {!currentMessageDraft.trim() && !currentAttachmentDraft && !selectedChatBlocked ? (
-                      <button
-                        aria-label="Record voice message"
-                        className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white hover:text-[#18212f]"
-                        onClick={startRecording}
-                        type="button"
-                      >
-                        <Mic size={22} />
-                      </button>
-                    ) : null}
-                    <button aria-label="Send" className="cs-press flex h-11 shrink-0 items-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50 sm:px-5" disabled={selectedChatBlocked || (!currentMessageDraft.trim() && !currentAttachmentDraft)} onClick={sendChatMessage}>
-                      <span className="hidden sm:inline">Send</span>
-                      <Send size={18} />
-                    </button>
-                  </div>
-                )}
+                <MessageComposer
+                  attachment={currentAttachmentDraft}
+                  disabled={selectedChatBlocked}
+                  emojiPickerOpen={isEmojiOpen}
+                  isRecording={isRecording}
+                  mode="direct"
+                  notice={chatNotice}
+                  onCancelRecording={cancelRecording}
+                  onChange={handleInputChange}
+                  onEmojiSelect={addEmoji}
+                  onEmojiToggle={() => setIsEmojiOpen((open) => !open)}
+                  onFileAttachment={handleFileAttachment}
+                  onMediaAttachment={handleFileAttachment}
+                  onRemoveAttachment={() => { if (selectedChatId) setDraftAttachment(selectedChatId, null); }}
+                  onSend={sendChatMessage}
+                  onSendRecording={stopAndSendRecording}
+                  onStartRecording={startRecording}
+                  placeholder={selectedChatBlocked ? "Unblock this user to send messages" : "Write a message"}
+                  recordingDuration={recordingDuration}
+                  typingUser={typingUser}
+                  value={currentMessageDraft}
+                />
               </footer>
               </div>
               <ContactInfoPanel
@@ -4679,7 +4587,7 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
   if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} key={message.id} message={message} onOpenReactionDetails={onReactionDetails} onReact={onReact} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><form className="border-t border-[#e5e9f0] bg-white p-3 sm:p-4" onSubmit={send}>{file ? <div className="mb-2 flex items-center justify-between rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]">{filePreview ? <img alt="Attachment preview" className="h-10 w-10 rounded-lg object-cover" src={filePreview} /> : <span>{file.name}</span>}<button className="text-[#64748b]" onClick={() => { setFile(null); setFilePreview(""); }} type="button">Remove</button></div> : null}<div className="flex items-center gap-2 rounded-2xl border border-[#dce1e8] bg-[#f8fafc] p-2"><label aria-label="Attach group media" className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-xl text-[#64748b] hover:bg-white"><Paperclip size={20} /><input accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.apk" className="hidden" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value=""; }} type="file" /></label>{isRecording ? <button aria-label="Stop recording" className="flex h-10 flex-1 items-center gap-2 px-2 text-sm font-bold text-red-600" onClick={stopRecording} type="button"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-600" />Recording... Click to stop</button> : <input className="h-10 min-w-0 flex-1 bg-transparent px-2 text-sm outline-none" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Write a group message" value={draft} />}{!draft.trim() && !file && !isRecording ? <button aria-label="Record voice message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-white" onClick={startRecording} type="button"><Mic size={20} /></button> : null}<button aria-label="Send group message" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#00a884] text-white disabled:opacity-50" disabled={isSending || (!draft.trim() && !file)} type="submit"><Send size={17} /></button></div></form>{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} key={message.id} message={message} onOpenReactionDetails={onReactionDetails} onReact={onReact} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} isRecording={isRecording} isSending={isSending} mode="group" onAttachment={chooseFile} onChange={setDraft} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} value={draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} manage={manage} /> : null}</div>;
 }
 
 function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
