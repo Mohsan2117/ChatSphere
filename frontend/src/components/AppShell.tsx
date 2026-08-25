@@ -3621,22 +3621,22 @@ export function AppShell() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-[#071019] text-[#E5E7EB] flex flex-col">
+    <main className="h-screen overflow-hidden bg-[#eef1f5] text-[#18212f] flex flex-col">
       {/* Mobile Top Navbar */}
-      <header className="flex h-16 shrink-0 items-center justify-between bg-[#0B1323] border-b border-white/10 px-4 text-[#E5E7EB] lg:hidden z-30 shadow-md">
+      <header className="flex h-16 shrink-0 items-center justify-between bg-[#0b1120] px-4 text-white lg:hidden z-30 shadow-md">
         <div className="flex items-center gap-3">
           <button
             aria-label={isMobileDrawerOpen ? "Close menu" : "Open menu"}
             onClick={() => setIsMobileDrawerOpen(!isMobileDrawerOpen)}
-            className="cs-press grid h-10 w-10 place-items-center rounded-xl text-[#9AA3B8] hover:bg-white/10 hover:text-white transition focus:outline-none"
+            className="cs-press grid h-10 w-10 place-items-center rounded-xl text-[#94a3b8] hover:bg-white/10 hover:text-white transition focus:outline-none"
             type="button"
           >
             {isMobileDrawerOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
-          <span className="text-base font-bold tracking-tight">ChatSphere</span>
+          <span className="text-base font-black tracking-tight">ChatSphere</span>
         </div>
         <button
-          className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-white/10 text-xs font-bold text-[#38BDF8] hover:bg-white/20"
+          className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg bg-white/10 text-xs font-black text-[#00a884] hover:bg-white/20"
           onClick={() => {
             setIsProfileEditorOpen(true);
             setProfileError("");
@@ -3656,25 +3656,25 @@ export function AppShell() {
       {/* Mobile Drawer (Left Sidebar) */}
       <div className={`fixed inset-0 z-50 flex lg:hidden transition-opacity duration-300 ${isMobileDrawerOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
         <div
-          className={`fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity duration-300 ease-in-out ${isMobileDrawerOpen ? "opacity-100" : "opacity-0"}`}
+          className={`fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity duration-300 ease-in-out ${isMobileDrawerOpen ? "opacity-100" : "opacity-0"}`}
           onClick={() => setIsMobileDrawerOpen(false)}
         />
         <div
-          className={`relative flex w-full max-w-[280px] flex-col bg-[#0B1323] text-[#E5E7EB] shadow-2xl transition-transform duration-300 ease-in-out h-full ${
+          className={`relative flex w-full max-w-[280px] flex-col bg-[#0b1120] text-white shadow-2xl transition-transform duration-300 ease-in-out h-full ${
             isMobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
             <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-[#38BDF8] to-[#60A5FA] text-[#071019]">
+              <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white">
                 <MessageCircle size={18} />
               </span>
-              <span className="text-base font-bold tracking-tight">ChatSphere</span>
+              <span className="text-base font-black tracking-tight">ChatSphere</span>
             </div>
             <button
               aria-label="Close menu"
               onClick={() => setIsMobileDrawerOpen(false)}
-              className="grid h-8 w-8 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white transition"
+              className="grid h-8 w-8 place-items-center rounded-lg text-[#94a3b8] hover:bg-white/10 hover:text-white transition"
               type="button"
             >
               <X size={18} />
@@ -3694,10 +3694,10 @@ export function AppShell() {
                   aria-label={label}
                   className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
                     isActive && mode === "ai"
-                      ? "bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_8px_24px_rgba(56,189,248,.35)]"
+                      ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
                       : isActive
-                        ? "bg-[#152035] text-[#38BDF8]"
-                        : "text-[#9AA3B8] hover:bg-white/5 hover:text-white"
+                        ? "bg-white/10 text-white"
+                        : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
                   }`}
                   key={mode}
                   onClick={() => {
@@ -3716,7 +3716,7 @@ export function AppShell() {
           <div className="border-t border-white/10 p-4">
             <button
               aria-label="Logout"
-              className="cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#9AA3B8] transition hover:bg-white/5 hover:text-white"
+              className="cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/5 hover:text-white"
               onClick={() => {
                 logout();
                 setIsMobileDrawerOpen(false);
@@ -3737,12 +3737,12 @@ export function AppShell() {
             : "lg:grid-cols-[250px_350px_minmax(0,1fr)] xl:grid-cols-[270px_390px_minmax(0,1fr)]"
         }`}
       >
-        <aside className="hidden h-screen flex-col border-r border-white/5 bg-[#0B1323] px-4 py-6 text-[#E5E7EB] lg:flex">
+        <aside className="hidden h-screen flex-col border-r border-white/5 bg-[#0b1120] px-4 py-6 text-white lg:flex">
           <div className="flex items-center gap-3 px-2">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_6px_18px_rgba(56,189,248,.35)]">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_6px_18px_rgba(124,58,237,.4)]">
               <MessageCircle size={20} />
             </span>
-            <span className="text-lg font-bold tracking-tight">ChatSphere</span>
+            <span className="text-lg font-black tracking-tight">ChatSphere</span>
           </div>
           <nav className="mt-8 space-y-1.5">
             {[
@@ -3757,10 +3757,10 @@ export function AppShell() {
                   aria-label={label}
                   className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
                     isActive && mode === "ai"
-                      ? "bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_8px_24px_rgba(56,189,248,.35)]"
+                      ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
                       : isActive
-                        ? "bg-[#152035] text-[#38BDF8]"
-                        : "text-[#9AA3B8] hover:bg-white/5 hover:text-white"
+                        ? "bg-white/10 text-white"
+                        : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
                   }`}
                   key={mode}
                   onClick={() => openWorkspace(mode)}
@@ -3774,7 +3774,7 @@ export function AppShell() {
           </nav>
           <button
             aria-label="Logout"
-            className="cs-press mt-auto flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#9AA3B8] transition hover:bg-white/5 hover:text-white"
+            className="cs-press mt-auto flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/5 hover:text-white"
             onClick={logout}
             type="button"
           >
@@ -3784,17 +3784,17 @@ export function AppShell() {
         </aside>
 
         {workspaceMode !== "ai" ? (
-        <aside className={`flex h-full min-h-0 flex-col overflow-hidden border-r border-white/10 bg-[#0E1726] text-[#E5E7EB] ${selectedChat || selectedGroupId ? "hidden lg:flex" : "flex"}`}>
+        <aside className={`flex h-full min-h-0 flex-col overflow-hidden border-r border-[#dce1e8] bg-white ${selectedChat || selectedGroupId ? "hidden lg:flex" : "flex"}`}>
           {mobileTab === "calls" ? (
             <>
-              <header className="border-b border-white/10 px-5 py-5">
+              <header className="border-b border-[#e5e9f0] px-5 py-5">
                 <div className="hidden lg:flex items-center justify-between gap-3">
-                  <h1 className="text-2xl font-bold tracking-normal text-[#E5E7EB]">Calls</h1>
+                  <h1 className="text-2xl font-black tracking-normal">Calls</h1>
                 </div>
-                <label className="mt-5 lg:mt-3 flex h-11 items-center gap-3 rounded-xl border border-white/10 bg-[#152035]/60 px-3 text-[#9AA3B8] focus-within:border-[#38BDF8] transition">
+                <label className="mt-5 lg:mt-3 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b]">
                   <Search size={19} />
                   <input
-                    className="w-full bg-transparent text-sm text-[#E5E7EB] outline-none focus-visible:!outline-none placeholder:text-[#64748B]"
+                    className="w-full bg-transparent text-sm outline-none focus-visible:!outline-none placeholder:text-[#94a3b8]"
                     onChange={(e) => setCallHistorySearch(e.target.value)}
                     placeholder="Search calls"
                     value={callHistorySearch}
@@ -3803,7 +3803,7 @@ export function AppShell() {
               </header>
               <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 pb-24 lg:pb-4">
                 <div className="mb-3 flex items-center justify-between px-2">
-                  <h2 className="text-sm font-bold text-[#E5E7EB]">Recent</h2>
+                  <h2 className="text-sm font-black">Recent</h2>
                 </div>
                 {isCallHistoryLoading ? (
                   <div className="space-y-3">
@@ -3818,12 +3818,12 @@ export function AppShell() {
                     ))}
                   </div>
                 ) : callHistory.filter(c => !callHistorySearch.trim() || c.otherUser.name.toLowerCase().includes(callHistorySearch.toLowerCase())).length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-5 py-10 text-center">
-                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#38BDF8]/10 text-[#38BDF8]">
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
                       <Phone size={24} />
                     </div>
-                    <h2 className="mt-5 text-base font-bold text-[#E5E7EB]">{callHistorySearch.trim() ? "No matching calls" : "No calls yet"}</h2>
-                    <p className="mt-2 text-sm leading-6 text-[#9AA3B8]">{callHistorySearch.trim() ? "Try a different search term." : "Your call history will appear here after you make or receive calls."}</p>
+                    <h2 className="mt-5 text-base font-black">{callHistorySearch.trim() ? "No matching calls" : "No calls yet"}</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#64748b]">{callHistorySearch.trim() ? "Try a different search term." : "Your call history will appear here after you make or receive calls."}</p>
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -3835,7 +3835,7 @@ export function AppShell() {
                         return (
                           <div
                             key={call.id}
-                            className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-white/[0.04]"
+                            className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-[#f8fafc]"
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
@@ -3850,7 +3850,7 @@ export function AppShell() {
                             role="button"
                             tabIndex={0}
                           >
-                            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#152035] text-sm font-bold text-[#38BDF8] border border-white/5">
+                            <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]">
                               {call.otherUser.avatarUrl ? (
                                 <AvatarImage alt={call.otherUser.name} className="h-full w-full object-cover" fallback={chatInitials(call.otherUser.name)} src={call.otherUser.avatarUrl} />
                               ) : (
@@ -3858,8 +3858,8 @@ export function AppShell() {
                               )}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className={`truncate text-sm font-bold ${isMissed ? "text-red-400" : "text-[#E5E7EB]"}`}>{call.otherUser.name}</div>
-                              <div className={`mt-0.5 flex items-center gap-1 text-xs ${isMissed ? "text-red-400" : "text-[#9AA3B8]"}`}>
+                              <div className={`truncate text-sm font-bold ${isMissed ? "text-[#ef4444]" : "text-[#18212f]"}`}>{call.otherUser.name}</div>
+                              <div className={`mt-0.5 flex items-center gap-1 text-xs ${isMissed ? "text-[#ef4444]" : "text-[#64748b]"}`}>
                                 <span>{directionIcon}</span>
                                 <span className="capitalize">{call.direction}</span>
                                 <span>·</span>
@@ -3870,10 +3870,10 @@ export function AppShell() {
                                   <><span>·</span><span className="capitalize">{call.status}</span></>
                                 )}
                               </div>
-                              <div className="mt-0.5 text-[11px] text-[#64748B]">{formatCallTime(call.startedAt)}</div>
+                              <div className="mt-0.5 text-[11px] text-[#94a3b8]">{formatCallTime(call.startedAt)}</div>
                             </div>
                             <button
-                              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#38BDF8] hover:bg-white/10 transition"
+                              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#00a884] hover:bg-[#e7f8f2] transition"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const chatSeed = directoryChats.find(c => c.id === call.otherUser.id);
@@ -3911,13 +3911,13 @@ export function AppShell() {
             />
           ) : (
             <>
-          <header className="border-b border-white/10 px-3 py-3 lg:px-5 lg:py-5">
+          <header className="border-b border-[#e5e9f0] px-3 py-3 lg:px-5 lg:py-5">
             <div className="hidden lg:flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#38BDF8]">Chatsphere</p>
-                <h1 className="mt-2 text-2xl font-bold tracking-normal text-[#E5E7EB]">{workspaceTitle}</h1>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Chatsphere</p>
+                <h1 className="mt-2 text-2xl font-black tracking-normal">{workspaceTitle}</h1>
               </div>
-              <button className="hidden lg:grid h-11 w-11 place-items-center overflow-hidden rounded-xl text-sm font-bold text-[#38BDF8] hover:bg-white/10 transition" onClick={() => {
+              <button className="hidden lg:grid h-11 w-11 place-items-center overflow-hidden rounded-xl text-sm font-black text-[#008f70]" onClick={() => {
                 setIsProfileEditorOpen(true);
                 setProfileError("");
                 setProfileMessage("");
@@ -3929,11 +3929,11 @@ export function AppShell() {
                 )}
               </button>
             </div>
-            <label className="mt-3 flex h-11 items-center gap-3 rounded-xl border border-white/10 bg-[#152035]/60 px-3 text-[#9AA3B8] focus-within:border-[#38BDF8] lg:mt-5 transition">
+            <label className="mt-3 flex h-11 items-center gap-3 rounded-xl border border-[#dce1e8] bg-[#f7f9fb] px-3 text-[#64748b] lg:mt-5">
               <Search size={19} />
               <input
                 ref={chatSearchRef}
-                className="w-full bg-transparent text-sm text-[#E5E7EB] outline-none focus-visible:!outline-none placeholder:text-[#64748B]"
+                className="w-full bg-transparent text-sm outline-none focus-visible:!outline-none placeholder:text-[#94a3b8]"
                 onChange={(event) => setChatSearch(event.target.value)}
                 placeholder="Search by name"
                 value={chatSearch}
@@ -3943,37 +3943,37 @@ export function AppShell() {
 
           <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-2 py-3 pb-24 lg:px-3 lg:py-4 lg:pb-4">
             <div className="mb-2 flex items-center justify-between px-2 lg:mb-3">
-              <h2 className="text-sm font-bold text-[#E5E7EB]">
+              <h2 className="text-sm font-black">
                 {workspaceMode === "files" ? "Shared files" : workspaceMode === "contacts" ? "All contacts" : "Open conversations"}
               </h2>
-              <span className="text-xs font-semibold text-[#9AA3B8]">{workspaceMode === "files" ? attachedMessages.length : workspaceMode === "contacts" ? contactResults.length : "Date"}</span>
+              <span className="text-xs font-bold text-[#94a3b8]">{workspaceMode === "files" ? attachedMessages.length : workspaceMode === "contacts" ? contactResults.length : "Date"}</span>
             </div>
             {workspaceMode === "files" ? (
               <div className="space-y-2">
                 {attachedMessages.length ? (
                   attachedMessages.map(({ chat, message }) => (
                     <button
-                      className="cs-hover-lift flex w-full items-start gap-3 rounded-2xl border border-transparent bg-transparent p-3 text-left transition hover:border-white/10 hover:bg-white/[0.04]"
+                      className="cs-hover-lift flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3 text-left transition hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       key={message.id}
                       onClick={() => chat && selectChat(chat)}
                       type="button"
                     >
-                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#38BDF8]/10 text-[#38BDF8]">
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e7f8f2] text-[#00a884]">
                         <FileText size={20} />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <strong className="block truncate text-sm text-[#E5E7EB]">{message.attachment?.name}</strong>
-                        <span className="mt-1 block truncate text-sm text-[#9AA3B8]">{chat?.name ?? "Unknown chat"} - {formatMessageTime(message)}</span>
+                        <strong className="block truncate text-sm">{message.attachment?.name}</strong>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat?.name ?? "Unknown chat"} - {formatMessageTime(message)}</span>
                       </span>
                     </button>
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-5 py-10 text-center">
-                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#38BDF8]/10 text-[#38BDF8]">
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
                       <FileText size={24} />
                     </div>
-                    <h2 className="mt-5 text-base font-bold text-[#E5E7EB]">No files yet</h2>
-                    <p className="mt-2 text-sm leading-6 text-[#9AA3B8]">Images, videos, and documents you send will show here.</p>
+                    <h2 className="mt-5 text-base font-black">No files yet</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#64748b]">Images, videos, and documents you send will show here.</p>
                   </div>
                 )}
               </div>
@@ -3985,22 +3985,22 @@ export function AppShell() {
                       key={chat.id}
                       onClick={() => selectChat(chat)}
                       className={`cs-hover-lift flex min-w-0 max-w-full w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
-                        selectedChatId === chat.id ? "border-[#38BDF8]/40 bg-[#152035] shadow-sm" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.04]"
+                        selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                       type="button"
                     >
                       <ChatAvatar chat={chat} className="h-11 w-11 rounded-full text-sm" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
-                          <strong className="truncate text-sm text-[#E5E7EB]">{chat.name}</strong>
-                          <span className="text-xs font-bold text-[#38BDF8]">{chat.online ? "online" : "offline"}</span>
+                          <strong className="truncate text-sm">{chat.name}</strong>
+                          <span className="text-xs font-bold text-[#00a884]">{chat.online ? "online" : "offline"}</span>
                         </span>
-                        <span className="mt-1 block truncate text-sm text-[#9AA3B8]">{chat.online ? "Online now" : "Offline"}</span>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat.online ? "Online now" : "Offline"}</span>
                       </span>
                     </button>
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-4 py-8 text-center text-sm text-[#9AA3B8]">No contact found. Try another name or email.</div>
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-8 text-center text-sm text-[#64748b]">No contact found. Try another name or email.</div>
                 )}
               </div>
             ) : chatSearch.trim() ? (
@@ -4011,23 +4011,23 @@ export function AppShell() {
                       key={chat.id}
                       onClick={() => selectChat(chat)}
                       className={`cs-hover-lift flex w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
-                        selectedChatId === chat.id ? "border-[#38BDF8]/40 bg-[#152035] shadow-sm" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.04]"
+                        selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                       }`}
                     >
                       <ChatAvatar chat={chat} className="h-11 w-11 rounded-full text-sm" />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2">
-                          <strong className="truncate text-sm text-[#E5E7EB]">{chat.name}</strong>
-                          <span className="text-xs font-semibold text-[#9AA3B8]">
+                          <strong className="truncate text-sm">{chat.name}</strong>
+                          <span className="text-xs font-bold text-[#94a3b8]">
                             {chatMessages[chat.id]?.at(-1) ? formatMessageTime(chatMessages[chat.id].at(-1)) : "new"}
                           </span>
                         </span>
-                        <span className="mt-1 block truncate text-sm text-[#9AA3B8]">{chat.online ? "Online now" : "Offline"}</span>
+                        <span className="mt-1 block truncate text-sm text-[#64748b]">{chat.online ? "Online now" : "Offline"}</span>
                       </span>
                     </button>
                   ))
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-4 py-8 text-center text-sm text-[#9AA3B8]">No registered user found.</div>
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-8 text-center text-sm text-[#64748b]">No registered user found.</div>
                 )}
               </div>
             ) : workspaceMode === "inbox" ? (
@@ -4035,7 +4035,7 @@ export function AppShell() {
                 {isInboxLoading ? (
                   <>
                     {[0, 1, 2].map((item) => (
-                      <div key={item} className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-transparent p-3">
+                      <div key={item} className="flex w-full items-start gap-3 rounded-2xl border border-transparent bg-white p-3">
                         <div className="cs-skeleton h-11 w-11 shrink-0 rounded-xl" />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
@@ -4048,12 +4048,12 @@ export function AppShell() {
                     ))}
                   </>
                 ) : inboxError ? (
-                  <div className="rounded-2xl border border-red-500/30 bg-red-950/40 px-5 py-8 text-center">
-                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-red-900/40 text-red-400">
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-8 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-red-100 text-red-600">
                       <MessageCircle size={24} />
                     </div>
-                    <h2 className="mt-5 text-base font-bold text-red-300">Could not load inbox</h2>
-                    <p className="mt-2 text-sm leading-6 text-red-400">{inboxError}</p>
+                    <h2 className="mt-5 text-base font-black text-red-700">Could not load inbox</h2>
+                    <p className="mt-2 text-sm leading-6 text-red-600">{inboxError}</p>
                   </div>
                 ) : inboxChats.length ? (
                   inboxChats.map((chat) => {
@@ -4064,48 +4064,48 @@ export function AppShell() {
                         key={chat.id}
                         onClick={() => selectChat(chat)}
                         className={`cs-hover-lift flex min-w-0 max-w-full w-full items-start gap-3 rounded-2xl border p-3 text-left transition ${
-                          selectedChatId === chat.id ? "border-[#38BDF8]/40 bg-[#152035] shadow-sm" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.04]"
+                          selectedChatId === chat.id ? "border-[#00a884] bg-[#effdf8] shadow-sm" : "border-transparent bg-white hover:border-[#e5e9f0] hover:bg-[#f8fafc]"
                         }`}
                         type="button"
                       >
                         <ChatAvatar chat={chat} className="h-11 w-11 rounded-full text-sm" />
                         <span className="min-w-0 flex-1 overflow-hidden">
                           <span className="flex items-center justify-between gap-2">
-                            <strong className="truncate text-sm text-[#E5E7EB]">{chat.name}</strong>
-                            <span className="shrink-0 text-xs font-semibold text-[#64748B]">{formatMessageTime(lastMessage)}</span>
+                            <strong className="truncate text-sm">{chat.name}</strong>
+                            <span className="shrink-0 text-xs font-bold text-[#94a3b8]">{formatMessageTime(lastMessage)}</span>
                           </span>
-                          <span className="mt-1 flex items-center justify-between gap-2 text-sm text-[#9AA3B8]">
+                          <span className="mt-1 flex items-center justify-between gap-2 text-sm text-[#64748b]">
                             <span className="min-w-0 truncate">{attachmentPreviewLabel(lastMessage) || (chat.online ? "Online now" : formatLastSeen(chat.lastSeenAt))}</span>
-                            {unread ? <span className="grid h-5 min-w-5 place-items-center rounded-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] px-1.5 text-[11px] font-bold text-[#071019]">{unread}</span> : null}
+                            {unread ? <span className="grid h-5 min-w-5 place-items-center rounded-full bg-[#00a884] px-1.5 text-[11px] font-black text-white">{unread}</span> : null}
                           </span>
                         </span>
                       </button>
                     );
                   })
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-5 py-10 text-center">
-                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#38BDF8]/10 text-[#38BDF8]">
+                  <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                    <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
                       <MessageCircle size={24} />
                     </div>
-                    <h2 className="mt-5 text-base font-bold text-[#E5E7EB]">Inbox is empty</h2>
-                    <p className="mt-2 text-sm leading-6 text-[#9AA3B8]">People appear here after you send or receive a message.</p>
+                    <h2 className="mt-5 text-base font-black">Inbox is empty</h2>
+                    <p className="mt-2 text-sm leading-6 text-[#64748b]">People appear here after you send or receive a message.</p>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-5 py-10 text-center">
-                <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#38BDF8]/10 text-[#38BDF8]">
+              <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center">
+                <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]">
                   <Search size={24} />
                 </div>
-                <h2 className="mt-5 text-base font-bold text-[#E5E7EB]">Find someone to message</h2>
-                <p className="mt-2 text-sm leading-6 text-[#9AA3B8]">Registered users will appear here after database search is connected.</p>
+                <h2 className="mt-5 text-base font-black">Find someone to message</h2>
+                <p className="mt-2 text-sm leading-6 text-[#64748b]">Registered users will appear here after database search is connected.</p>
               </div>
             )}
           </div>
           </>
           )}
           {/* Desktop tab bar */}
-          <div className="hidden shrink-0 items-center justify-around border-t border-white/10 bg-[#0E1726] px-2 py-2 lg:flex">
+          <div className="hidden shrink-0 items-center justify-around border-t border-[#e5e9f0] bg-white px-2 py-2 lg:flex">
             {([
               { key: "chats" as const, label: "Chats", icon: MessageCircle },
               { key: "status" as const, label: "Status", icon: Radio },
@@ -4116,8 +4116,8 @@ export function AppShell() {
                 key={key}
                 className={`flex flex-col items-center justify-center gap-0.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-colors ${
                   mobileTab === key
-                    ? "text-[#38BDF8]"
-                    : "text-[#9AA3B8] hover:text-white"
+                    ? "text-[#00a884]"
+                    : "text-[#94a3b8] hover:text-[#64748b]"
                 }`}
                 onClick={() => setMobileTab(key)}
                 type="button"
@@ -4130,7 +4130,7 @@ export function AppShell() {
         </aside>
         ) : null}
 
-        <section className={`h-full lg:h-screen min-h-0 flex-col overflow-hidden bg-[#071019] text-[#E5E7EB] ${selectedChat || selectedGroupId || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
+        <section className={`h-full lg:h-screen min-h-0 flex-col overflow-hidden bg-[#f7f9fb] ${selectedChat || selectedGroupId || workspaceMode === "ai" ? "flex" : "hidden lg:flex"}`}>
           {workspaceMode === "ai" ? (
             <AIChat
               apiUrl={apiUrl()}
@@ -4494,14 +4494,14 @@ export function AppShell() {
       ) : null}
 
       {isProfileEditorOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-sm px-4">
-          <form className="cs-scale-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-white/10 bg-[#0E1726] p-6 text-[#E5E7EB] shadow-[0_28px_90px_rgba(0,0,0,0.8)]" onSubmit={saveProfileUpdate}>
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[#0f172a]/45 px-4">
+          <form className="cs-scale-in max-h-[90vh] w-full max-w-md overflow-y-auto rounded-3xl border border-[#dce1e8] bg-white p-6 shadow-[0_28px_90px_rgba(15,23,42,.22)]" onSubmit={saveProfileUpdate}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#38BDF8]">Profile</p>
-                <h2 className="mt-2 text-2xl font-bold text-[#E5E7EB]">Edit your profile</h2>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Profile</p>
+                <h2 className="mt-2 text-2xl font-black">Edit your profile</h2>
               </div>
-              <button className="rounded-xl border border-white/10 bg-[#152035] px-3 py-2 text-sm font-bold text-[#9AA3B8] hover:text-white transition" onClick={() => setIsProfileEditorOpen(false)} type="button">
+              <button className="rounded-xl border border-[#dce1e8] px-3 py-2 text-sm font-black text-[#64748b]" onClick={() => setIsProfileEditorOpen(false)} type="button">
                 Close
               </button>
             </div>
@@ -4510,7 +4510,7 @@ export function AppShell() {
               currentPreview={avatarPreview}
               fallback={userInitials}
               inputId="profile-editor-avatar-upload"
-              labelTone="dark"
+              labelTone="light"
               onChooseBuiltIn={chooseBuiltInAvatar}
               onChooseGallery={chooseAvatar}
               selectedBuiltInAvatar={selectedBuiltInAvatar}
@@ -4519,24 +4519,24 @@ export function AppShell() {
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="text-sm font-semibold text-[#9AA3B8]">First name</span>
-                <input className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#152035]/60 px-3 text-sm text-[#E5E7EB] outline-none focus:border-[#38BDF8] transition" onChange={(event) => setFirstName(event.target.value)} value={firstName} />
+                <span className="text-sm font-bold text-[#334155]">First name</span>
+                <input className="mt-2 h-11 w-full rounded-xl border border-[#dce1e8] bg-white px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setFirstName(event.target.value)} value={firstName} />
               </label>
               <label className="block">
-                <span className="text-sm font-semibold text-[#9AA3B8]">Last name</span>
-                <input className="mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#152035]/60 px-3 text-sm text-[#E5E7EB] outline-none focus:border-[#38BDF8] transition" onChange={(event) => setLastName(event.target.value)} value={lastName} />
+                <span className="text-sm font-bold text-[#334155]">Last name</span>
+                <input className="mt-2 h-11 w-full rounded-xl border border-[#dce1e8] bg-white px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setLastName(event.target.value)} value={lastName} />
               </label>
             </div>
 
-            {profileError ? <p className="mt-4 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm font-semibold text-red-300">{profileError}</p> : null}
-            {profileMessage ? <p className="mt-4 rounded-xl bg-[#38BDF8]/10 border border-[#38BDF8]/20 px-3 py-2 text-sm font-semibold text-[#38BDF8]">{profileMessage}</p> : null}
-            <button className="cs-press mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-sm font-bold text-[#071019] shadow-[0_4px_14px_rgba(56,189,248,0.25)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 transition" disabled={isSubmitting} type="submit">
+            {profileError ? <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{profileError}</p> : null}
+            {profileMessage ? <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{profileMessage}</p> : null}
+            <button className="cs-press mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60" disabled={isSubmitting} type="submit">
               {isSubmitting ? "Saving..." : "Save profile"}
               {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
             </button>
             <button
               aria-label="Log out"
-              className="cs-press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-950/30 text-sm font-bold text-red-400 transition hover:bg-red-900/40"
+              className="cs-press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 text-sm font-black text-[#b42318] transition hover:bg-red-100"
               onClick={logout}
               type="button"
             >
@@ -4548,46 +4548,46 @@ export function AppShell() {
       ) : null}
 
       {reactionDetails ? (
-        <div className="fixed inset-0 z-[75] grid place-items-center bg-black/70 backdrop-blur-sm px-4" onClick={() => setReactionDetails(null)}>
-          <div className="cs-scale-in w-full max-w-xs rounded-2xl border border-white/10 bg-[#0E1726] p-5 shadow-2xl text-[#E5E7EB]" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-[75] grid place-items-center bg-[#0f172a]/35 px-4" onClick={() => setReactionDetails(null)}>
+          <div className="cs-scale-in w-full max-w-xs rounded-2xl border border-[#dce1e8] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between">
               <div>
                 <div className="text-3xl">{reactionDetails.emoji}</div>
-                <h2 className="mt-2 text-base font-bold text-[#E5E7EB]">Reacted</h2>
+                <h2 className="mt-2 text-base font-black">Reacted</h2>
               </div>
-              <button aria-label="Close reactions" className="grid h-9 w-9 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={() => setReactionDetails(null)} type="button"><X size={18} /></button>
+              <button aria-label="Close reactions" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={() => setReactionDetails(null)} type="button"><X size={18} /></button>
             </div>
             <div className="mt-4 space-y-2">
               {reactionDetails.users.length ? reactionDetails.users.map((user) => (
-                <div className="rounded-xl bg-[#152035] border border-white/5 px-3 py-2 text-sm font-semibold text-[#E5E7EB]" key={user.id}>{user.name}</div>
-              )) : <p className="text-sm font-semibold text-[#9AA3B8]">No reactions yet.</p>}
+                <div className="rounded-xl bg-[#f8fafc] px-3 py-2 text-sm font-bold text-[#334155]" key={user.id}>{user.name}</div>
+              )) : <p className="text-sm font-semibold text-[#64748b]">No reactions yet.</p>}
             </div>
           </div>
         </div>
       ) : null}
 
       {deleteTarget ? (
-        <div className="fixed inset-0 z-[80] grid place-items-end bg-black/70 backdrop-blur-sm px-3 py-4 sm:place-items-center sm:px-4" onClick={closeDeleteDialog}>
-          <div className="cs-scale-in w-full max-w-sm rounded-2xl border border-white/10 bg-[#0E1726] p-5 shadow-2xl text-[#E5E7EB]" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-[80] grid place-items-end bg-[#0f172a]/35 px-3 py-4 sm:place-items-center sm:px-4" onClick={closeDeleteDialog}>
+          <div className="cs-scale-in w-full max-w-sm rounded-2xl border border-[#dce1e8] bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-bold text-[#E5E7EB]">Delete message?</h2>
-                <p className="mt-1 text-sm font-medium text-[#9AA3B8]">This action only affects the selected message.</p>
+                <h2 className="text-lg font-black text-[#18212f]">Delete message?</h2>
+                <p className="mt-1 text-sm font-semibold text-[#64748b]">This action only affects the selected message.</p>
               </div>
-              <button aria-label="Cancel delete" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={closeDeleteDialog} type="button"><X size={18} /></button>
+              <button aria-label="Cancel delete" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={closeDeleteDialog} type="button"><X size={18} /></button>
             </div>
             <div className="mt-5 space-y-2">
-              <button className="flex h-11 w-full items-center justify-between rounded-xl border border-red-500/20 bg-red-950/40 px-4 text-sm font-bold text-red-300 hover:bg-red-900/50 disabled:opacity-60 transition" disabled={isDeletingMessage} onClick={() => deleteMessage("me")} type="button">
+              <button className="flex h-11 w-full items-center justify-between rounded-xl border border-red-100 bg-red-50 px-4 text-sm font-black text-[#b42318] hover:bg-red-100 disabled:opacity-60" disabled={isDeletingMessage} onClick={() => deleteMessage("me")} type="button">
                 <span>Delete for me</span>
                 <Trash2 size={16} />
               </button>
               {deleteTarget.message.mine ? (
-                <button className="flex h-11 w-full items-center justify-between rounded-xl bg-red-600 px-4 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60 transition shadow-md" disabled={isDeletingMessage} onClick={() => deleteMessage("everyone")} type="button">
+                <button className="flex h-11 w-full items-center justify-between rounded-xl bg-[#b42318] px-4 text-sm font-black text-white hover:bg-[#971b12] disabled:opacity-60" disabled={isDeletingMessage} onClick={() => deleteMessage("everyone")} type="button">
                   <span>Delete for everyone</span>
                   <Trash2 size={16} />
                 </button>
               ) : null}
-              <button className="h-11 w-full rounded-xl border border-white/10 bg-[#152035] px-4 text-sm font-bold text-[#E5E7EB] hover:bg-white/10 disabled:opacity-60 transition" disabled={isDeletingMessage} onClick={closeDeleteDialog} type="button">Cancel</button>
+              <button className="h-11 w-full rounded-xl border border-[#dce1e8] bg-white px-4 text-sm font-black text-[#334155] hover:bg-[#f8fafc] disabled:opacity-60" disabled={isDeletingMessage} onClick={closeDeleteDialog} type="button">Cancel</button>
             </div>
           </div>
         </div>
@@ -4812,8 +4812,8 @@ function statusRelativeTime(value: string): string {
 
 function StatusAvatar({ user, ring = "none", size = "h-14 w-14" }: { user: { name: string; avatarUrl?: string }; ring?: "unseen" | "viewed" | "none"; size?: string }) {
   return (
-    <div className={`${size} shrink-0 rounded-full p-[2px] ${ring === "unseen" ? "bg-gradient-to-tr from-[#38BDF8] to-[#60A5FA]" : ring === "viewed" ? "bg-slate-700" : "bg-transparent"}`}>
-      <div className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#152035] text-sm font-bold text-[#38BDF8] border border-white/5">
+    <div className={`${size} shrink-0 rounded-full p-[2px] ${ring === "unseen" ? "bg-[#00a884]" : ring === "viewed" ? "bg-[#cbd5e1]" : "bg-transparent"}`}>
+      <div className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-sm font-black text-[#008f70]">
         {user.avatarUrl ? <AvatarImage alt={user.name} className="h-full w-full object-cover" fallback={chatInitials(user.name)} src={user.avatarUrl} /> : chatInitials(user.name)}
       </div>
     </div>
@@ -4828,7 +4828,7 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
   const [composerType, setComposerType] = useState<"text" | "image" | "video">("text");
   const [composerText, setComposerText] = useState("");
   const [composerCaption, setComposerCaption] = useState("");
-  const [composerBackground, setComposerBackground] = useState("#0B3B60");
+  const [composerBackground, setComposerBackground] = useState("#e7f8f2");
   const [composerFile, setComposerFile] = useState<File | null>(null);
   const [composerPreview, setComposerPreview] = useState("");
   const [isPosting, setIsPosting] = useState(false);
@@ -4983,27 +4983,27 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
     return (
       <button className={compact
         ? "flex w-[76px] shrink-0 flex-col items-center gap-2 text-center"
-        : "flex h-auto w-[76px] shrink-0 flex-col items-center gap-2 text-center lg:relative lg:h-[230px] lg:w-[132px] lg:overflow-hidden lg:rounded-2xl lg:border lg:border-white/10 lg:bg-[#152035]/60 lg:text-left lg:shadow-sm lg:transition lg:hover:-translate-y-0.5 lg:hover:shadow-md lg:hover:border-[#38BDF8]/40"}
+        : "flex h-auto w-[76px] shrink-0 flex-col items-center gap-2 text-center lg:relative lg:h-[230px] lg:w-[132px] lg:overflow-hidden lg:rounded-2xl lg:border lg:border-[#dce1e8] lg:bg-[#e7f8f2] lg:text-left lg:shadow-sm lg:transition lg:hover:-translate-y-0.5 lg:hover:shadow-md"}
         key={first.userId} onClick={() => openGroup(group)} type="button">
         {compact ? (
           <>
             <StatusAvatar ring={unseen ? "unseen" : "viewed"} size="h-[72px] w-[72px]" user={first.user} />
-            <span className="w-full truncate text-xs font-bold text-[#E5E7EB]">{first.user.name}</span>
+            <span className="w-full truncate text-xs font-bold text-[#334155]">{first.user.name}</span>
           </>
         ) : (
           <>
             <div className="flex flex-col items-center gap-2 lg:hidden">
               <StatusAvatar ring={unseen ? "unseen" : "viewed"} size="h-[72px] w-[72px]" user={first.user} />
-              <span className="w-full truncate text-xs font-bold text-[#E5E7EB]">{first.user.name}</span>
+              <span className="w-full truncate text-xs font-bold text-[#334155]">{first.user.name}</span>
             </div>
             <div className="relative hidden h-full flex-col items-center justify-between p-3 lg:flex">
               {mediaSource ? (
                 first.type === "video" ? <video aria-hidden className="absolute inset-0 h-full w-full object-cover" muted playsInline preload="metadata" src={mediaSource} /> : <img alt="" className="absolute inset-0 h-full w-full object-cover" src={mediaSource} />
-              ) : <div className="absolute inset-0" style={{ backgroundColor: first.background || "#152035" }} />}
-              <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/85" />
+              ) : <div className="absolute inset-0" style={{ backgroundColor: first.background || "#e7f8f2" }} />}
+              <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/75" />
               <div className="relative flex h-full w-full flex-col items-center justify-between">
                 <StatusAvatar ring={unseen ? "unseen" : "viewed"} size="h-11 w-11" user={first.user} />
-                <span className="w-full truncate text-center text-sm font-bold text-white">{first.user.name}</span>
+                <span className="w-full truncate text-center text-sm font-black text-white">{first.user.name}</span>
               </div>
             </div>
           </>
@@ -5013,40 +5013,40 @@ function StatusPanel({ authToken, currentUserId, currentUser, className = "" }: 
   };
 
   return (
-    <div className={`${className} min-h-0 flex-1 flex-col bg-[#0E1726] text-[#E5E7EB]`}>
-      <header className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-        <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#38BDF8]">Updates</p><h1 className="mt-1 text-2xl font-bold text-[#E5E7EB]">Status</h1></div>
-        <button aria-label="Add status update" className="grid h-10 w-10 place-items-center rounded-xl bg-[#152035] text-[#38BDF8] transition hover:bg-white/10" onClick={() => setIsComposerOpen(true)} title="Add status update" type="button"><Plus size={20} /></button>
+    <div className={`${className} min-h-0 flex-1 flex-col bg-white`}>
+      <header className="flex items-center justify-between border-b border-[#e5e9f0] px-5 py-4">
+        <div><p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Updates</p><h1 className="mt-1 text-2xl font-black text-[#18212f]">Status</h1></div>
+        <button aria-label="Add status update" className="grid h-10 w-10 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70] transition hover:bg-[#d1f0e5]" onClick={() => setIsComposerOpen(true)} title="Add status update" type="button"><Plus size={20} /></button>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <section className="border-b border-white/10 px-4 py-4">
+        <section className="border-b border-[#e5e9f0] px-4 py-4">
           <div className="flex items-center gap-3">
             <button aria-label={myStatuses.length ? "Open my status" : "Add status update"} onClick={() => myStatuses.length ? openGroup(myStatuses) : setIsComposerOpen(true)} type="button"><StatusAvatar ring={myStatuses.length ? "unseen" : "none"} user={currentUser} size="h-14 w-14" /></button>
-            <button className="min-w-0 flex-1 text-left" onClick={() => myStatuses.length ? openGroup(myStatuses) : setIsComposerOpen(true)} type="button"><strong className="block text-sm font-bold text-[#E5E7EB]">{myStatuses.length ? "My status" : "Add status update"}</strong><span className="mt-1 block text-xs text-[#9AA3B8]">{myStatuses.length ? `${myStatuses.length} active update${myStatuses.length === 1 ? "" : "s"}` : "Share with your contacts"}</span></button>
-            <button aria-label="Create status" className="grid h-10 w-10 place-items-center rounded-xl text-[#38BDF8] hover:bg-white/10 transition" onClick={() => setIsComposerOpen(true)} type="button"><Camera size={20} /></button>
+            <button className="min-w-0 flex-1 text-left" onClick={() => myStatuses.length ? openGroup(myStatuses) : setIsComposerOpen(true)} type="button"><strong className="block text-sm font-black text-[#18212f]">{myStatuses.length ? "My status" : "Add status update"}</strong><span className="mt-1 block text-xs text-[#64748b]">{myStatuses.length ? `${myStatuses.length} active update${myStatuses.length === 1 ? "" : "s"}` : "Share with your contacts"}</span></button>
+            <button aria-label="Create status" className="grid h-10 w-10 place-items-center rounded-xl text-[#00a884] hover:bg-[#e7f8f2]" onClick={() => setIsComposerOpen(true)} type="button"><Camera size={20} /></button>
           </div>
-          {myStatuses.length ? <button className="mt-3 text-xs font-bold text-[#38BDF8]" onClick={() => setIsComposerOpen(true)} type="button">Add another update</button> : null}
+          {myStatuses.length ? <button className="mt-3 text-xs font-black text-[#008f70]" onClick={() => setIsComposerOpen(true)} type="button">Add another update</button> : null}
         </section>
-        {error ? <div className="mx-4 mt-4 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm font-semibold text-red-300">{error}</div> : null}
+        {error ? <div className="mx-4 mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div> : null}
         {isLoading ? <div className="space-y-3 px-4 py-5">{[1, 2, 3].map((item) => <div className="flex items-center gap-3" key={item}><div className="cs-skeleton h-14 w-14 rounded-full" /><div className="cs-skeleton h-4 w-40" /></div>)}</div> : null}
-        {!isLoading && recentGroups.length ? <section><h2 className="px-4 pb-3 pt-5 text-xs font-bold uppercase tracking-[0.16em] text-[#9AA3B8]">Recent updates</h2><div className="flex gap-3 overflow-x-auto px-4 pb-4">{recentGroups.map((group) => renderGroup(group))}</div></section> : null}
-        {!isLoading && viewedGroups.length ? <section><h2 className="px-4 pb-3 pt-5 text-xs font-bold uppercase tracking-[0.16em] text-[#9AA3B8]">Viewed updates</h2><div className="flex gap-4 overflow-x-auto px-4 pb-4">{viewedGroups.map((group) => renderGroup(group, true))}</div></section> : null}
-        {!isLoading && !recentGroups.length && !viewedGroups.length ? <div className="px-6 py-16 text-center"><Radio className="mx-auto text-[#38BDF8]" size={32} /><h2 className="mt-4 text-base font-bold text-[#E5E7EB]">No recent updates</h2><p className="mt-2 text-sm leading-6 text-[#9AA3B8]">Share a photo, video, or thought with your contacts.</p></div> : null}
+        {!isLoading && recentGroups.length ? <section><h2 className="px-4 pb-3 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Recent updates</h2><div className="flex gap-3 overflow-x-auto px-4 pb-4">{recentGroups.map((group) => renderGroup(group))}</div></section> : null}
+        {!isLoading && viewedGroups.length ? <section><h2 className="px-4 pb-3 pt-5 text-xs font-black uppercase tracking-[0.16em] text-[#64748b]">Viewed updates</h2><div className="flex gap-4 overflow-x-auto px-4 pb-4">{viewedGroups.map((group) => renderGroup(group, true))}</div></section> : null}
+        {!isLoading && !recentGroups.length && !viewedGroups.length ? <div className="px-6 py-16 text-center"><Radio className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-base font-black text-[#18212f]">No recent updates</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Share a photo, video, or thought with your contacts.</p></div> : null}
       </div>
 
-      {isComposerOpen ? <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 backdrop-blur-sm px-4"><form className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-[#0E1726] border border-white/10 text-[#E5E7EB] p-5 shadow-2xl" onSubmit={postStatus}>
-        <div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-[#38BDF8]">New update</p><h2 className="mt-1 text-xl font-bold text-[#E5E7EB]">Create status</h2></div><button aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={closeComposer} type="button"><X size={18} /></button></div>
-        <div className="mt-5 grid grid-cols-3 gap-2"><button className={`rounded-xl border px-3 py-2 text-sm font-bold transition ${composerType === "text" ? "border-[#38BDF8]/40 bg-[#38BDF8]/15 text-[#38BDF8]" : "border-white/10 text-[#9AA3B8] bg-[#152035]"}`} onClick={() => { setComposerType("text"); setComposerFile(null); setComposerPreview(""); }} type="button">Text</button><button className={`rounded-xl border px-3 py-2 text-sm font-bold transition ${composerType === "image" ? "border-[#38BDF8]/40 bg-[#38BDF8]/15 text-[#38BDF8]" : "border-white/10 text-[#9AA3B8] bg-[#152035]"}`} onClick={() => { setComposerType("image"); fileInputRef.current?.click(); }} type="button">Image</button><button className={`rounded-xl border px-3 py-2 text-sm font-bold transition ${composerType === "video" ? "border-[#38BDF8]/40 bg-[#38BDF8]/15 text-[#38BDF8]" : "border-white/10 text-[#9AA3B8] bg-[#152035]"}`} onClick={() => { setComposerType("video"); fileInputRef.current?.click(); }} type="button">Video</button></div>
+      {isComposerOpen ? <div className="fixed inset-0 z-[70] grid place-items-center bg-[#0f172a]/50 px-4"><form className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onSubmit={postStatus}>
+        <div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">New update</p><h2 className="mt-1 text-xl font-black">Create status</h2></div><button aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={closeComposer} type="button"><X size={18} /></button></div>
+        <div className="mt-5 grid grid-cols-3 gap-2"><button className={`rounded-xl border px-3 py-2 text-sm font-black ${composerType === "text" ? "border-[#00a884] bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] text-[#64748b]"}`} onClick={() => { setComposerType("text"); setComposerFile(null); setComposerPreview(""); }} type="button">Text</button><button className={`rounded-xl border px-3 py-2 text-sm font-black ${composerType === "image" ? "border-[#00a884] bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] text-[#64748b]"}`} onClick={() => { setComposerType("image"); fileInputRef.current?.click(); }} type="button">Image</button><button className={`rounded-xl border px-3 py-2 text-sm font-black ${composerType === "video" ? "border-[#00a884] bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] text-[#64748b]"}`} onClick={() => { setComposerType("video"); fileInputRef.current?.click(); }} type="button">Video</button></div>
         <input className="hidden" accept="image/*,video/*" onChange={(event) => chooseStatusFile(event.target.files?.[0])} ref={fileInputRef} type="file" />
-        {composerType === "text" ? <><textarea autoFocus className="mt-4 min-h-36 w-full resize-none rounded-xl border border-white/10 bg-[#152035]/70 text-[#E5E7EB] p-4 text-base outline-none focus:border-[#38BDF8]" maxLength={2000} onChange={(event) => setComposerText(event.target.value)} placeholder="Share an update..." value={composerText} /><div className="mt-3 flex gap-2">{["#0B3B60", "#152035", "#071019", "#1e1b4b", "#172554"].map((color) => <button aria-label={`Use ${color} background`} className={`h-8 w-8 rounded-full border-2 ${composerBackground === color ? "border-[#38BDF8]" : "border-white/20 shadow"}`} key={color} onClick={() => setComposerBackground(color)} style={{ backgroundColor: color }} type="button" />)}</div></> : <>{composerPreview ? <div className="mt-4 overflow-hidden rounded-xl bg-[#152035]">{composerType === "video" ? <video className="max-h-72 w-full object-contain" controls src={composerPreview} /> : <img alt="Status preview" className="max-h-72 w-full object-contain" src={composerPreview} />}</div> : <button className="mt-4 flex h-32 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 bg-[#152035]/40 text-sm font-bold text-[#9AA3B8] hover:border-[#38BDF8]/40 transition" onClick={() => fileInputRef.current?.click()} type="button"><Image size={22} />Choose media</button>}<input className="mt-3 h-11 w-full rounded-xl border border-white/10 bg-[#152035]/70 px-3 text-sm text-[#E5E7EB] outline-none focus:border-[#38BDF8]" maxLength={500} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Add a caption (optional)" value={composerCaption} /></>}
-        <button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-sm font-bold text-[#071019] shadow-[0_4px_14px_rgba(56,189,248,0.25)] hover:brightness-110 disabled:opacity-40 transition" disabled={isPosting || (composerType === "text" ? !composerText.trim() : !composerFile)} type="submit">{isPosting ? "Posting..." : "Share status"}<Send size={16} /></button>
+        {composerType === "text" ? <><textarea autoFocus className="mt-4 min-h-36 w-full resize-none rounded-xl border border-[#dce1e8] bg-[#f8fafc] p-4 text-base outline-none focus:border-[#00a884]" maxLength={2000} onChange={(event) => setComposerText(event.target.value)} placeholder="Share an update..." value={composerText} /><div className="mt-3 flex gap-2">{["#e7f8f2", "#dbeafe", "#fef3c7", "#fce7f3", "#e2e8f0"].map((color) => <button aria-label={`Use ${color} background`} className={`h-8 w-8 rounded-full border-2 ${composerBackground === color ? "border-[#18212f]" : "border-white shadow"}`} key={color} onClick={() => setComposerBackground(color)} style={{ backgroundColor: color }} type="button" />)}</div></> : <>{composerPreview ? <div className="mt-4 overflow-hidden rounded-xl bg-[#f8fafc]">{composerType === "video" ? <video className="max-h-72 w-full object-contain" controls src={composerPreview} /> : <img alt="Status preview" className="max-h-72 w-full object-contain" src={composerPreview} />}</div> : <button className="mt-4 flex h-32 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#cbd5e1] text-sm font-black text-[#64748b]" onClick={() => fileInputRef.current?.click()} type="button"><Image size={22} />Choose media</button>}<input className="mt-3 h-11 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" maxLength={500} onChange={(event) => setComposerCaption(event.target.value)} placeholder="Add a caption (optional)" value={composerCaption} /></>}
+        <button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:opacity-50" disabled={isPosting || (composerType === "text" ? !composerText.trim() : !composerFile)} type="submit">{isPosting ? "Posting..." : "Share status"}<Send size={16} /></button>
       </form></div> : null}
 
-      {viewer && currentStatus ? <div className="fixed inset-0 z-[80] flex flex-col bg-[#071019] text-[#E5E7EB]" onPointerCancel={() => setViewerPaused(false)} onPointerDown={() => setViewerPaused(true)} onPointerUp={() => setViewerPaused(false)}>
-        <div className="flex gap-1 px-4 pt-3">{viewer.group.map((status, index) => <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/20" key={status.id}><div className="h-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA]" style={{ width: index < viewer.index ? "100%" : index === viewer.index ? `${viewerProgress * 100}%` : "0%", transition: "width 50ms linear" }} /></div>)}</div>
-        <div className="flex items-center gap-3 px-4 py-4"><StatusAvatar ring="none" size="h-10 w-10" user={currentStatus.user} /><div className="min-w-0 flex-1"><div className="truncate text-sm font-bold text-[#E5E7EB]">{currentStatus.user.name}</div><div className="text-xs text-[#9AA3B8]">{statusRelativeTime(currentStatus.createdAt)}</div></div>{currentStatus.userId === currentUserId ? <><button aria-label="Show viewers" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => showViewers(currentStatus)} type="button"><Eye size={18} /></button><button aria-label="Delete status" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => deleteStatus(currentStatus)} type="button"><Trash2 size={18} /></button></> : null}<button aria-label="Close status viewer" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => setViewer(null)} type="button"><X size={20} /></button></div>
-        <div className="relative flex min-h-0 flex-1 items-center justify-center px-8"><button aria-label="Previous status" className="absolute left-2 z-10 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === 0} onClick={() => goViewer(-1)} type="button"><ChevronLeft size={30} /></button><div className="max-h-full max-w-2xl text-center">{currentStatus.type === "text" ? <div className="flex min-h-[45vh] min-w-[min(80vw,34rem)] items-center justify-center rounded-2xl p-10 text-2xl font-bold" style={{ backgroundColor: currentStatus.background || "#0B3B60", color: "#FFFFFF" }}>{currentStatus.textContent}</div> : currentStatus.type === "video" ? <video autoPlay className="max-h-[68vh] max-w-full rounded-2xl" controls onLoadedMetadata={handleViewerVideoMetadata} src={attachmentSource(currentStatus.mediaUrl || "", authToken)} /> : <img alt={currentStatus.caption || "Status update"} className="max-h-[68vh] max-w-full rounded-2xl object-contain" src={attachmentSource(currentStatus.mediaUrl || "", authToken)} />}{currentStatus.caption ? <p className="mt-4 text-sm text-white/90">{currentStatus.caption}</p> : null}</div><button aria-label="Next status" className="absolute right-2 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === viewer.group.length - 1} onClick={() => goViewer(1)} type="button"><ChevronRight size={30} /></button></div>
-        {viewerList ? <div className="absolute bottom-4 left-1/2 max-h-48 w-[min(90vw,24rem)] -translate-x-1/2 overflow-y-auto rounded-xl bg-[#0E1726] border border-white/10 p-3 text-[#E5E7EB] shadow-xl"><div className="mb-2 flex items-center justify-between text-sm font-bold">Viewed by <button aria-label="Close viewer list" onClick={() => setViewerList(null)} type="button"><X size={16} /></button></div>{viewerList.length ? viewerList.map((item) => <div className="flex items-center gap-2 border-t border-white/10 py-2" key={`${item.user.name}-${item.viewedAt}`}><StatusAvatar size="h-7 w-7" user={item.user} /><span className="text-xs font-bold text-[#E5E7EB]">{item.user.name}</span></div>) : <p className="text-xs text-[#9AA3B8]">No views yet.</p>}</div> : null}
+      {viewer && currentStatus ? <div className="fixed inset-0 z-[80] flex flex-col bg-[#07130f] text-white" onPointerCancel={() => setViewerPaused(false)} onPointerDown={() => setViewerPaused(true)} onPointerUp={() => setViewerPaused(false)}>
+        <div className="flex gap-1 px-4 pt-3">{viewer.group.map((status, index) => <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/30" key={status.id}><div className="h-full bg-white" style={{ width: index < viewer.index ? "100%" : index === viewer.index ? `${viewerProgress * 100}%` : "0%", transition: "width 50ms linear" }} /></div>)}</div>
+        <div className="flex items-center gap-3 px-4 py-4"><StatusAvatar ring="none" size="h-10 w-10" user={currentStatus.user} /><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{currentStatus.user.name}</div><div className="text-xs text-white/70">{statusRelativeTime(currentStatus.createdAt)}</div></div>{currentStatus.userId === currentUserId ? <><button aria-label="Show viewers" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => showViewers(currentStatus)} type="button"><Eye size={18} /></button><button aria-label="Delete status" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => deleteStatus(currentStatus)} type="button"><Trash2 size={18} /></button></> : null}<button aria-label="Close status viewer" className="grid h-9 w-9 place-items-center rounded-lg hover:bg-white/10" onClick={() => setViewer(null)} type="button"><X size={20} /></button></div>
+        <div className="relative flex min-h-0 flex-1 items-center justify-center px-8"><button aria-label="Previous status" className="absolute left-2 z-10 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === 0} onClick={() => goViewer(-1)} type="button"><ChevronLeft size={30} /></button><div className="max-h-full max-w-2xl text-center">{currentStatus.type === "text" ? <div className="flex min-h-[45vh] min-w-[min(80vw,34rem)] items-center justify-center rounded-2xl p-10 text-2xl font-black" style={{ backgroundColor: currentStatus.background || "#e7f8f2", color: "#18212f" }}>{currentStatus.textContent}</div> : currentStatus.type === "video" ? <video autoPlay className="max-h-[68vh] max-w-full rounded-2xl" controls onLoadedMetadata={handleViewerVideoMetadata} src={attachmentSource(currentStatus.mediaUrl || "", authToken)} /> : <img alt={currentStatus.caption || "Status update"} className="max-h-[68vh] max-w-full rounded-2xl object-contain" src={attachmentSource(currentStatus.mediaUrl || "", authToken)} />}{currentStatus.caption ? <p className="mt-4 text-sm text-white/90">{currentStatus.caption}</p> : null}</div><button aria-label="Next status" className="absolute right-2 grid h-12 w-12 place-items-center rounded-full hover:bg-white/10 disabled:opacity-20" disabled={viewer.index === viewer.group.length - 1} onClick={() => goViewer(1)} type="button"><ChevronRight size={30} /></button></div>
+        {viewerList ? <div className="absolute bottom-4 left-1/2 max-h-48 w-[min(90vw,24rem)] -translate-x-1/2 overflow-y-auto rounded-xl bg-white p-3 text-[#18212f] shadow-xl"><div className="mb-2 flex items-center justify-between text-sm font-black">Viewed by <button aria-label="Close viewer list" onClick={() => setViewerList(null)} type="button"><X size={16} /></button></div>{viewerList.length ? viewerList.map((item) => <div className="flex items-center gap-2 border-t border-[#edf1f5] py-2" key={`${item.user.name}-${item.viewedAt}`}><StatusAvatar size="h-7 w-7" user={item.user} /><span className="text-xs font-bold">{item.user.name}</span></div>) : <p className="text-xs text-[#64748b]">No views yet.</p>}</div> : null}
       </div> : null}
     </div>
   );
@@ -5065,7 +5065,7 @@ type GroupListPanelProps = {
 };
 
 function GroupAvatar({ name, avatarUrl, className = "h-12 w-12" }: { name: string; avatarUrl?: string; className?: string }) {
-  return <div className={`${className} grid shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#152035] text-sm font-bold text-[#38BDF8] border border-white/5`}>{avatarUrl ? <AvatarImage alt={name} className="h-full w-full object-cover" fallback={chatInitials(name)} src={avatarUrl} /> : chatInitials(name)}</div>;
+  return <div className={`${className} grid shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e7f8f2] text-sm font-black text-[#008f70]`}>{avatarUrl ? <AvatarImage alt={name} className="h-full w-full object-cover" fallback={chatInitials(name)} src={avatarUrl} /> : chatInitials(name)}</div>;
 }
 
 function GroupListPanel({ authToken, currentUserId, groups, users, isLoading, error, className = "", onSelect, onRefresh }: GroupListPanelProps) {
@@ -5100,13 +5100,13 @@ function GroupListPanel({ authToken, currentUserId, groups, users, isLoading, er
     } catch (error) { setCreateError(error instanceof Error ? error.message : "Could not create group"); } finally { setIsCreating(false); }
   };
 
-  return <div className={`${className} min-h-0 flex-1 flex-col bg-[#0E1726] text-[#E5E7EB]`}>
-    <header className="flex items-center justify-between border-b border-white/10 px-5 py-4"><div><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#38BDF8]">Community</p><h1 className="mt-1 text-2xl font-bold text-[#E5E7EB]">Groups</h1></div><button aria-label="Create group" className="grid h-10 w-10 place-items-center rounded-xl bg-[#152035] text-[#38BDF8] hover:bg-white/10 transition" onClick={() => setIsCreateOpen(true)} title="Create group" type="button"><Plus size={20} /></button></header>
+  return <div className={`${className} min-h-0 flex-1 flex-col bg-white`}>
+    <header className="flex items-center justify-between border-b border-[#e5e9f0] px-5 py-4"><div><p className="text-xs font-black uppercase tracking-[0.22em] text-[#00a884]">Community</p><h1 className="mt-1 text-2xl font-black">Groups</h1></div><button aria-label="Create group" className="grid h-10 w-10 place-items-center rounded-xl bg-[#e7f8f2] text-[#008f70] hover:bg-[#d1f0e5]" onClick={() => setIsCreateOpen(true)} title="Create group" type="button"><Plus size={20} /></button></header>
     <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-      {error ? <div className="mb-4 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm font-semibold text-red-300">{error}</div> : null}
-      {isLoading ? <div className="space-y-3">{[1, 2, 3].map((item) => <div className="flex items-center gap-3 p-3" key={item}><div className="cs-skeleton h-12 w-12 rounded-2xl" /><div className="cs-skeleton h-4 w-36" /></div>)}</div> : groups.length ? groups.map((group) => <button className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-white/[0.04]" key={group.id} onClick={() => onSelect(group.id)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><strong className="truncate text-sm font-bold text-[#E5E7EB]">{group.name}</strong><span className="text-[11px] font-semibold text-[#64748B]">{group.latestMessage?.createdAt ? formatGroupTime(group.latestMessage.createdAt) : "new"}</span></span><span className="mt-1 block truncate text-sm text-[#9AA3B8]">{group.latestMessage?.body || group.latestMessage?.attachment?.name || `${group.memberCount} members`}</span></span></button>) : <div className="mt-16 rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-5 py-10 text-center"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#38BDF8]/10 text-[#38BDF8]"><Users size={24} /></div><h2 className="mt-5 text-base font-bold text-[#E5E7EB]">No groups yet</h2><p className="mt-2 text-sm leading-6 text-[#9AA3B8]">Create a group and start chatting with multiple people.</p><button className="mt-5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] px-4 py-2.5 text-sm font-bold text-[#071019] shadow-[0_4px_14px_rgba(56,189,248,0.25)] hover:brightness-110 transition" onClick={() => setIsCreateOpen(true)} type="button"><Plus size={16} />Create Group</button></div>}
+      {error ? <div className="mb-4 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</div> : null}
+      {isLoading ? <div className="space-y-3">{[1, 2, 3].map((item) => <div className="flex items-center gap-3 p-3" key={item}><div className="cs-skeleton h-12 w-12 rounded-2xl" /><div className="cs-skeleton h-4 w-36" /></div>)}</div> : groups.length ? groups.map((group) => <button className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition hover:bg-[#f8fafc]" key={group.id} onClick={() => onSelect(group.id)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><strong className="truncate text-sm font-black">{group.name}</strong><span className="text-[11px] font-bold text-[#94a3b8]">{group.latestMessage?.createdAt ? formatGroupTime(group.latestMessage.createdAt) : "new"}</span></span><span className="mt-1 block truncate text-sm text-[#64748b]">{group.latestMessage?.body || group.latestMessage?.attachment?.name || `${group.memberCount} members`}</span></span></button>) : <div className="mt-16 rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-5 py-10 text-center"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#e7f8f2] text-[#00a884]"><Users size={24} /></div><h2 className="mt-5 text-base font-black">No groups yet</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Create a group and start chatting with multiple people.</p><button className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#00a884] px-4 py-2.5 text-sm font-black text-white" onClick={() => setIsCreateOpen(true)} type="button"><Plus size={16} />Create Group</button></div>}
     </div>
-    {isCreateOpen ? <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 backdrop-blur-sm px-4"><form className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-[#0E1726] border border-white/10 text-[#E5E7EB] p-5 shadow-2xl" onSubmit={createGroup}><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-[#38BDF8]">New group</p><h2 className="mt-1 text-xl font-bold text-[#E5E7EB]">Create Group</h2></div><button aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={resetCreate} type="button"><X size={18} /></button></div><label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/20 bg-[#152035]/40 p-3 hover:border-[#38BDF8]/40 transition"><div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-[#152035] text-[#38BDF8]">{avatarPreview ? <img alt="Group avatar preview" className="h-full w-full object-cover" src={avatarPreview} /> : <Upload size={20} />}</div><span className="text-sm font-bold text-[#9AA3B8]">Add group photo (optional)</span><input accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setAvatarFile(file); setAvatarPreview(URL.createObjectURL(file)); } }} type="file" /></label><input autoFocus className="mt-4 h-11 w-full rounded-xl border border-white/10 bg-[#152035]/70 text-[#E5E7EB] px-3 text-sm outline-none focus:border-[#38BDF8] transition" onChange={(event) => setName(event.target.value)} placeholder="Group name" value={name} /><div className="mt-5 flex flex-wrap gap-2">{selectedMembers.map((id) => { const user = users.find((item) => item.id === id); return user ? <button className="rounded-full bg-[#38BDF8]/15 border border-[#38BDF8]/30 px-3 py-1.5 text-xs font-bold text-[#38BDF8]" key={id} onClick={() => setSelectedMembers((current) => current.filter((item) => item !== id))} type="button">{user.name} <X className="ml-1 inline" size={12} /></button> : null; })}</div><label className="mt-4 flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-[#152035]/60 px-3 text-[#9AA3B8] focus-within:border-[#38BDF8] transition"><Search size={16} /><input className="w-full bg-transparent text-sm text-[#E5E7EB] outline-none placeholder:text-[#64748B]" onChange={(event) => setSearch(event.target.value)} placeholder="Search members" value={search} /></label><div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#152035]/40">{availableUsers.map((user) => <button className={`flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-white/[0.06] transition ${selectedMembers.includes(user.id) ? "bg-[#38BDF8]/10" : ""}`} key={user.id} onClick={() => setSelectedMembers((current) => current.includes(user.id) ? current.filter((item) => item !== user.id) : [...current, user.id])} type="button"><GroupAvatar avatarUrl={user.avatarUrl} name={user.name} className="h-9 w-9 rounded-xl text-xs" /><span className="min-w-0 flex-1 truncate text-sm font-bold text-[#E5E7EB]">{user.name}</span>{selectedMembers.includes(user.id) ? <Check size={16} className="text-[#38BDF8]" /> : null}</button>)}</div>{createError ? <p className="mt-3 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm font-semibold text-red-300">{createError}</p> : null}<button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-sm font-bold text-[#071019] shadow-[0_4px_14px_rgba(56,189,248,0.25)] hover:brightness-110 disabled:opacity-40 transition" disabled={isCreating} type="submit">{isCreating ? "Creating..." : "Create Group"}<Plus size={17} /></button></form></div> : null}
+    {isCreateOpen ? <div className="fixed inset-0 z-[70] grid place-items-center bg-[#0f172a]/45 px-4"><form className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onSubmit={createGroup}><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">New group</p><h2 className="mt-1 text-xl font-black">Create Group</h2></div><button aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={resetCreate} type="button"><X size={18} /></button></div><label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-[#cbd5e1] p-3"><div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-[#e7f8f2] text-[#008f70]">{avatarPreview ? <img alt="Group avatar preview" className="h-full w-full object-cover" src={avatarPreview} /> : <Upload size={20} />}</div><span className="text-sm font-bold text-[#64748b]">Add group photo (optional)</span><input accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setAvatarFile(file); setAvatarPreview(URL.createObjectURL(file)); } }} type="file" /></label><input autoFocus className="mt-4 h-11 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} placeholder="Group name" value={name} /><div className="mt-5 flex flex-wrap gap-2">{selectedMembers.map((id) => { const user = users.find((item) => item.id === id); return user ? <button className="rounded-full bg-[#e7f8f2] px-3 py-1.5 text-xs font-black text-[#008f70]" key={id} onClick={() => setSelectedMembers((current) => current.filter((item) => item !== id))} type="button">{user.name} <X className="ml-1 inline" size={12} /></button> : null; })}</div><label className="mt-4 flex h-10 items-center gap-2 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 text-[#64748b]"><Search size={16} /><input className="w-full bg-transparent text-sm outline-none" onChange={(event) => setSearch(event.target.value)} placeholder="Search members" value={search} /></label><div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-[#edf1f5]">{availableUsers.map((user) => <button className={`flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-[#f8fafc] ${selectedMembers.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelectedMembers((current) => current.includes(user.id) ? current.filter((item) => item !== user.id) : [...current, user.id])} type="button"><GroupAvatar avatarUrl={user.avatarUrl} name={user.name} className="h-9 w-9 rounded-xl text-xs" /><span className="min-w-0 flex-1 truncate text-sm font-bold">{user.name}</span>{selectedMembers.includes(user.id) ? <Check size={16} className="text-[#00a884]" /> : null}</button>)}</div>{createError ? <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{createError}</p> : null}<button className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] text-sm font-black text-white disabled:opacity-50" disabled={isCreating} type="submit">{isCreating ? "Creating..." : "Create Group"}<Plus size={17} /></button></form></div> : null}
   </div>;
 }
 
@@ -5197,8 +5197,8 @@ function GroupChatPanel({ authToken, currentUserId, currentUserName, details, me
   const stopRecording = () => recorderRef.current?.stop();
   const manage = async (method: string, path: string, body?: unknown) => { if (!group) return; setInfoError(""); const response = await fetch(`${apiUrl()}/api/v1/groups/${group.id}${path}`, { method, headers: body ? { ...authHeaders(authToken), "Content-Type": "application/json" } : authHeaders(authToken), body: body ? JSON.stringify(body) : undefined }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Group action failed"); await onRefresh(); };
 
-  if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#9AA3B8]"><Loader2 className="mr-2 animate-spin text-[#38BDF8]" size={18} />Loading group...</div>;
-  return <div className="flex min-h-0 flex-1 flex-col bg-[#071019] text-[#E5E7EB]"><header className="flex min-h-[82px] items-center gap-3 border-b border-white/10 bg-[#0E1726] px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#9AA3B8] hover:bg-white/10 lg:hidden transition" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-bold text-[#E5E7EB]">{group.name}</strong><span className="block text-sm font-semibold text-[#9AA3B8]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#9AA3B8] hover:bg-white/10 transition" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onDelete={onDeleteMessage} onEdit={startEdit} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => { setEditingMessage(null); setEditText(""); setReplyTo(replyForMessage(item)); }} onToggleStar={onToggleStar} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-8 py-10 text-center"><Users className="mx-auto text-[#38BDF8]" size={32} /><h2 className="mt-4 text-lg font-bold text-[#E5E7EB]">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#9AA3B8]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} editMode={editingMessage ? { originalBody: editingMessage.originalBody } : null} isRecording={isRecording} isSavingEdit={isSavingEdit} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelEdit={cancelEdit} onCancelReply={() => setReplyTo(null)} onChange={(value) => editingMessage ? setEditText(value) : setDraft(value)} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={editingMessage ? null : replyTo} value={editingMessage ? editText : draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} onOpenStarred={openStarredMessages} manage={manage} /> : null}{isStarredOpen ? <StarredMessagesModal isLoading={isStarredLoading} messages={starredMessages} onClose={() => setIsStarredOpen(false)} onSelect={(messageId) => { setIsStarredOpen(false); setIsInfoOpen(false); scrollToOriginal(messageId); }} title="Starred messages" /> : null}</div>;
+  if (!group) return <div className="flex flex-1 items-center justify-center text-sm font-bold text-[#64748b]"><Loader2 className="mr-2 animate-spin" size={18} />Loading group...</div>;
+  return <div className="flex min-h-0 flex-1 flex-col bg-[#f7f9fb]"><header className="flex min-h-[82px] items-center gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6"><button aria-label="Back to groups" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onBack} type="button"><ArrowLeft size={22} /></button><button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setIsInfoOpen(true)} type="button"><GroupAvatar avatarUrl={group.avatarUrl} name={group.name} className="h-12 w-12 rounded-2xl text-base" /><span className="min-w-0"><strong className="block truncate text-xl font-black">{group.name}</strong><span className="block text-sm font-semibold text-[#64748b]">{group.memberCount} members</span></span></button><button aria-label="Group info" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={() => setIsInfoOpen(true)} type="button"><MoreVertical size={21} /></button></header><div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6" ref={scrollRef}>{messages.length ? <div className="w-full space-y-3">{messages.map((message) => <MessageBubble authToken={authToken} highlighted={highlightedMessageId === message.id} key={message.id} message={message} onDelete={onDeleteMessage} onEdit={startEdit} onOpenReactionDetails={onReactionDetails} onQuoteClick={scrollToOriginal} onReact={onReact} onReply={(item) => { setEditingMessage(null); setEditText(""); setReplyTo(replyForMessage(item)); }} onToggleStar={onToggleStar} reactionPicker={reactionPicker} reactionTarget={{ type: "group", groupId: group.id, messageId: message.id }} resolveAttachmentSource={attachmentSource} senderName={!message.mine ? group.members.find((member) => member.id === message.senderId)?.name || message.senderEmail || "Member" : undefined} setReactionPicker={setReactionPicker} timestamp={formatGroupTime(message.createdAt || "")} variant="group" />)}</div> : <div className="mx-auto mt-20 max-w-md rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center"><Users className="mx-auto text-[#00a884]" size={32} /><h2 className="mt-4 text-lg font-black">Start the group conversation</h2><p className="mt-2 text-sm leading-6 text-[#64748b]">Send the first message to everyone in {group.name}.</p></div>}</div><MessageComposer attachmentFile={file} attachmentPreview={filePreview} editMode={editingMessage ? { originalBody: editingMessage.originalBody } : null} isRecording={isRecording} isSavingEdit={isSavingEdit} isSending={isSending} mode="group" onAttachment={chooseFile} onCancelEdit={cancelEdit} onCancelReply={() => setReplyTo(null)} onChange={(value) => editingMessage ? setEditText(value) : setDraft(value)} onRemoveAttachment={() => { setFile(null); setFilePreview(""); }} onSend={send} onStartRecording={startRecording} onStopRecording={stopRecording} replyTo={editingMessage ? null : replyTo} value={editingMessage ? editText : draft} />{isInfoOpen ? <GroupInfoPanel authToken={authToken} currentUserId={currentUserId} details={group} users={users} canManage={canManage} onClose={() => setIsInfoOpen(false)} onLeave={onLeave} onOpenStarred={openStarredMessages} manage={manage} /> : null}{isStarredOpen ? <StarredMessagesModal isLoading={isStarredLoading} messages={starredMessages} onClose={() => setIsStarredOpen(false)} onSelect={(messageId) => { setIsStarredOpen(false); setIsInfoOpen(false); scrollToOriginal(messageId); }} title="Starred messages" /> : null}</div>;
 }
 
 function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, onClose, onLeave, onOpenStarred, manage }: { authToken: string; currentUserId: string; details: GroupDetails; users: ChatSeed[]; canManage: boolean; onClose: () => void; onLeave: () => void; onOpenStarred: () => void; manage: (method: string, path: string, body?: unknown) => Promise<void> }) {
@@ -5208,7 +5208,7 @@ function GroupInfoPanel({ authToken, currentUserId, details, users, canManage, o
   const onlineByUserId = new Map(users.map((user) => [user.id, Boolean(user.online)]));
   const candidates = users.filter((user) => user.id !== currentUserId && !memberIDs.has(user.id));
   const update = async (action: () => Promise<void>) => { try { await action(); } catch (error) { window.alert(error instanceof Error ? error.message : "Group action failed"); } };
-  return <div className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm"><div className="h-full w-full max-w-md overflow-y-auto bg-[#0E1726] border-l border-white/10 text-[#E5E7EB] p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-[#38BDF8]">Group info</p><h2 className="mt-1 text-xl font-bold text-[#E5E7EB]">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-bold text-[#E5E7EB]">{details.memberCount} members</div><div className="text-sm text-[#9AA3B8]">You are {details.role}</div></div></div><button className="mt-5 flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-[#152035]/60 px-4 py-3 text-left text-sm font-bold text-[#38BDF8] shadow-sm hover:bg-[#152035] transition" onClick={onOpenStarred} type="button"><Star size={17} />Starred messages</button>{canManage ? <><label className="mt-5 block text-sm font-semibold text-[#9AA3B8]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-white/10 bg-[#152035]/70 text-[#E5E7EB] px-3 text-sm outline-none focus:border-[#38BDF8] transition" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#38BDF8]/15 border border-[#38BDF8]/30 px-3 py-2 text-sm font-bold text-[#38BDF8] hover:bg-[#38BDF8]/25 transition" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-bold uppercase tracking-[0.14em] text-[#9AA3B8]">Members</h3><div className="mt-2 divide-y divide-white/5">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><span className="relative inline-flex h-10 w-10 shrink-0"><span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#152035] text-xs font-bold text-[#38BDF8] border border-white/5">{member.avatarUrl ? <AvatarImage alt={member.name} className="h-full w-full rounded-full object-cover" fallback={chatInitials(member.name)} src={member.avatarUrl} /> : chatInitials(member.name)}</span>{member.id !== currentUserId && onlineByUserId.get(member.id) ? <OnlineStatusBadge /> : null}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-bold text-[#E5E7EB]">{member.name}</div><div className="text-xs capitalize text-[#9AA3B8]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-bold text-[#38BDF8] hover:underline" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-bold text-red-400 hover:underline" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-bold uppercase tracking-[0.14em] text-[#9AA3B8]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-[#152035]/40">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/[0.06] transition ${selected.includes(user.id) ? "bg-[#38BDF8]/10" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold text-[#E5E7EB]">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#38BDF8]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] px-3 py-2 text-sm font-bold text-[#071019] disabled:opacity-40 transition" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl border border-red-500/30 bg-red-950/30 px-3 py-2.5 text-sm font-bold text-red-400 hover:bg-red-900/40 transition" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#152035]/50 border border-white/5 px-3 py-2 text-xs leading-5 text-[#9AA3B8]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
+  return <div className="fixed inset-0 z-[60] flex justify-end bg-[#0f172a]/35"><div className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#00a884]">Group info</p><h2 className="mt-1 text-xl font-black">{details.name}</h2></div><button aria-label="Close group info" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button></div><div className="mt-5 flex items-center gap-3"><GroupAvatar avatarUrl={details.avatarUrl} name={details.name} className="h-16 w-16 rounded-2xl text-lg" /><div><div className="font-black">{details.memberCount} members</div><div className="text-sm text-[#64748b]">You are {details.role}</div></div></div><button className="mt-5 flex w-full items-center gap-2 rounded-2xl border border-[#e5e9f0] bg-white px-4 py-3 text-left text-sm font-black text-[#008f70] shadow-sm hover:bg-[#f8fafc]" onClick={onOpenStarred} type="button"><Star size={17} />Starred messages</button>{canManage ? <><label className="mt-5 block text-sm font-bold text-[#334155]">Group name<input className="mt-2 h-10 w-full rounded-xl border border-[#dce1e8] px-3 text-sm outline-none focus:border-[#00a884]" onChange={(event) => setName(event.target.value)} value={name} /></label><button className="mt-2 rounded-xl bg-[#e7f8f2] px-3 py-2 text-sm font-black text-[#008f70]" onClick={() => update(() => manage("PATCH", "", { name, avatarUrl: details.avatarUrl || "" }))} type="button">Save name</button></> : null}<h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Members</h3><div className="mt-2 divide-y divide-[#edf1f5]">{details.members.map((member) => <div className="flex items-center gap-3 py-3" key={member.id}><span className="relative inline-flex h-10 w-10 shrink-0"><span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">{member.avatarUrl ? <AvatarImage alt={member.name} className="h-full w-full rounded-full object-cover" fallback={chatInitials(member.name)} src={member.avatarUrl} /> : chatInitials(member.name)}</span>{member.id !== currentUserId && onlineByUserId.get(member.id) ? <OnlineStatusBadge /> : null}</span><div className="min-w-0 flex-1"><div className="truncate text-sm font-black">{member.name}</div><div className="text-xs capitalize text-[#64748b]">{member.role}</div></div>{details.role === "owner" && member.role !== "owner" ? <button className="text-xs font-black text-[#008f70]" onClick={() => update(() => manage(member.role === "admin" ? "DELETE" : "POST", `/admins/${member.id}`))} type="button">{member.role === "admin" ? "Demote" : "Promote"}</button> : null}{canManage && member.role !== "owner" && (details.role === "owner" || member.role === "member") ? <button className="text-xs font-black text-red-600" onClick={() => update(() => manage("DELETE", `/members/${member.id}`))} type="button">Remove</button> : null}</div>)}</div>{canManage && candidates.length ? <><h3 className="mt-7 text-xs font-black uppercase tracking-[0.14em] text-[#64748b]">Add members</h3><div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-[#edf1f5]">{candidates.map((user) => <button className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc] ${selected.includes(user.id) ? "bg-[#effdf8]" : ""}`} key={user.id} onClick={() => setSelected((current) => current.includes(user.id) ? current.filter((id) => id !== user.id) : [...current, user.id])} type="button"><span className="min-w-0 flex-1 truncate font-bold">{user.name}</span>{selected.includes(user.id) ? <Check size={15} className="text-[#00a884]" /> : null}</button>)}</div><button className="mt-2 rounded-xl bg-[#00a884] px-3 py-2 text-sm font-black text-white disabled:opacity-50" disabled={!selected.length} onClick={() => update(async () => { await manage("POST", "/members", { userIds: selected }); setSelected([]); })} type="button">Add selected</button></> : null}{details.role !== "owner" ? <button className="mt-8 w-full rounded-xl bg-red-50 px-3 py-2.5 text-sm font-black text-red-700" onClick={() => update(async () => { await manage("DELETE", `/members/${currentUserId}`); onLeave(); })} type="button">Leave group</button> : <p className="mt-8 rounded-xl bg-[#f8fafc] px-3 py-2 text-xs leading-5 text-[#64748b]">Owners cannot leave. Transfer ownership or delete the group first.</p>}</div></div>;
 }
 
 
@@ -5253,20 +5253,20 @@ function ContactInfoPanel({
   const presenceText = chat.online ? "Online" : formatLastSeen(chat.lastSeenAt);
   const totalShared = media.length + links.length + files.length;
   const panel = (
-    <div className="flex h-full min-h-0 flex-col bg-[#0E1726] text-[#E5E7EB]">
-      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-white/10 bg-[#0E1726] px-4">
-        <button aria-label="Close contact info" className="grid h-10 w-10 place-items-center rounded-xl text-[#9AA3B8] hover:bg-white/10 hover:text-white transition" onClick={onClose} type="button">
+    <div className="flex h-full min-h-0 flex-col bg-[#f7f9fb]">
+      <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[#e5e9f0] bg-white px-4">
+        <button aria-label="Close contact info" className="grid h-10 w-10 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9]" onClick={onClose} type="button">
           <X size={21} />
         </button>
-        <h2 className="text-lg font-bold text-[#E5E7EB]">Contact info</h2>
+        <h2 className="text-lg font-black text-[#18212f]">Contact info</h2>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">
         <section className="py-7 text-center">
           <ChatAvatar chat={chat} className="mx-auto h-28 w-28 rounded-full text-3xl" />
-          <h3 className="mt-4 truncate text-2xl font-bold text-[#E5E7EB]">{chat.name}</h3>
-          <p className={`mt-1 text-sm font-semibold ${chat.online ? "text-[#38BDF8]" : "text-[#9AA3B8]"}`}>{presenceText}</p>
-          {chat.preview && chat.preview.includes("@") ? <p className="mt-2 truncate text-sm font-medium text-[#64748B]">{chat.preview}</p> : null}
+          <h3 className="mt-4 truncate text-2xl font-black text-[#18212f]">{chat.name}</h3>
+          <p className={`mt-1 text-sm font-bold ${chat.online ? "text-[#00a884]" : "text-[#64748b]"}`}>{presenceText}</p>
+          {chat.preview && chat.preview.includes("@") ? <p className="mt-2 truncate text-sm font-semibold text-[#94a3b8]">{chat.preview}</p> : null}
         </section>
 
         <section className="grid grid-cols-3 gap-2">
@@ -5275,13 +5275,13 @@ function ContactInfoPanel({
           <ContactQuickAction icon={<Search size={20} />} label="Search" onClick={onSearch} />
         </section>
 
-        <button className="mt-4 w-full rounded-2xl border border-white/10 bg-[#152035]/60 p-4 text-left shadow-sm transition hover:border-[#38BDF8]/40 hover:bg-[#152035]" onClick={() => onMediaTabChange("media")} type="button">
+        <button className="mt-4 w-full rounded-2xl border border-[#e5e9f0] bg-white p-4 text-left shadow-sm transition hover:border-[#00a884]/30 hover:bg-[#fbfefd]" onClick={() => onMediaTabChange("media")} type="button">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-[#E5E7EB]">Media, links and files</h3>
-              <p className="mt-1 text-xs font-medium text-[#9AA3B8]">{totalShared ? `${media.length} media · ${links.length} links · ${files.length} files` : "No shared items yet"}</p>
+              <h3 className="text-sm font-black text-[#18212f]">Media, links and files</h3>
+              <p className="mt-1 text-xs font-semibold text-[#64748b]">{totalShared ? `${media.length} media · ${links.length} links · ${files.length} files` : "No shared items yet"}</p>
             </div>
-            <span className="rounded-full bg-[#38BDF8]/15 border border-[#38BDF8]/30 px-2.5 py-1 text-xs font-bold text-[#38BDF8]">{totalShared}</span>
+            <span className="rounded-full bg-[#e7f8f2] px-2.5 py-1 text-xs font-black text-[#008f70]">{totalShared}</span>
           </div>
           {totalShared ? (
             <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
@@ -5290,11 +5290,11 @@ function ContactInfoPanel({
               {!media.length && !links.length && files.slice(-3).map((item) => <SharedFilePreview item={item} key={`${item.message.id}-${item.attachment.url}`} />)}
             </div>
           ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-white/10 bg-[#152035]/30 px-3 py-4 text-center text-xs font-medium text-[#9AA3B8]">Shared photos, videos, links, and files will appear here.</div>
+            <div className="mt-4 rounded-xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-3 py-4 text-center text-xs font-bold text-[#94a3b8]">Shared photos, videos, links, and files will appear here.</div>
           )}
         </button>
 
-        <section className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-[#152035]/60 shadow-sm">
+        <section className="mt-4 overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white shadow-sm">
           <ContactActionRow icon={<Star size={17} />} label="Starred messages" onClick={onOpenStarred} />
           <ContactActionRow danger label="Clear chat" onClick={onClear} />
           {blocked ? (
@@ -5310,11 +5310,11 @@ function ContactInfoPanel({
 
   return (
     <>
-      <aside className={`hidden h-full min-h-0 shrink-0 overflow-hidden border-l border-white/10 bg-[#0E1726] shadow-[-18px_0_45px_rgba(0,0,0,0.5)] transition-[width,opacity] duration-300 lg:block ${isOpen ? "w-[360px] opacity-100 xl:w-[380px]" : "w-0 opacity-0"}`} aria-hidden={!isOpen}>
+      <aside className={`hidden h-full min-h-0 shrink-0 overflow-hidden border-l border-[#dce1e8] bg-white shadow-[-18px_0_45px_rgba(15,23,42,.08)] transition-[width,opacity] duration-300 lg:block ${isOpen ? "w-[360px] opacity-100 xl:w-[380px]" : "w-0 opacity-0"}`} aria-hidden={!isOpen}>
         {isOpen ? panel : null}
       </aside>
       {isOpen ? (
-        <div className="fixed inset-0 z-[70] bg-[#0E1726] lg:hidden">
+        <div className="fixed inset-0 z-[70] bg-white lg:hidden">
           {panel}
         </div>
       ) : null}
@@ -5325,7 +5325,7 @@ function ContactInfoPanel({
 
 function ContactQuickAction({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
   return (
-    <button className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#152035]/60 px-2 py-3 text-sm font-bold text-[#38BDF8] shadow-sm transition hover:border-[#38BDF8]/40 hover:bg-[#152035]" onClick={onClick} type="button">
+    <button className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#dce1e8] bg-white px-2 py-3 text-sm font-black text-[#008f70] shadow-sm transition hover:border-[#00a884]/40 hover:bg-[#e7f8f2]" onClick={onClick} type="button">
       {icon}
       <span>{label}</span>
     </button>
@@ -5334,7 +5334,7 @@ function ContactQuickAction({ icon, label, onClick }: { icon: ReactNode; label: 
 
 function ContactActionRow({ danger, icon, label, onClick }: { danger?: boolean; icon?: ReactNode; label: string; onClick: () => void }) {
   return (
-    <button className={`flex w-full items-center justify-between border-b border-white/5 px-4 py-3 text-left text-sm font-bold last:border-b-0 transition ${danger ? "text-red-400 hover:bg-red-950/30" : "text-[#38BDF8] hover:bg-white/[0.04]"}`} onClick={onClick} type="button">
+    <button className={`flex w-full items-center justify-between border-b border-[#edf1f5] px-4 py-3 text-left text-sm font-black last:border-b-0 ${danger ? "text-[#b42318] hover:bg-[#fff5f5]" : "text-[#008f70] hover:bg-[#f8fafc]"}`} onClick={onClick} type="button">
       <span className="flex min-w-0 items-center gap-2 truncate">{icon}{label}</span>
     </button>
   );
@@ -5344,14 +5344,14 @@ type StarredDisplayMessage = (ChatMessage | GroupChatMessage) & { senderEmail?: 
 
 function StarredMessagesModal({ isLoading, messages, onClose, onSelect, title }: { isLoading: boolean; messages: StarredDisplayMessage[]; onClose: () => void; onSelect: (messageId: string) => void; title: string }) {
   return (
-    <div className="fixed inset-0 z-[90] grid place-items-center bg-black/70 backdrop-blur-sm px-3" onClick={onClose}>
-      <div className="flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0E1726] text-[#E5E7EB] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-[#0f172a]/40 px-3" onClick={onClose}>
+      <div className="flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#e5e9f0] px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
-            <Star size={18} className="fill-amber-400 text-amber-400" />
-            <h2 className="truncate text-base font-bold text-[#E5E7EB]">{title}</h2>
+            <Star size={18} className="fill-[#f59e0b] text-[#f59e0b]" />
+            <h2 className="truncate text-base font-black text-[#18212f]">{title}</h2>
           </div>
-          <button aria-label="Close starred messages" className="grid h-9 w-9 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={onClose} type="button"><X size={18} /></button>
+          <button aria-label="Close starred messages" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {isLoading ? (
@@ -5359,20 +5359,20 @@ function StarredMessagesModal({ isLoading, messages, onClose, onSelect, title }:
           ) : messages.length ? (
             <div className="space-y-2">
               {messages.map((message) => (
-                <button className="flex w-full items-start gap-3 rounded-xl border border-white/10 bg-[#152035]/60 p-3 text-left transition hover:border-[#38BDF8]/40 hover:bg-[#152035]" key={message.id} onClick={() => onSelect(message.id)} type="button">
-                  <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-amber-950/40 border border-amber-500/30 text-amber-400"><Star size={16} className="fill-amber-400" /></div>
+                <button className="flex w-full items-start gap-3 rounded-xl border border-[#e5e9f0] bg-white p-3 text-left transition hover:border-[#00a884]/30 hover:bg-[#fbfefd]" key={message.id} onClick={() => onSelect(message.id)} type="button">
+                  <div className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fff7ed] text-[#f59e0b]"><Star size={16} className="fill-[#f59e0b]" /></div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="truncate text-sm font-bold text-[#E5E7EB]">{starredSenderLabel(message)}</span>
-                      <span className="shrink-0 text-xs font-semibold text-[#64748B]">{message.createdAt ? formatGroupTime(message.createdAt) : message.time}</span>
+                      <span className="truncate text-sm font-black text-[#18212f]">{starredSenderLabel(message)}</span>
+                      <span className="shrink-0 text-xs font-bold text-[#94a3b8]">{message.createdAt ? formatGroupTime(message.createdAt) : message.time}</span>
                     </div>
-                    <p className="mt-1 truncate text-sm font-medium text-[#9AA3B8]">{starredMessagePreview(message)}</p>
+                    <p className="mt-1 truncate text-sm font-semibold text-[#64748b]">{starredMessagePreview(message)}</p>
                   </div>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-4 py-12 text-center text-sm font-medium text-[#9AA3B8]">No starred messages</div>
+            <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-12 text-center text-sm font-bold text-[#94a3b8]">No starred messages</div>
           )}
         </div>
       </div>
@@ -5399,32 +5399,32 @@ function starredMessagePreview(message: StarredDisplayMessage) {
 function SharedMediaThumb({ item }: { item: SharedAttachmentItem }) {
   const isVideo = item.attachment.kind === "video";
   return (
-    <a className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-[#152035]" href={item.source || undefined} rel="noreferrer" target="_blank">
+    <a className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-[#e5e9f0] bg-[#f1f5f9]" href={item.source || undefined} rel="noreferrer" target="_blank">
       {isVideo ? (
         <video className="h-full w-full object-cover" src={item.source} />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img alt={item.attachment.name} className="h-full w-full object-cover" src={item.source} />
       )}
-      {isVideo ? <span className="absolute inset-0 grid place-items-center bg-black/40 text-white"><Play size={20} fill="currentColor" /></span> : null}
+      {isVideo ? <span className="absolute inset-0 grid place-items-center bg-black/20 text-white"><Play size={20} fill="currentColor" /></span> : null}
     </a>
   );
 }
 
 function SharedLinkPreview({ item }: { item: SharedLinkItem }) {
   return (
-    <a className="flex h-20 w-40 shrink-0 flex-col justify-between rounded-xl border border-white/10 bg-[#152035]/60 p-3 text-xs font-bold text-[#E5E7EB] hover:border-[#38BDF8]/40 transition" href={item.url} rel="noreferrer" target="_blank">
-      <Link size={17} className="text-[#38BDF8]" />
-      <span className="line-clamp-2 break-all text-[#9AA3B8]">{item.url}</span>
+    <a className="flex h-20 w-40 shrink-0 flex-col justify-between rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-xs font-bold text-[#334155]" href={item.url} rel="noreferrer" target="_blank">
+      <Link size={17} className="text-[#00a884]" />
+      <span className="line-clamp-2 break-all">{item.url}</span>
     </a>
   );
 }
 
 function SharedFilePreview({ item }: { item: SharedAttachmentItem }) {
   return (
-    <a className="flex h-20 w-40 shrink-0 flex-col justify-between rounded-xl border border-white/10 bg-[#152035]/60 p-3 text-xs font-bold text-[#E5E7EB] hover:border-[#38BDF8]/40 transition" download={item.attachment.name} href={item.source || undefined}>
-      <FileText size={18} className="text-[#38BDF8]" />
-      <span className="line-clamp-2 text-[#9AA3B8]">{item.attachment.name}</span>
+    <a className="flex h-20 w-40 shrink-0 flex-col justify-between rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-xs font-bold text-[#334155]" download={item.attachment.name} href={item.source || undefined}>
+      <FileText size={18} className="text-[#00a884]" />
+      <span className="line-clamp-2">{item.attachment.name}</span>
     </a>
   );
 }
@@ -5445,15 +5445,15 @@ function SharedMediaDetailsModal({
   tab: ContactInfoMediaTab;
 }) {
   return (
-    <div className="fixed inset-0 z-[80] grid place-items-center bg-black/70 backdrop-blur-sm px-3" onClick={onClose}>
-      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0E1726] text-[#E5E7EB] shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 className="text-base font-bold text-[#E5E7EB]">Media, links and files</h2>
-          <button aria-label="Close shared media" className="grid h-9 w-9 place-items-center rounded-lg text-[#9AA3B8] hover:bg-white/10 hover:text-white" onClick={onClose} type="button"><X size={18} /></button>
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-[#0f172a]/40 px-3" onClick={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[#dce1e8] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-[#e5e9f0] px-4 py-3">
+          <h2 className="text-base font-black text-[#18212f]">Media, links and files</h2>
+          <button aria-label="Close shared media" className="grid h-9 w-9 place-items-center rounded-lg text-[#64748b] hover:bg-[#f8fafc]" onClick={onClose} type="button"><X size={18} /></button>
         </div>
-        <div className="grid grid-cols-3 gap-2 border-b border-white/10 p-3">
+        <div className="grid grid-cols-3 gap-2 border-b border-[#e5e9f0] p-3">
           {(["media", "links", "files"] as ContactInfoMediaTab[]).map((item) => (
-            <button className={`rounded-xl px-3 py-2 text-sm font-bold transition ${tab === item ? "bg-[#38BDF8]/15 border border-[#38BDF8]/30 text-[#38BDF8]" : "text-[#9AA3B8] hover:bg-white/5"}`} key={item} onClick={() => setTab(item)} type="button">
+            <button className={`rounded-xl px-3 py-2 text-sm font-black ${tab === item ? "bg-[#e7f8f2] text-[#008f70]" : "text-[#64748b] hover:bg-[#f8fafc]"}`} key={item} onClick={() => setTab(item)} type="button">
               {item === "media" ? "Media" : item === "links" ? "Links" : "Files"}
             </button>
           ))}
@@ -5482,9 +5482,9 @@ function SharedLinksList({ items }: { items: SharedLinkItem[] }) {
   return (
     <div className="space-y-2">
       {items.map((item) => (
-        <a className="flex items-start gap-3 rounded-xl border border-white/10 bg-[#152035]/60 p-3 text-sm font-bold text-[#E5E7EB] hover:border-[#38BDF8]/40 transition" href={item.url} key={`${item.message.id}-${item.url}`} rel="noreferrer" target="_blank">
-          <Link size={18} className="mt-0.5 shrink-0 text-[#38BDF8]" />
-          <span className="min-w-0 break-all text-[#9AA3B8]">{item.url}</span>
+        <a className="flex items-start gap-3 rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-sm font-bold text-[#334155] hover:border-[#00a884]/30" href={item.url} key={`${item.message.id}-${item.url}`} rel="noreferrer" target="_blank">
+          <Link size={18} className="mt-0.5 shrink-0 text-[#00a884]" />
+          <span className="min-w-0 break-all">{item.url}</span>
         </a>
       ))}
     </div>
@@ -5496,9 +5496,9 @@ function SharedFilesList({ items }: { items: SharedAttachmentItem[] }) {
   return (
     <div className="space-y-2">
       {items.map((item) => (
-        <a className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#152035]/60 p-3 text-sm font-bold text-[#E5E7EB] hover:border-[#38BDF8]/40 transition" download={item.attachment.name} href={item.source || undefined} key={`${item.message.id}-${item.attachment.url}`}>
-          <FileText size={20} className="shrink-0 text-[#38BDF8]" />
-          <span className="min-w-0 flex-1 truncate text-[#9AA3B8]">{item.attachment.name}</span>
+        <a className="flex items-center gap-3 rounded-xl border border-[#e5e9f0] bg-[#f8fafc] p-3 text-sm font-bold text-[#334155] hover:border-[#00a884]/30" download={item.attachment.name} href={item.source || undefined} key={`${item.message.id}-${item.attachment.url}`}>
+          <FileText size={20} className="shrink-0 text-[#00a884]" />
+          <span className="min-w-0 flex-1 truncate">{item.attachment.name}</span>
         </a>
       ))}
     </div>
@@ -5506,7 +5506,7 @@ function SharedFilesList({ items }: { items: SharedAttachmentItem[] }) {
 }
 
 function SharedEmptyState({ label }: { label: string }) {
-  return <div className="rounded-2xl border border-dashed border-white/10 bg-[#152035]/30 px-4 py-10 text-center text-sm font-medium text-[#9AA3B8]">{label}</div>;
+  return <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-4 py-10 text-center text-sm font-bold text-[#94a3b8]">{label}</div>;
 }
 
 function attachmentSource(url: string, token: string) {
@@ -5535,7 +5535,7 @@ function ChatAvatar({ chat, className }: { chat: ChatSeed; className: string }) 
 }
 
 function OnlineStatusBadge() {
-  return <span aria-hidden="true" className="pointer-events-none absolute bottom-0.5 right-0.5 h-[20%] w-[20%] min-h-2 min-w-2 max-h-5 max-w-5 rounded-full border-2 border-[#0E1726] bg-[#38BDF8]" />;
+  return <span aria-hidden="true" className="pointer-events-none absolute bottom-0.5 right-0.5 h-[20%] w-[20%] min-h-2 min-w-2 max-h-5 max-w-5 rounded-full border-2 border-white bg-[#00a884]" />;
 }
 
 function AvatarImage({ alt, className, fallback, src }: { alt: string; className?: string; fallback: ReactNode; src: string }) {
@@ -5574,8 +5574,8 @@ function AvatarSelection({
 }) {
   const isDark = labelTone === "dark";
   return (
-    <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#152035]/60 text-[#E5E7EB]" : "border-white/10 bg-[#152035]/60 text-[#E5E7EB]"}`}>
-      <div className="text-sm font-bold text-[#E5E7EB]">{title}</div>
+    <div className={`rounded-md border p-4 ${isDark ? "border-white/10 bg-[#0b141a]" : "border-[#e5e9f0] bg-[#f8fafc]"}`}>
+      <div className={`text-sm font-bold ${isDark ? "text-white" : "text-[#18212f]"}`}>{title}</div>
       <div className="mt-4 grid grid-cols-5 gap-2 sm:gap-3">
         {BUILT_IN_AVATARS.map((avatar, index) => {
           const selected = selectedBuiltInAvatar === avatar.src;
@@ -5584,30 +5584,30 @@ function AvatarSelection({
               aria-label={`Choose ChatSphere avatar ${index + 1}`}
               aria-pressed={selected}
               className={`relative grid aspect-square shrink-0 place-items-center rounded-full border-2 p-1 transition ${
-                selected ? "border-[#38BDF8] bg-[#38BDF8]/20 shadow-[0_0_0_3px_rgba(56,189,248,.3)]" : "border-white/10 bg-[#0E1726] hover:border-[#38BDF8]/50"
+                selected ? "border-[#00a884] bg-[#e7f8f2] shadow-[0_0_0_3px_rgba(0,168,132,.18)]" : isDark ? "border-white/10 bg-[#17251f] hover:border-[#00a884]/70" : "border-[#dce1e8] bg-white hover:border-[#00a884]/70"
               }`}
               key={avatar.id}
               onClick={() => onChooseBuiltIn(avatar.src)}
               type="button"
             >
-              <span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#152035] text-xs font-bold text-[#38BDF8]">
+              <span className="grid h-full w-full place-items-center overflow-hidden rounded-full bg-[#e7f8f2] text-xs font-black text-[#008f70]">
                 <AvatarImage alt={`ChatSphere avatar ${index + 1}`} className="h-full w-full object-cover" fallback={<Image size={20} />} src={avatar.src} />
               </span>
-              {selected ? <span className="absolute bottom-0 right-0 grid h-5 w-5 place-items-center rounded-full border-2 border-[#0E1726] bg-[#38BDF8] text-[#071019] sm:h-6 sm:w-6"><Check size={13} strokeWidth={3} /></span> : null}
+              {selected ? <span className="absolute bottom-0 right-0 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-[#00a884] text-white sm:h-6 sm:w-6"><Check size={13} strokeWidth={3} /></span> : null}
             </button>
           );
         })}
       </div>
-      <div className="my-4 flex items-center gap-3 text-xs font-bold uppercase text-[#9AA3B8]">
-        <span className="h-px flex-1 bg-white/10" />
+      <div className={`my-4 flex items-center gap-3 text-xs font-black uppercase ${isDark ? "text-[#8696a0]" : "text-[#94a3b8]"}`}>
+        <span className={`h-px flex-1 ${isDark ? "bg-white/10" : "bg-[#dce1e8]"}`} />
         or
-        <span className="h-px flex-1 bg-white/10" />
+        <span className={`h-px flex-1 ${isDark ? "bg-white/10" : "bg-[#dce1e8]"}`} />
       </div>
       <div className="flex flex-wrap items-center gap-4">
-        <span className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full bg-[#0E1726] border border-white/10 text-[#38BDF8] text-sm font-bold">
+        <span className={`grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-full ${isDark ? "bg-[#202c33] text-[#00a884]" : "bg-[#e7f8f2] text-[#008f70]"} text-sm font-black`}>
           {currentPreview ? <AvatarImage alt="Profile preview" className="h-full w-full object-cover" fallback={fallback} src={currentPreview} /> : fallback}
         </span>
-        <label className="cs-press inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] px-4 text-sm font-bold text-[#071019] shadow-[0_12px_28px_rgba(56,189,248,.25)] hover:brightness-110 transition">
+        <label className="cs-press inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#00a884] px-4 text-sm font-black text-white shadow-[0_12px_28px_rgba(0,168,132,.18)]">
           <Upload size={17} />
           Choose from Gallery
           <input id={inputId} accept="image/*" className="hidden" onChange={onChooseGallery} type="file" />

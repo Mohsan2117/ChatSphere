@@ -160,27 +160,27 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
   }, []);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-[#071019] text-[#E5E7EB]">
-      <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-white/10 bg-[#0E1726] px-4 sm:px-6">
+    <div className="flex min-w-0 flex-1 flex-col">
+      <header className="flex min-h-[82px] items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-6">
         <div className={`min-w-0 items-center gap-3 sm:gap-4 ${isChatSearchOpen ? "hidden sm:flex" : "flex"}`}>
-          <button aria-label="Back to chats" className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#9AA3B8] hover:bg-white/10 hover:text-white lg:hidden" onClick={onCloseChat} type="button">
+          <button aria-label="Back to chats" className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#64748b] hover:bg-[#f1f5f9] lg:hidden" onClick={onCloseChat} type="button">
             <ArrowLeft size={22} />
           </button>
-          <button className="flex min-w-0 items-center gap-3 rounded-2xl pr-2 text-left transition hover:bg-white/[0.04] sm:gap-4" onClick={onOpenContactInfo} type="button">
+          <button className="flex min-w-0 items-center gap-3 rounded-2xl pr-2 text-left transition hover:bg-[#f8fafc] sm:gap-4" onClick={onOpenContactInfo} type="button">
             {avatar}
             <div className="min-w-0">
-              <h2 className="truncate text-xl font-bold text-[#E5E7EB]">{chat.name}</h2>
-              <p className={`text-sm font-semibold ${chat.online ? "text-[#38BDF8]" : "text-[#9AA3B8]"}`}>{chat.online ? "Online" : formatLastSeen(chat.lastSeenAt)}</p>
+              <h2 className="truncate text-xl font-black">{chat.name}</h2>
+              <p className={`text-sm font-semibold ${chat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{chat.online ? "Online" : formatLastSeen(chat.lastSeenAt)}</p>
             </div>
           </button>
         </div>
-        <div className={`relative flex min-w-0 items-center justify-end gap-2 text-[#9AA3B8] sm:gap-4 ${isChatSearchOpen ? "flex-1" : ""}`}>
+        <div className={`relative flex min-w-0 items-center justify-end gap-2 text-[#64748b] sm:gap-4 ${isChatSearchOpen ? "flex-1" : ""}`}>
           {isChatSearchOpen ? (
-            <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-[#152035]/60 px-3 sm:w-72 sm:flex-none">
-              <Search size={18} className="text-[#9AA3B8]" />
+            <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-[#dce1e8] bg-[#f8fafc] px-3 sm:w-72 sm:flex-none">
+              <Search size={18} />
               <input
                 ref={chatMessageSearchRef}
-                className="min-w-0 flex-1 bg-transparent text-sm text-[#E5E7EB] outline-none placeholder:text-[#64748B]"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#94a3b8]"
                 onChange={(event) => onSearchChange(event.target.value)}
                 placeholder="Search this chat"
                 value={chatMessageSearch}
@@ -191,7 +191,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
             <>
               <button
                 aria-label="Start audio call"
-                className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-white/10 text-[#9AA3B8] hover:text-[#38BDF8] transition"
+                className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
                 onClick={onStartAudioCall}
                 type="button"
               >
@@ -199,7 +199,7 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
               </button>
               <button
                 aria-label="Start video call"
-                className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-white/10 text-[#9AA3B8] hover:text-[#38BDF8] transition"
+                className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9] text-[#64748b]"
                 onClick={onStartVideoCall}
                 type="button"
               >
@@ -207,33 +207,33 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
               </button>
             </>
           )}
-          <button aria-label="Chat options" className="cs-press grid h-10 w-10 place-items-center rounded-xl text-[#9AA3B8] hover:bg-white/10 hover:text-white transition" onClick={onToggleChatMenu} type="button">
+          <button aria-label="Chat options" className="cs-press grid h-10 w-10 place-items-center rounded-xl hover:bg-[#f1f5f9]" onClick={onToggleChatMenu} type="button">
             <MoreVertical size={23} />
           </button>
           {isChatMenuOpen ? (
-            <div className="cs-scale-in absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#0E1726] py-2 text-sm font-semibold text-[#E5E7EB] shadow-[0_18px_45px_rgba(0,0,0,0.6)] backdrop-blur-xl">
-              <div className="border-b border-white/10 px-4 py-3">
-                <div className="truncate font-bold text-[#E5E7EB]">{chat.name}</div>
-                <div className={`mt-1 text-xs ${chat.online ? "text-[#38BDF8]" : "text-[#9AA3B8]"}`}>{chat.online ? "Online" : formatLastSeen(chat.lastSeenAt)}</div>
+            <div className="cs-scale-in absolute right-0 top-12 z-30 w-56 overflow-hidden rounded-2xl border border-[#dce1e8] bg-white py-2 text-sm font-bold text-[#334155] shadow-[0_18px_45px_rgba(15,23,42,.14)]">
+              <div className="border-b border-[#edf1f5] px-4 py-3">
+                <div className="truncate text-[#18212f]">{chat.name}</div>
+                <div className={`mt-1 text-xs ${chat.online ? "text-[#00a884]" : "text-[#94a3b8]"}`}>{chat.online ? "Online" : formatLastSeen(chat.lastSeenAt)}</div>
               </div>
-              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-white/[0.06] text-[#E5E7EB]" onClick={onToggleChatSearch} type="button">Search messages</button>
-              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-white/[0.06] text-[#E5E7EB]" onClick={onReport} type="button">Report user</button>
+              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onToggleChatSearch} type="button">Search messages</button>
+              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onReport} type="button">Report user</button>
               {disabled ? (
-                <button className="flex w-full items-center px-4 py-3 text-left hover:bg-white/[0.06] text-[#38BDF8]" onClick={onUnblock} type="button">Unblock user</button>
+                <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onUnblock} type="button">Unblock user</button>
               ) : (
-                <button className="flex w-full items-center px-4 py-3 text-left text-red-400 hover:bg-red-500/10" onClick={onBlock} type="button">Block user</button>
+                <button className="flex w-full items-center px-4 py-3 text-left text-[#b42318] hover:bg-[#fff5f5]" onClick={onBlock} type="button">Block user</button>
               )}
-              <button className={`flex w-full items-center px-4 py-3 text-left text-red-400 ${isClearingChat ? "opacity-50 cursor-not-allowed" : "hover:bg-red-500/10"}`} onClick={onClear} disabled={isClearingChat} type="button">
+              <button className={`flex w-full items-center px-4 py-3 text-left text-[#b42318] ${isClearingChat ? "opacity-50 cursor-not-allowed" : "hover:bg-[#fff5f5]"}`} onClick={onClear} disabled={isClearingChat} type="button">
                 {isClearingChat ? "Chat clearing..." : "Clear chat"}
               </button>
-              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-white/[0.06] text-[#9AA3B8]" onClick={onCloseChat} type="button">Close chat</button>
+              <button className="flex w-full items-center px-4 py-3 text-left hover:bg-[#f8fafc]" onClick={onCloseChat} type="button">Close chat</button>
             </div>
           ) : null}
         </div>
       </header>
 
-      <div ref={scrollContainerRef as Ref<HTMLDivElement>} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32 bg-[#071019]">
-        <div className="mx-auto mb-8 w-fit rounded-full border border-white/10 bg-[#152035] px-4 py-2 text-xs font-semibold text-[#9AA3B8] shadow-sm">Conversation started</div>
+      <div ref={scrollContainerRef as Ref<HTMLDivElement>} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 pb-28 sm:px-6 sm:py-8 sm:pb-32">
+        <div className="mx-auto mb-8 w-fit rounded-full border border-[#dce1e8] bg-white px-4 py-2 text-xs font-bold text-[#64748b]">Conversation started</div>
         {messages.length ? (
           <div className="space-y-4">
             {messages.map((message) => (
@@ -261,15 +261,15 @@ export function ChatPanel<TMessage extends DirectChatMessage>({
             ))}
           </div>
         ) : (
-          <div className="mx-auto mt-20 max-w-md rounded-3xl border border-dashed border-white/15 bg-[#152035]/30 px-8 py-10 text-center text-sm leading-6 text-[#9AA3B8]">
-            <MessageCircle className="mx-auto text-[#38BDF8]" size={34} />
-            <h3 className="mt-4 text-lg font-bold text-[#E5E7EB]">{chatMessageSearch.trim() ? "No matching messages" : "No messages yet"}</h3>
+          <div className="mx-auto mt-20 max-w-md rounded-3xl border border-dashed border-[#cbd5e1] bg-white px-8 py-10 text-center text-sm leading-6 text-[#64748b]">
+            <MessageCircle className="mx-auto text-[#00a884]" size={34} />
+            <h3 className="mt-4 text-lg font-black text-[#18212f]">{chatMessageSearch.trim() ? "No matching messages" : "No messages yet"}</h3>
             <p className="mt-2">{chatMessageSearch.trim() ? "Try a different word from this conversation." : "Write the first message below. Attachments and emojis are ready."}</p>
           </div>
         )}
       </div>
 
-      <footer className={`fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-[#0E1726] px-3 py-3 shadow-[0_-14px_35px_rgba(0,0,0,0.5)] sm:px-5 lg:left-[600px] xl:left-[660px] ${isContactInfoOpen ? "lg:right-[360px] xl:right-[380px]" : ""}`}>
+      <footer className={`fixed bottom-0 left-0 right-0 z-40 border-t border-[#e5e9f0] bg-white px-3 py-3 shadow-[0_-14px_35px_rgba(15,23,42,.08)] sm:px-5 lg:left-[600px] xl:left-[660px] ${isContactInfoOpen ? "lg:right-[360px] xl:right-[380px]" : ""}`}>
         <MessageComposer
           attachment={attachment}
           disabled={disabled}

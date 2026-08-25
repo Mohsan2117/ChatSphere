@@ -1196,12 +1196,12 @@ export function AudioCallOverlay({
   // Incoming call banner
   if (callState === "incoming") {
     return (
-      <div className="cs-scale-in fixed left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 top-4 z-[100] w-[calc(100vw-2rem)] md:w-full md:max-w-md rounded-3xl border border-white/10 bg-[#0E1726]/95 backdrop-blur-xl p-4 text-white shadow-[0_24px_60px_rgba(0,0,0,0.7)]">
+      <div className="cs-scale-in fixed left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 top-4 z-[100] w-[calc(100vw-2rem)] md:w-full md:max-w-md rounded-3xl border border-white/10 bg-slate-900/95 backdrop-blur-md p-4 text-white shadow-[0_24px_60px_rgba(0,0,0,0.6)]">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <span
-              className={`grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl font-bold text-white text-base shadow-md ${
-                remoteUser?.color || "bg-[#0B3B60]"
+              className={`grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-2xl font-black text-white text-base shadow-md ${
+                remoteUser?.color || "bg-[#0f766e]"
               }`}
             >
               {remoteUser?.avatarUrl ? (
@@ -1211,8 +1211,8 @@ export function AudioCallOverlay({
               )}
             </span>
             <div className="min-w-0">
-              <div className="truncate text-base font-bold text-[#E5E7EB]">{remoteUser?.name}</div>
-              <div className="text-xs font-semibold text-[#38BDF8]">
+              <div className="truncate text-base font-bold text-white">{remoteUser?.name}</div>
+              <div className="text-xs font-semibold text-[#00a884]">
                 {participants.length > 0
                   ? (callType === "video" ? "Invited you to a group video call" : "Invited you to a group audio call")
                   : (callType === "video" ? "Incoming video call" : "Incoming audio call")}
@@ -1222,7 +1222,7 @@ export function AudioCallOverlay({
           <div className="flex shrink-0 items-center gap-3">
             <button
               aria-label="Reject call"
-              className="cs-press grid h-10 w-10 place-items-center rounded-full bg-red-600 text-white hover:bg-red-700 transition-colors shadow-md"
+              className="cs-press grid h-10 w-10 place-items-center rounded-full bg-[#b42318] text-white hover:bg-[#911c13] transition-colors shadow-md"
               onClick={rejectCall}
               type="button"
             >
@@ -1230,7 +1230,7 @@ export function AudioCallOverlay({
             </button>
             <button
               aria-label="Accept call"
-              className="cs-press grid h-10 w-10 place-items-center rounded-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-md animate-pulse hover:brightness-110 transition-all font-bold"
+              className="cs-press grid h-10 w-10 place-items-center rounded-full bg-[#00a884] text-white hover:bg-[#008f70] transition-colors shadow-md animate-pulse"
               onClick={acceptCall}
               type="button"
             >
@@ -1632,15 +1632,15 @@ export function AudioCallOverlay({
   return (
     <div
       style={{
-        backgroundImage: `radial-gradient(circle at center, #152035 0%, #071019 100%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M40 0l40 40-40 40L0 40z' fill='%23ffffff' fill-opacity='.008' fill-rule='evenodd'/%3E%3C/svg%3E")`
+        backgroundImage: `radial-gradient(circle at center, #15323a 0%, #0b141a 100%), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpath d='M40 0l40 40-40 40L0 40z' fill='%23ffffff' fill-opacity='.008' fill-rule='evenodd'/%3E%3C/svg%3E")`
       }}
-      className="fixed inset-0 z-[95] flex flex-col items-center justify-between text-[#E5E7EB] overflow-hidden bg-[#071019] transition-all duration-300"
+      className="fixed inset-0 z-[95] flex flex-col items-center justify-between text-white overflow-hidden bg-[#0b141a] transition-all duration-300"
     >
       {/* Top Header bar */}
-      <div className="z-30 w-full px-6 pt-6 flex justify-between items-center bg-gradient-to-b from-black/40 to-transparent pb-10">
+      <div className="z-30 w-full px-6 pt-6 flex justify-between items-center bg-gradient-to-b from-black/30 to-transparent pb-10">
         <button
           aria-label="Minimize call"
-          className="cs-press grid h-12 w-12 place-items-center rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[#E5E7EB] hover:bg-white/20 transition-colors"
+          className="cs-press grid h-12 w-12 place-items-center rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white hover:bg-white/20 transition-colors"
           onClick={() => setIsMinimized(true)}
           type="button"
         >
@@ -1658,16 +1658,16 @@ export function AudioCallOverlay({
             <div className="relative flex items-center justify-center my-6">
               {(callState === "outgoing" || callState === "connecting") && (
                 <>
-                  <div className="absolute h-40 w-40 animate-ping rounded-full bg-[#38BDF8]/20" />
-                  <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#38BDF8]/30" />
+                  <div className="absolute h-40 w-40 animate-ping rounded-full bg-[#00a884]/15" />
+                  <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/20" />
                 </>
               )}
               {callState === "connected" && (
-                <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#38BDF8]/15" />
+                <div className="absolute h-36 w-36 animate-pulse rounded-full bg-[#00a884]/10" />
               )}
               <span
-                className={`relative z-10 grid h-28 w-28 md:h-32 md:w-32 place-items-center overflow-hidden rounded-full text-4xl font-black text-white shadow-2xl border-4 border-[#38BDF8]/30 ${
-                  remoteUser?.color || "bg-[#0B3B60]"
+                className={`relative z-10 grid h-28 w-28 md:h-32 md:w-32 place-items-center overflow-hidden rounded-full text-4xl font-black text-white shadow-2xl border-4 border-slate-700/50 ${
+                  remoteUser?.color || "bg-[#0f766e]"
                 }`}
               >
                 {remoteUser?.avatarUrl ? (
@@ -1678,20 +1678,20 @@ export function AudioCallOverlay({
               </span>
             </div>
 
-            <h2 className="truncate text-2xl md:text-3xl font-bold text-[#E5E7EB] text-center w-full">{remoteUser?.name}</h2>
-            <p className="mt-2 text-sm font-bold text-[#38BDF8] uppercase tracking-wider">{getStatusText()}</p>
+            <h2 className="truncate text-2xl md:text-3xl font-black text-white text-center w-full">{remoteUser?.name}</h2>
+            <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
           </div>
         ) : (
           // Group Audio Avatar Grid (3+ Participants)
           <div className="w-full flex flex-col items-center">
             <div className="grid grid-cols-2 gap-4 w-full max-w-md my-6">
               {/* Local Participant avatar */}
-              <div className="flex flex-col items-center justify-center p-4 bg-[#152035]/60 rounded-3xl border border-white/10 relative">
-                <span className="grid h-20 w-20 place-items-center rounded-full text-2xl font-black text-white bg-[#0B3B60] shadow-md border-2 border-[#38BDF8]/30">
+              <div className="flex flex-col items-center justify-center p-4 bg-slate-800/40 rounded-3xl border border-white/5 relative">
+                <span className="grid h-20 w-20 place-items-center rounded-full text-2xl font-black text-white bg-slate-700 shadow-md border-2 border-slate-600">
                   You
                 </span>
-                <span className="text-sm font-bold text-[#E5E7EB] mt-3">You</span>
-                <span className="text-xs text-[#9AA3B8] mt-1">
+                <span className="text-sm font-bold text-white mt-3">You</span>
+                <span className="text-xs text-slate-400 mt-1">
                   {isMuted ? "Muted" : "Active"}
                 </span>
               </div>
@@ -1700,38 +1700,38 @@ export function AudioCallOverlay({
               {participants.map((p) => {
                 const pMuted = participantsMuted.get(p.id) ?? false;
                 return (
-                  <div key={p.id} className="flex flex-col items-center justify-center p-4 bg-[#152035]/60 rounded-3xl border border-white/10 relative">
-                    <span className={`grid h-20 w-20 place-items-center rounded-full text-2xl font-black text-white shadow-md border-2 border-white/10 ${p.color}`}>
+                  <div key={p.id} className="flex flex-col items-center justify-center p-4 bg-slate-800/40 rounded-3xl border border-white/5 relative">
+                    <span className={`grid h-20 w-20 place-items-center rounded-full text-2xl font-black text-white shadow-md border-2 border-slate-700/50 ${p.color}`}>
                       {p.avatar}
                     </span>
-                    <span className="text-sm font-bold text-[#E5E7EB] mt-3 truncate max-w-[120px]">{p.name}</span>
-                    <span className="text-xs text-[#9AA3B8] mt-1">
+                    <span className="text-sm font-bold text-white mt-3 truncate max-w-[120px]">{p.name}</span>
+                    <span className="text-xs text-slate-400 mt-1">
                       {pMuted ? "Muted" : "Active"}
                     </span>
                   </div>
                 );
               })}
             </div>
-            <p className="mt-2 text-sm font-bold text-[#38BDF8] uppercase tracking-wider">{getStatusText()}</p>
+            <p className="mt-2 text-sm font-semibold text-[#00a884] uppercase tracking-wider">{getStatusText()}</p>
           </div>
         )}
       </div>
 
       {/* Large Dark Controls Panel at bottom */}
-      <div className="w-full max-w-md bg-[#0E1726]/95 backdrop-blur-xl border border-white/10 rounded-t-[40px] md:rounded-[32px] p-8 pb-10 shadow-[0_-12px_40px_rgba(0,0,0,0.7)] flex flex-col gap-6">
+      <div className="w-full max-w-md bg-slate-900/90 backdrop-blur-md border border-white/10 rounded-t-[40px] md:rounded-[32px] p-8 pb-10 shadow-[0_-12px_40px_rgba(0,0,0,0.6)] flex flex-col gap-6">
         {/* Row 1: Add People | Speaker | Mute */}
         <div className="grid grid-cols-3 gap-4 w-full max-w-sm mx-auto justify-items-center">
           {/* Add People */}
           <div className="flex flex-col items-center gap-1.5">
             <button
               aria-label="Add people"
-              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-[#152035] hover:bg-[#1f2d47] text-[#E5E7EB] transition-colors border border-white/10"
+              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors border border-white/5"
               onClick={() => setIsAddPeopleOpen(true)}
               type="button"
             >
               <UserPlus size={24} />
             </button>
-            <span className="text-xs text-[#9AA3B8] font-semibold">Add People</span>
+            <span className="text-xs text-slate-400 font-semibold">Add People</span>
           </div>
 
           {/* Speaker Toggle */}
@@ -1740,15 +1740,15 @@ export function AudioCallOverlay({
               aria-label={isSpeakerOn ? "Speaker" : "Earpiece"}
               className={`cs-press grid h-14 w-14 place-items-center rounded-full border transition-all ${
                 isSpeakerOn
-                  ? "bg-white text-[#071019] border-white"
-                  : "bg-[#152035] hover:bg-[#1f2d47] text-[#E5E7EB] border-white/10"
+                  ? "bg-white text-slate-950 border-white"
+                  : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
               }`}
               onClick={toggleSpeaker}
               type="button"
             >
               <Volume2 size={24} />
             </button>
-            <span className="text-xs text-[#9AA3B8] font-semibold">{isSpeakerOn ? "Speaker" : "Earpiece"}</span>
+            <span className="text-xs text-slate-400 font-semibold">{isSpeakerOn ? "Speaker" : "Earpiece"}</span>
           </div>
 
           {/* Mute Button */}
@@ -1757,15 +1757,15 @@ export function AudioCallOverlay({
               aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
               className={`cs-press grid h-14 w-14 place-items-center rounded-full border transition-all ${
                 isMuted
-                  ? "bg-white text-[#071019] border-white"
-                  : "bg-[#152035] hover:bg-[#1f2d47] text-[#E5E7EB] border-white/10"
+                  ? "bg-white text-slate-950 border-white"
+                  : "bg-slate-800 hover:bg-slate-700 text-white border-white/5"
               }`}
               onClick={toggleMute}
               type="button"
             >
               {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
             </button>
-            <span className="text-xs text-[#9AA3B8] font-semibold">{isMuted ? "Muted" : "Mute"}</span>
+            <span className="text-xs text-slate-400 font-semibold">{isMuted ? "Muted" : "Mute"}</span>
           </div>
         </div>
 
@@ -1777,13 +1777,13 @@ export function AudioCallOverlay({
           <div className="flex flex-col items-center gap-1.5">
             <button
               aria-label="End call"
-              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-red-600 hover:bg-red-700 text-white transition-colors shadow-lg"
+              className="cs-press grid h-14 w-14 place-items-center rounded-full bg-[#b42318] hover:bg-[#911c13] text-white transition-colors"
               onClick={endCall}
               type="button"
             >
               <PhoneOff size={24} />
             </button>
-            <span className="text-xs text-red-400 font-bold">End</span>
+            <span className="text-xs text-[#b42318] font-bold">End</span>
           </div>
 
           <div />
@@ -1792,8 +1792,8 @@ export function AudioCallOverlay({
 
       {/* Add People Selection Modal */}
       {isAddPeopleOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-[#0E1726] border border-white/10 p-6 text-[#E5E7EB] shadow-2xl flex flex-col max-h-[80vh] cs-scale-in">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-white/10 p-6 text-white shadow-2xl flex flex-col max-h-[80vh] cs-scale-in">
             <h3 className="text-lg font-bold mb-4">Add people</h3>
             
             <input
@@ -1801,12 +1801,12 @@ export function AudioCallOverlay({
               placeholder="Search users..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#152035]/70 border border-white/10 rounded-xl px-3 py-2 text-sm text-[#E5E7EB] placeholder-[#64748B] focus:outline-none focus:border-[#38BDF8] mb-4"
+              className="w-full bg-slate-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-[#00a884] mb-4"
             />
 
             <div className="flex-1 overflow-y-auto mb-6 pr-1 space-y-2 max-h-[40vh]">
               {filteredUsers.length === 0 ? (
-                <p className="text-xs text-[#9AA3B8] text-center py-4">No users found</p>
+                <p className="text-xs text-slate-400 text-center py-4">No users found</p>
               ) : (
                 filteredUsers.map((user) => {
                   const isSelected = selectedUserIds.includes(user.id);
@@ -1814,7 +1814,7 @@ export function AudioCallOverlay({
                     <div
                       key={user.id}
                       onClick={() => handleToggleUser(user.id)}
-                      className="flex items-center justify-between p-2 rounded-xl hover:bg-white/[0.06] cursor-pointer transition-colors"
+                      className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <span className={`grid h-9 w-9 place-items-center rounded-xl font-bold text-white text-xs ${user.color}`}>
@@ -1823,10 +1823,10 @@ export function AudioCallOverlay({
                         <span className="text-sm font-semibold truncate max-w-[160px]">{user.name}</span>
                       </div>
                       <div className={`h-5 w-5 rounded-full border flex items-center justify-center transition-colors ${
-                        isSelected ? "border-[#38BDF8] bg-[#38BDF8]" : "border-slate-600"
+                        isSelected ? "border-[#00a884] bg-[#00a884]" : "border-slate-500"
                       }`}>
                         {isSelected && (
-                          <span className="block h-2 w-2 rounded-full bg-[#071019]" />
+                          <span className="block h-2 w-2 rounded-full bg-white" />
                         )}
                       </div>
                     </div>
@@ -1835,7 +1835,7 @@ export function AudioCallOverlay({
               )}
             </div>
 
-            <div className="flex justify-end gap-3 mt-auto border-t border-white/10 pt-4">
+            <div className="flex justify-end gap-3 mt-auto border-t border-white/5 pt-4">
               <button
                 type="button"
                 onClick={() => {
@@ -1843,7 +1843,7 @@ export function AudioCallOverlay({
                   setSelectedUserIds([]);
                   setSearchQuery("");
                 }}
-                className="px-4 py-2 rounded-xl text-sm font-semibold text-[#9AA3B8] hover:text-white transition-colors"
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-400 hover:text-white transition-colors"
               >
                 Cancel
               </button>
@@ -1851,8 +1851,8 @@ export function AudioCallOverlay({
                 type="button"
                 onClick={handleConfirmAddPeople}
                 disabled={selectedUserIds.length === 0}
-                className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
-                  selectedUserIds.length === 0 ? "bg-white/5 text-[#64748B] cursor-not-allowed" : "bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019]"
+                className={`px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors ${
+                  selectedUserIds.length === 0 ? "bg-slate-800 text-slate-500 cursor-not-allowed" : "bg-[#00a884] hover:bg-[#008f70]"
                 }`}
               >
                 Add
