@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   Bot,
   Check,
   CheckCheck,
@@ -10,6 +11,7 @@ import {
   Image,
   Link,
   Loader2,
+  Lock,
   LogOut,
   MessageCircle,
   MoreVertical,
@@ -3087,58 +3089,36 @@ export function AppShell() {
       );
     }
     return (
-      <main className="relative min-h-screen bg-[#07130f] text-white overflow-hidden">
-        {/* Originkit Line Ripple Background with ChatSphere-themed communication particles */}
+      <main className="relative min-h-screen h-[100dvh] bg-[#071019] text-[#E5E7EB] overflow-hidden flex items-center justify-center p-4 sm:p-6">
+        {/* Originkit Line Ripple Background with Reactions (03) + Orbit (05) particles */}
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden="true">
           <LineRippleBackground
             backgroundColor="transparent"
-            strokeColor="#00a884"
-            accentColor="#25d366"
-            count={42}
-            movement={18}
-            force={4}
+            strokeColor="#18E0FF"
+            accentColor="#18E0FF"
+            pinkColor="#FF5FA2"
             hover={true}
           />
         </div>
 
-        <section className="relative z-10 mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
-          <div className="hidden lg:block cs-fade-up-delay max-w-2xl">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#00a884] text-[#07130f] shadow-[0_18px_50px_rgba(0,168,132,.25)]">
-              <MessageCircle size={31} />
+        <section className="relative z-10 mx-auto grid w-full max-w-5xl items-center gap-8 lg:grid-cols-[1fr_440px] lg:gap-14">
+          {/* Left-side branding (desktop) */}
+          <div className="hidden lg:flex flex-col items-center text-center cs-fade-up-delay">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_0_45px_rgba(56,189,248,0.35)]">
+              <MessageCircle size={36} strokeWidth={2.4} />
             </div>
-            <h1 className="mt-8 text-4xl font-bold tracking-normal sm:text-5xl">ChatSphere</h1>
-            <p className="mt-4 max-w-xl text-lg leading-8 text-[#c3d0d6]">
-              Create an account with email, verify a one-time code, and open your private chats, groups, contacts, and shared media.
+            <h1 className="mt-5 text-4xl font-bold tracking-tight text-[#E5E7EB] sm:text-5xl">ChatSphere</h1>
+            <p className="mt-2 text-base font-medium text-[#9AA3B8]">
+              Connect. Chat. Stay close.
             </p>
-            <div className="mt-8 grid max-w-xl gap-3 sm:grid-cols-3">
-              {[
-                ["Email account", Mail],
-                ["Code secure", ShieldCheck],
-                ["Realtime chat", CheckCheck]
-              ].map(([label, Icon]) => (
-                <div key={label as string} className="rounded-md border border-white/10 bg-white/[0.04] p-4">
-                  <Icon className="text-[#00a884]" size={21} />
-                  <div className="mt-3 text-sm font-bold">{label as string}</div>
-                </div>
-              ))}
-            </div>
           </div>
 
-          <div className="cs-auth-card w-full max-w-md mx-auto lg:max-w-none rounded-2xl border border-white/10 bg-[#101b17] p-6 shadow-[0_30px_90px_rgba(0,0,0,.38)]">
+          {/* Centered Auth Card with Glassmorphism */}
+          <div className="cs-auth-card w-full max-w-md mx-auto lg:max-w-none rounded-3xl border border-[#38BDF8]/15 bg-[#152035]/55 backdrop-blur-xl p-6 sm:p-8 shadow-[0_20px_60px_rgba(0,0,0,0.5),0_0_40px_rgba(56,189,248,0.06)]">
             {(authStep === "signup" || authStep === "login") ? (
-              <div className="mb-5 grid grid-cols-2 rounded-xl border border-white/10 bg-[#07130f] p-1">
+              <div className="mb-6 grid grid-cols-2 rounded-xl border border-white/5 bg-[#0B1323]/80 p-1">
                 <button
-                  className={`h-10 rounded-lg text-sm font-bold ${authStep === "signup" ? "bg-[#00a884] text-[#06130f]" : "text-[#aebac1]"}`}
-                  onClick={() => {
-                    setAuthStep("signup");
-                    setAuthError("");
-                  }}
-                  type="button"
-                >
-                  Signup
-                </button>
-                <button
-                  className={`h-10 rounded-lg text-sm font-bold ${authStep === "login" ? "bg-[#00a884] text-[#06130f]" : "text-[#aebac1]"}`}
+                  className={`h-10 rounded-lg text-sm font-bold transition ${authStep === "login" ? "bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-md" : "text-[#9AA3B8] hover:text-white"}`}
                   onClick={() => {
                     setAuthStep("login");
                     setAuthError("");
@@ -3147,342 +3127,459 @@ export function AppShell() {
                 >
                   Login
                 </button>
+                <button
+                  className={`h-10 rounded-lg text-sm font-bold transition ${authStep === "signup" ? "bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-md" : "text-[#9AA3B8] hover:text-white"}`}
+                  onClick={() => {
+                    setAuthStep("signup");
+                    setAuthError("");
+                  }}
+                  type="button"
+                >
+                  Signup
+                </button>
               </div>
             ) : null}
 
-            <div className="border-b border-white/10 pb-5">
-              <h2 className="text-2xl font-bold">
+            <div>
+              <h2 className="text-2xl font-bold text-[#E5E7EB]">
                 {authStep === "signup"
-                  ? "Create account"
+                  ? "Create your account"
                   : authStep === "login"
-                    ? "Login"
+                    ? "Welcome back"
                   : authStep === "code"
-                    ? "Enter email code"
+                    ? "Enter verification code"
                   : authStep === "forgot"
-                    ? "Forgot password"
+                    ? "Reset password"
                   : authStep === "reset-code"
                     ? "Enter reset code"
                   : authStep === "reset-password"
                     ? "Set new password"
                     : "Profile picture"}
               </h2>
-              <p className="mt-2 text-sm leading-6 text-[#aebac1]">
+              <p className="mt-1.5 text-sm leading-6 text-[#9AA3B8]">
                 {authStep === "signup"
-                  ? "Enter your details first. We will send the OTP after signup."
+                  ? "Get started with ChatSphere today."
                   : authStep === "login"
-                    ? "Already have an account? Use your email and password."
+                    ? "Login to continue your conversations."
                   : authStep === "code"
                     ? `Enter the 6-digit code sent to ${email}.`
                   : authStep === "forgot"
-                    ? "Enter your account email. We will send a reset code to Gmail."
+                    ? "Enter your email to receive a password reset code."
                   : authStep === "reset-code"
                     ? `Enter the password reset code sent to ${email}.`
                   : authStep === "reset-password"
-                    ? "Choose a new password for your ChatSphere account."
+                    ? "Choose a new secure password for your account."
                     : "Add a profile photo before opening chats."}
               </p>
             </div>
-            {authMessage ? <p className="mt-4 rounded-md border border-[#00a884]/30 bg-[#00a884]/10 px-3 py-2 text-sm text-[#bdf5e2]">{authMessage}</p> : null}
+            {authMessage ? <p className="mt-4 rounded-xl border border-[#38BDF8]/30 bg-[#38BDF8]/10 px-3 py-2 text-sm text-[#bae6fd]">{authMessage}</p> : null}
 
             {authStep === "signup" ? (
-              <form className="mt-5 space-y-5" onSubmit={requestCode}>
-                <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">First name</span>
-                  <input
-                    value={firstName}
-                    onChange={(event) => setFirstName(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Enter first name"
-                    type="text"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">
-                    Last name <span className="text-[#8696a0]">(optional)</span>
-                  </span>
-                  <input
-                    value={lastName}
-                    onChange={(event) => setLastName(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Enter last name"
-                    type="text"
-                  />
-                </label>
+              <form className="mt-5 space-y-4" onSubmit={requestCode}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#9AA3B8]">First name</span>
+                    <input
+                      value={firstName}
+                      onChange={(event) => setFirstName(event.target.value)}
+                      className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
+                      placeholder="First name"
+                      type="text"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-semibold text-[#9AA3B8]">
+                      Last name <span className="text-[#64748B]">(opt)</span>
+                    </span>
+                    <input
+                      value={lastName}
+                      onChange={(event) => setLastName(event.target.value)}
+                      className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
+                      placeholder="Last name"
+                      type="text"
+                    />
+                  </label>
                 </div>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
-                  <input
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="you@example.com"
-                    inputMode="email"
-                    type="email"
-                  />
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Email address</span>
+                  <div className="relative mt-1.5">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
+                    <input
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-4 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
+                      placeholder="you@example.com"
+                      inputMode="email"
+                      type="email"
+                    />
+                  </div>
                 </label>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Set password</span>
-                  <div className="relative mt-2">
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Set password</span>
+                  <div className="relative mt-1.5">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
                     <input
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-11 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Create password"
                       type={showPassword ? "text" : "password"}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#9AA3B8] hover:text-white transition"
                       aria-label={showPassword ? "Hide password" : "Show password"}
                       tabIndex={-1}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </label>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Confirm password</span>
-                  <div className="relative mt-2">
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Confirm password</span>
+                  <div className="relative mt-1.5">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
                     <input
                       value={confirmPassword}
                       onChange={(event) => setConfirmPassword(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-11 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Repeat password"
                       type={showConfirmPassword ? "text" : "password"}
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword((prev) => !prev)}
-                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#9AA3B8] hover:text-white transition"
                       aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                       tabIndex={-1}
                     >
-                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </label>
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
-                  {isSubmitting ? "Creating account..." : "Signup"}
-                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+                <button
+                  disabled={isSubmitting}
+                  className="cs-press mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
+                >
+                  {isSubmitting ? "Creating account..." : "Sign up"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
-                <p className="rounded-xl border border-white/10 bg-[#07130f] px-3 py-2 text-xs leading-5 text-[#8696a0]">After signup, we will send a 6-digit code to your Gmail.</p>
-                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+
+                <div className="pt-2 text-center text-sm text-[#9AA3B8]">
+                  Already have an account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthStep("login");
+                      setAuthError("");
+                    }}
+                    className="font-bold text-[#38BDF8] hover:underline"
+                  >
+                    Login
+                  </button>
+                </div>
+
+                {authError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : authStep === "login" ? (
-              <form className="mt-5 space-y-5" onSubmit={login}>
+              <form className="mt-5 space-y-4" onSubmit={login}>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
-                  <input
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="you@example.com"
-                    inputMode="email"
-                    type="email"
-                  />
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Email address</span>
+                  <div className="relative mt-1.5">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
+                    <input
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-4 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
+                      placeholder="you@example.com"
+                      inputMode="email"
+                      type="email"
+                    />
+                  </div>
                 </label>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Password</span>
-                  <div className="relative mt-2">
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Password</span>
+                  <div className="relative mt-1.5">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
                     <input
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-11 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Enter password"
                       type={showPassword ? "text" : "password"}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#9AA3B8] hover:text-white transition"
                       aria-label={showPassword ? "Hide password" : "Show password"}
                       tabIndex={-1}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </label>
-                <label className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-[#d1d7db] select-none hover:text-white transition">
-                  <input
-                    type="checkbox"
-                    checked={keepSignedIn}
-                    onChange={(e) => setKeepSignedIn(e.target.checked)}
-                    className="h-4 w-4 rounded border border-white/20 bg-[#17251f] accent-[#00a884] cursor-pointer"
-                  />
-                  <span>Keep me signed in for 30 days</span>
-                </label>
-                <button disabled={isSubmitting} className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
-                  {isSubmitting ? "Logging in..." : "Login"}
-                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
-                </button>
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2.5 cursor-pointer text-xs font-medium text-[#9AA3B8] select-none hover:text-white transition">
+                    <input
+                      type="checkbox"
+                      checked={keepSignedIn}
+                      onChange={(e) => setKeepSignedIn(e.target.checked)}
+                      className="h-4 w-4 rounded border border-white/20 bg-[#0B1323] accent-[#38BDF8] cursor-pointer"
+                    />
+                    <span>Keep me signed in for 30 days</span>
+                  </label>
+                </div>
                 <button
-                  className="w-full text-center text-sm font-bold text-[#00a884] hover:text-[#46dfbd]"
-                  onClick={() => {
-                    setAuthStep("forgot");
-                    setAuthError("");
-                    setAuthMessage("");
-                    setVerificationCode("");
-                    setPassword("");
-                    setConfirmPassword("");
-                  }}
-                  type="button"
+                  disabled={isSubmitting}
+                  className="cs-press mt-1 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
                 >
-                  Forgot password?
+                  {isSubmitting ? "Logging in..." : "Login"}
+                  {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
-                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+
+                <div className="text-center pt-1">
+                  <button
+                    className="text-xs font-semibold text-[#38BDF8] hover:text-[#60A5FA] transition"
+                    onClick={() => {
+                      setAuthStep("forgot");
+                      setAuthError("");
+                      setAuthMessage("");
+                      setVerificationCode("");
+                      setPassword("");
+                      setConfirmPassword("");
+                    }}
+                    type="button"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+
+                {/* Divider "or" */}
+                <div className="relative my-3 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-white/10" />
+                  </div>
+                  <span className="relative bg-[#121c2e] px-3 text-xs font-medium text-[#9AA3B8]">or</span>
+                </div>
+
+                {/* Social Buttons: Google, Apple, Discord */}
+                <div className="grid grid-cols-3 gap-2.5">
+                  <button
+                    type="button"
+                    className="cs-press flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition"
+                    aria-label="Continue with Google"
+                  >
+                    <svg className="h-5 w-5" viewBox="0 0 24 24">
+                      <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.3 9 5 12 5z"/>
+                      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9C2.2-2 3.7-5 3.7-8.8z"/>
+                      <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15.1s.7 5.4 1.9 7.8l3.7-2.9z"/>
+                      <path fill="#34A853" d="M12 23.5c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.3-6.4-5.2L1.9 16.5C3.7 20.2 7.5 23.5 12 23.5z"/>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="cs-press flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition text-white"
+                    aria-label="Continue with Apple"
+                  >
+                    <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.63-.77 1.06-1.85.94-2.93-.91.04-2.02.6-2.67 1.37-.58.67-1.08 1.76-.94 2.81 1.02.08 2.04-.48 2.67-1.25z"/>
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="cs-press flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition text-[#5865F2]"
+                    aria-label="Continue with Discord"
+                  >
+                    <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
+                      <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="pt-2 text-center text-sm text-[#9AA3B8]">
+                  Don&apos;t have an account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthStep("signup");
+                      setAuthError("");
+                    }}
+                    className="font-bold text-[#38BDF8] hover:underline"
+                  >
+                    Signup
+                  </button>
+                </div>
+
+                {authError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : authStep === "forgot" ? (
-              <form className="mt-5 space-y-5" onSubmit={requestPasswordReset}>
+              <form className="mt-5 space-y-4" onSubmit={requestPasswordReset}>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Email address</span>
-                  <input
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="you@example.com"
-                    inputMode="email"
-                    type="email"
-                  />
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Email address</span>
+                  <div className="relative mt-1.5">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
+                    <input
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-4 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
+                      placeholder="you@example.com"
+                      inputMode="email"
+                      type="email"
+                    />
+                  </div>
                 </label>
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button
+                  disabled={isSubmitting}
+                  className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
+                >
                   {isSubmitting ? "Sending code..." : "Send reset code"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
                 </button>
-                <button className="w-full text-center text-sm font-bold text-[#aebac1] hover:text-white" onClick={() => setAuthStep("login")} type="button">
+                <button
+                  className="w-full text-center text-sm font-semibold text-[#9AA3B8] hover:text-white transition"
+                  onClick={() => setAuthStep("login")}
+                  type="button"
+                >
                   Back to login
                 </button>
-                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+                {authError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : authStep === "reset-code" ? (
-              <form className="mt-5 space-y-5" onSubmit={verifyPasswordResetCode}>
+              <form className="mt-5 space-y-4" onSubmit={verifyPasswordResetCode}>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Reset code</span>
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Reset code</span>
                   <input
                     value={verificationCode}
                     onChange={(event) => setVerificationCode(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-center text-xl font-black tracking-[.35em] text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                    className="mt-1.5 h-12 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-4 text-center text-xl font-black tracking-[.35em] text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                     inputMode="numeric"
                     maxLength={6}
                     placeholder="000000"
                   />
                 </label>
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button
+                  disabled={isSubmitting}
+                  className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
+                >
                   Verify code
                   <ShieldCheck size={18} />
                 </button>
                 <button
-                  className="w-full text-center text-sm font-bold text-[#00a884] disabled:cursor-not-allowed disabled:text-[#6f8188]"
+                  className="w-full text-center text-sm font-semibold text-[#38BDF8] disabled:cursor-not-allowed disabled:text-[#64748B]"
                   disabled={resendSeconds > 0 || isSubmitting}
                   onClick={sendPasswordResetCode}
                   type="button"
                 >
                   {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend code"}
                 </button>
-                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+                {authError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : authStep === "reset-password" ? (
-              <form className="mt-5 space-y-5" onSubmit={completePasswordReset}>
+              <form className="mt-5 space-y-4" onSubmit={completePasswordReset}>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">New password</span>
-                  <div className="relative mt-2">
+                  <span className="text-xs font-semibold text-[#9AA3B8]">New password</span>
+                  <div className="relative mt-1.5">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
                     <input
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-11 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Enter new password"
                       type={showPassword ? "text" : "password"}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#9AA3B8] hover:text-white transition"
                       aria-label={showPassword ? "Hide password" : "Show password"}
                       tabIndex={-1}
                     >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </label>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Confirm new password</span>
-                  <div className="relative mt-2">
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Confirm new password</span>
+                  <div className="relative mt-1.5">
+                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9AA3B8]" size={17} />
                     <input
                       value={confirmPassword}
                       onChange={(event) => setConfirmPassword(event.target.value)}
-                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 pl-10 pr-11 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Repeat new password"
                       type={showConfirmPassword ? "text" : "password"}
                     />
                     <button
                       type="button"
                       onClick={() => setShowConfirmPassword((prev) => !prev)}
-                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#9AA3B8] hover:text-white transition"
                       aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                       tabIndex={-1}
                     >
-                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
                 </label>
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
+                <button
+                  disabled={isSubmitting}
+                  className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
+                >
                   Update password
                   <ShieldCheck size={18} />
                 </button>
-                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+                {authError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             ) : authStep === "profile" ? (
               <form className="mt-5 space-y-4" onSubmit={completeProfile}>
-                <div className="rounded-md border border-white/10 bg-[#0b141a] p-4">
-                  <div className="text-sm font-bold text-[#00a884]">Account details</div>
-                  <div className="mt-3 space-y-2 text-sm text-[#d1d7db]">
-                    <div>
-                      <span className="text-[#8696a0]">Email:</span> {email}
-                    </div>
+                <div className="rounded-xl border border-white/10 bg-[#0B1323]/60 p-3.5">
+                  <div className="text-xs font-bold text-[#38BDF8]">Account details</div>
+                  <div className="mt-1.5 text-xs text-[#9AA3B8]">
+                    <span>Email:</span> <span className="text-[#E5E7EB] font-medium">{email}</span>
                   </div>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block">
-                    <span className="text-sm font-semibold text-[#d1d7db]">First name</span>
+                    <span className="text-xs font-semibold text-[#9AA3B8]">First name</span>
                     <input
                       value={firstName}
                       onChange={(event) => setFirstName(event.target.value)}
-                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Enter first name"
                       type="text"
                     />
                   </label>
                   <label className="block">
-                    <span className="text-sm font-semibold text-[#d1d7db]">
-                      Last name <span className="text-[#8696a0]">(optional)</span>
+                    <span className="text-xs font-semibold text-[#9AA3B8]">
+                      Last name <span className="text-[#64748B]">(opt)</span>
                     </span>
                     <input
                       value={lastName}
                       onChange={(event) => setLastName(event.target.value)}
-                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Enter last name"
                       type="text"
                     />
                   </label>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block">
-                    <span className="text-sm font-semibold text-[#d1d7db]">Set password</span>
+                    <span className="text-xs font-semibold text-[#9AA3B8]">Set password</span>
                     <input
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Create password"
                       type="password"
                     />
                   </label>
                   <label className="block">
-                    <span className="text-sm font-semibold text-[#d1d7db]">Confirm password</span>
+                    <span className="text-xs font-semibold text-[#9AA3B8]">Confirm password</span>
                     <input
                       value={confirmPassword}
                       onChange={(event) => setConfirmPassword(event.target.value)}
-                      className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      className="mt-1.5 h-11 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 text-sm text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                       placeholder="Repeat password"
                       type="password"
                     />
@@ -3497,12 +3594,15 @@ export function AppShell() {
                   selectedBuiltInAvatar={selectedBuiltInAvatar}
                   title="Choose your profile picture"
                 />
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
+                <button
+                  disabled={isSubmitting}
+                  className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
+                >
                   {isSubmitting ? "Saving profile..." : "Continue to chats"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                 </button>
                 <button
-                  className="flex w-full items-center justify-center gap-1 text-center text-sm font-bold text-[#aebac1] hover:text-white disabled:cursor-not-allowed disabled:text-[#6f8188]"
+                  className="flex w-full items-center justify-center gap-1 text-center text-xs font-bold text-[#9AA3B8] hover:text-white disabled:cursor-not-allowed disabled:text-[#64748B] transition"
                   disabled={isSubmitting}
                   onClick={() => {
                     window.localStorage.removeItem("chatsphere-auth");
@@ -3515,25 +3615,25 @@ export function AppShell() {
                   <ArrowLeft size={14} />
                   Back to signup
                 </button>
-                {profileError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{profileError}</p> : null}
+                {profileError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{profileError}</p> : null}
               </form>
             ) : (
               <form className="mt-5 space-y-4" onSubmit={verifyCode}>
                 <label className="block">
-                  <span className="text-sm font-semibold text-[#d1d7db]">Verification code</span>
+                  <span className="text-xs font-semibold text-[#9AA3B8]">Verification code</span>
                   <input
                     value={verificationCode}
                     onChange={(event) => setVerificationCode(event.target.value)}
-                    className="mt-2 h-14 w-full rounded-md border border-white/10 bg-[#202c33] px-4 text-center text-2xl font-bold tracking-[0.35em] text-white outline-none placeholder:text-[#8696a0]"
+                    className="mt-1.5 h-14 w-full rounded-xl border border-white/10 bg-[#0B1323]/60 px-4 text-center text-2xl font-bold tracking-[0.35em] text-[#E5E7EB] outline-none transition placeholder:text-[#64748B] focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/20"
                     placeholder="123456"
                     maxLength={6}
                     inputMode="numeric"
                   />
                 </label>
-                <div className="flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/10 bg-[#0b141a] px-3 py-2 text-sm text-[#aebac1]">
+                <div className="flex min-h-11 items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0B1323]/60 px-3.5 py-2 text-xs text-[#9AA3B8]">
                   <span>{resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Did not get the code?"}</span>
                   <button
-                    className="rounded-md px-3 py-2 font-bold text-[#00a884] disabled:cursor-not-allowed disabled:text-[#64757d]"
+                    className="rounded-md px-2 py-1 font-bold text-[#38BDF8] hover:text-[#60A5FA] disabled:cursor-not-allowed disabled:text-[#64757d] transition"
                     disabled={resendSeconds > 0 || isSubmitting}
                     onClick={sendCode}
                     type="button"
@@ -3541,16 +3641,20 @@ export function AppShell() {
                     Resend
                   </button>
                 </div>
-                <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#00a884] font-bold text-[#06130f]">
+                <button
+                  disabled={isSubmitting}
+                  className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] transition hover:brightness-105 active:scale-[0.98]"
+                >
                   {isSubmitting ? "Checking code..." : "Verify and continue"}
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
                 </button>
-                {authError ? <p className="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
+                {authError ? <p className="rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-200">{authError}</p> : null}
               </form>
             )}
-            <div className="mt-6 flex justify-center gap-4 border-t border-white/10 pt-4 text-xs font-bold text-[#8696a0]">
-              <a className="hover:text-white" href="/privacy">Privacy</a>
-              <a className="hover:text-white" href="/terms">Terms</a>
+            <div className="mt-5 flex justify-center gap-4 border-t border-white/10 pt-3.5 text-xs font-semibold text-[#9AA3B8]">
+              <a className="hover:text-white transition" href="/privacy">Privacy</a>
+              <span className="text-white/20">•</span>
+              <a className="hover:text-white transition" href="/terms">Terms</a>
             </div>
           </div>
         </section>
