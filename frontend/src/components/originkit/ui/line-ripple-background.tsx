@@ -80,6 +80,14 @@ function createNoise2D(seed = 0.5) {
 
 type ParticleShape = "bubble" | "check" | "heart" | "at";
 
+interface ParticleOrbitRing {
+  radius: number;
+  speed: number;
+  dotAngle: number;
+  dotSize: number;
+  dotColor: string;
+}
+
 interface Point {
   x: number;
   y: number;
@@ -90,12 +98,8 @@ interface Point {
   baseAlpha: number;
   rotationOffset: number;
   hasLines?: boolean;
-}
-
-interface OrbitCenter {
-  xRatio: number;
-  yRatio: number;
-  rings: { radius: number; speed: number; dotAngle: number; dotSize: number; dotColor: string }[];
+  hasOrbitRings?: boolean;
+  orbitRings?: ParticleOrbitRing[];
 }
 
 interface StarDust {
@@ -126,17 +130,17 @@ const CURL = 3;
 const SEED = 0.5;
 
 // Exact color palette matching the Reactions (03) + Orbit (05) design:
-const COLOR_CYAN = "#00e5bc";
-const COLOR_PINK = "#ff4d88";
+const COLOR_TEAL = "#00d6b4";
+const COLOR_PINK = "#ff4db8";
 const COLOR_ICE = "#7fe8db";
 
 export default function InteractiveBackground({
-  strokeColor = COLOR_CYAN,
-  accentColor = COLOR_CYAN,
+  strokeColor = COLOR_TEAL,
+  accentColor = COLOR_TEAL,
   pinkColor = COLOR_PINK,
   backgroundColor = "transparent",
-  count = 38,
-  movement = 15,
+  count = 34,
+  movement = 14,
   hover = true,
   force = 3.5,
   className = "",
@@ -157,7 +161,6 @@ export default function InteractiveBackground({
   });
   const pointsRef = useRef<Point[]>([]);
   const stardustRef = useRef<StarDust[]>([]);
-  const orbitsRef = useRef<OrbitCenter[]>([]);
   const noiseRef = useRef<((x: number, y: number) => number) | null>(null);
   const rafRef = useRef<number | null>(null);
   const boundingRef = useRef<{ width: number; height: number; dpr: number } | null>(null);
@@ -197,50 +200,18 @@ export default function InteractiveBackground({
     canvas.style.height = `${height}px`;
   };
 
-  const initOrbitsAndStardust = () => {
-    // Ambient focal Orbit systems (Orbit Ripple 05)
-    orbitsRef.current = [
-      {
-        xRatio: 0.5,
-        yRatio: 0.48,
-        rings: [
-          { radius: 36, speed: 0.0008, dotAngle: 0.4, dotSize: 2.2, dotColor: COLOR_CYAN },
-          { radius: 72, speed: -0.0006, dotAngle: 2.1, dotSize: 2.5, dotColor: COLOR_PINK },
-          { radius: 118, speed: 0.0004, dotAngle: 4.3, dotSize: 2.8, dotColor: COLOR_CYAN },
-          { radius: 172, speed: -0.0003, dotAngle: 1.2, dotSize: 2.2, dotColor: COLOR_ICE },
-        ],
-      },
-      {
-        xRatio: 0.18,
-        yRatio: 0.35,
-        rings: [
-          { radius: 30, speed: 0.0007, dotAngle: 1.1, dotSize: 2, dotColor: COLOR_PINK },
-          { radius: 62, speed: -0.0005, dotAngle: 3.5, dotSize: 2.4, dotColor: COLOR_CYAN },
-          { radius: 102, speed: 0.0003, dotAngle: 5.2, dotSize: 2, dotColor: COLOR_PINK },
-        ],
-      },
-      {
-        xRatio: 0.82,
-        yRatio: 0.32,
-        rings: [
-          { radius: 32, speed: -0.0008, dotAngle: 0.8, dotSize: 2, dotColor: COLOR_CYAN },
-          { radius: 68, speed: 0.0005, dotAngle: 2.7, dotSize: 2.5, dotColor: COLOR_CYAN },
-          { radius: 112, speed: -0.0004, dotAngle: 4.8, dotSize: 2, dotColor: COLOR_PINK },
-        ],
-      },
-    ];
-
-    // Subtle twinkling stardust
+  const initStardust = () => {
+    // Sparkling stardust
     const stars: StarDust[] = [];
-    for (let i = 0; i < 48; i++) {
+    for (let i = 0; i < 42; i++) {
       const isPink = i % 4 === 0;
       stars.push({
-        xRatio: (Math.sin(i * 91.31 + 4.17) * 0.5 + 0.5),
-        yRatio: (Math.cos(i * 67.89 + 1.23) * 0.5 + 0.5),
-        size: 1 + (i % 3) * 0.5,
-        color: isPink ? COLOR_PINK : COLOR_CYAN,
-        alpha: 0.12 + (i % 5) * 0.04,
-        speed: 0.001 + (i % 3) * 0.0008,
+        xRatio: Math.sin(i * 91.31 + 4.17) * 0.5 + 0.5,
+        yRatio: Math.cos(i * 67.89 + 1.23) * 0.5 + 0.5,
+        size: 1 + (i % 3) * 0.45,
+        color: isPink ? COLOR_PINK : COLOR_TEAL,
+        alpha: 0.1 + (i % 4) * 0.04,
+        speed: 0.001 + (i % 3) * 0.0007,
         phase: i * 0.7,
       });
     }
@@ -275,11 +246,11 @@ export default function InteractiveBackground({
         const rRot = (Math.sin(idx * 43.11 + j * 17.51) * Math.PI) / 6;
         const rAlpha = Math.sin(idx * 73.29 + 1.61) * 0.5 + 0.5;
 
-        // Shape distribution exactly as in infographic:
-        // 60% Chat Bubble Outlines (Cyan)
-        // 20% Message Ticks (Cyan / Mint)
-        // 10% Reaction Hearts (Pink)
-        // 10% Dots & @ Symbols (Ice Cyan)
+        // 1. PARTICLE SHAPES (MUST USE from specification):
+        // 60% Chat Bubble Outlines (Teal)
+        // 20% Message Ticks (Teal)
+        // 10% Reaction Hearts (Pink/Magenta)
+        // 10% Dots & @ Symbols (Ice/Teal)
         let shape: ParticleShape = "bubble";
         if (rType >= 0.60 && rType < 0.80) {
           shape = "check";
@@ -289,26 +260,66 @@ export default function InteractiveBackground({
           shape = "at";
         }
 
-        // 3 Size tiers:
-        // Small (majority): 13-15px
-        // Medium: 18-21px
-        // Large: 25-29px
-        let size = 14;
+        // 3. SIZES (from specification):
+        // Small: 10-14px (majority)
+        // Medium: 16-20px
+        // Large: 22-28px (few)
+        let size = 12;
         let hasLines = false;
         if (rSizeTier >= 0.88) {
-          size = 25 + Math.floor(rSizeTier * 4);
+          // Large (few)
+          size = 23 + Math.floor(rSizeTier * 4.5);
           hasLines = shape === "bubble";
         } else if (rSizeTier >= 0.62) {
-          size = 18 + Math.floor(rSizeTier * 3.5);
+          // Medium
+          size = 16 + Math.floor(rSizeTier * 3.5);
           hasLines = shape === "bubble" && rType < 0.35;
         } else {
-          size = 13 + Math.floor(rSizeTier * 2.5);
+          // Small (majority)
+          size = 11 + Math.floor(rSizeTier * 2.5);
         }
 
-        // Natural jitter to break grid patterns
-        const jitterAmount = gap * 0.3;
+        // 7. ORBIT + REACTIONS MIX:
+        // Some particles (mainly chat bubbles and @) have orbit rings (like Orbit Ripple 05)
+        // Hearts and ticks float freely like Reactions Ripple 03
+        const hasOrbitRings =
+          (shape === "bubble" && size >= 17 && idx % 3 === 0) ||
+          (shape === "at" && idx % 2 === 0);
+
+        let orbitRings: ParticleOrbitRing[] | undefined;
+        if (hasOrbitRings) {
+          orbitRings = [
+            {
+              radius: size * 1.5,
+              speed: 0.0007 * (idx % 2 === 0 ? 1 : -1),
+              dotAngle: idx * 1.2,
+              dotSize: 1.8,
+              dotColor: COLOR_TEAL,
+            },
+            {
+              radius: size * 2.5,
+              speed: -0.0005 * (idx % 2 === 0 ? 1 : -1),
+              dotAngle: idx * 2.4,
+              dotSize: 2.2,
+              dotColor: idx % 4 === 0 ? COLOR_PINK : COLOR_TEAL,
+            },
+            {
+              radius: size * 3.6,
+              speed: 0.0003 * (idx % 2 === 0 ? 1 : -1),
+              dotAngle: idx * 3.8,
+              dotSize: 1.8,
+              dotColor: COLOR_ICE,
+            },
+          ];
+        }
+
+        // 2. DISTRIBUTION: Natural scattering across entire screen (no strict rows or grid)
+        const jitterAmount = gap * 0.32;
         const xPos = xStart + gap * i + rJitterX * jitterAmount;
         const yPos = yStart + gap * j + rJitterY * jitterAmount;
+
+        // 4. Default state: low opacity (10%-25%)
+        const baseAlpha = 0.11 + rAlpha * 0.13;
 
         points.push({
           x: xPos,
@@ -317,9 +328,11 @@ export default function InteractiveBackground({
           cursor: { x: 0, y: 0, vx: 0, vy: 0 },
           shape,
           size,
-          baseAlpha: 0.16 + rAlpha * 0.14,
+          baseAlpha,
           rotationOffset: rRot,
           hasLines,
+          hasOrbitRings,
+          orbitRings,
         });
       }
     }
@@ -351,7 +364,7 @@ export default function InteractiveBackground({
 
     const curl = CURL;
     const base = BASE_ANGLE;
-    const drift = time * movement * 6.5e-6;
+    const drift = time * movement * 6e-6;
     const dirX = Math.cos(base) * drift;
     const dirY = Math.sin(base) * drift;
 
@@ -362,9 +375,10 @@ export default function InteractiveBackground({
       const dx = p.x - mouse.sx;
       const dy = p.y - mouse.sy;
       const d = Math.hypot(dx, dy);
-      const l = Math.max(175, mouse.vs * 1.6);
+      const l = Math.max(170, mouse.vs * 1.6);
       let bend = 0;
 
+      // 6. RIPPLE INTERACTION (Gently push away from cursor, rotate, scale up)
       if (hover && d < l && mouse.set) {
         const s = 1 - d / l;
         const influence = (force / 10) * 0.018;
@@ -372,7 +386,7 @@ export default function InteractiveBackground({
         bend = (tangent - target) * s * (0.32 + mouse.vs * influence);
 
         const f = Math.cos(d * 0.001) * s;
-        const push = (force / 10) * 5.5e-4;
+        const push = (force / 10) * 5.2e-4;
         p.cursor.vx += Math.cos(Math.atan2(dy, dx)) * f * l * mouse.vs * push;
         p.cursor.vy += Math.sin(Math.atan2(dy, dx)) * f * l * mouse.vs * push;
       }
@@ -382,14 +396,15 @@ export default function InteractiveBackground({
       while (diff < -Math.PI) diff += 2 * Math.PI;
       p.angle += diff * 0.09;
 
+      // Smooth return to original position
       p.cursor.vx += (0 - p.cursor.x) * 0.011;
       p.cursor.vy += (0 - p.cursor.y) * 0.011;
       p.cursor.vx *= 0.93;
       p.cursor.vy *= 0.93;
       p.cursor.x += p.cursor.vx;
       p.cursor.y += p.cursor.vy;
-      p.cursor.x = Math.min(42, Math.max(-42, p.cursor.x));
-      p.cursor.y = Math.min(42, Math.max(-42, p.cursor.y));
+      p.cursor.x = Math.min(40, Math.max(-40, p.cursor.x));
+      p.cursor.y = Math.min(40, Math.max(-40, p.cursor.y));
     });
   };
 
@@ -410,68 +425,38 @@ export default function InteractiveBackground({
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // 1. Draw Orbit Ripple Rings (Orbit 05)
-    orbitsRef.current.forEach((orbit) => {
-      const ox = orbit.xRatio * width;
-      const oy = orbit.yRatio * height;
-
-      orbit.rings.forEach((ring) => {
-        // Concentric dotted orbit track
-        ctx.save();
-        ctx.strokeStyle = ring.dotColor === COLOR_PINK ? "rgba(255, 77, 136, 0.12)" : "rgba(0, 229, 188, 0.12)";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 7]);
-        ctx.beginPath();
-        ctx.arc(ox, oy, ring.radius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Orbiting satellite dot
-        const curAngle = ring.dotAngle + time * ring.speed;
-        const dotX = ox + Math.cos(curAngle) * ring.radius;
-        const dotY = oy + Math.sin(curAngle) * ring.radius;
-
-        ctx.setLineDash([]);
-        ctx.fillStyle = ring.dotColor;
-        ctx.globalAlpha = 0.45;
-        ctx.beginPath();
-        ctx.arc(dotX, dotY, ring.dotSize, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
-    });
-
-    // 2. Draw Dynamic Orbit Ripple from Active Cursor
+    // 1. Draw Dynamic Cursor Orbit Ripple Waves (expanding from mouse position)
     if (mouse.set && mouse.sx > 0 && mouse.sy > 0) {
       const cx = mouse.sx;
       const cy = mouse.sy;
-      const cursorRipples = [42, 86, 138, 195];
+      const cursorRipples = [38, 80, 130, 185];
 
       cursorRipples.forEach((radius, idx) => {
-        const pulse = Math.sin(time * 0.0025 + idx * 1.5) * 4;
+        const pulse = Math.sin(time * 0.0022 + idx * 1.4) * 3.5;
         const curR = radius + pulse;
         ctx.save();
-        ctx.strokeStyle = idx % 2 === 0 ? "rgba(0, 229, 188, 0.18)" : "rgba(255, 77, 136, 0.14)";
+        ctx.strokeStyle = idx % 2 === 0 ? "rgba(0, 214, 180, 0.16)" : "rgba(255, 77, 184, 0.13)";
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 6]);
         ctx.beginPath();
         ctx.arc(cx, cy, curR, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Micro-node travelling on cursor ring
+        // Orbiting micro-node on cursor ring
         const nodeAngle = time * (0.0006 * (idx % 2 === 0 ? 1 : -1)) + idx * 2.1;
         const nx = cx + Math.cos(nodeAngle) * curR;
         const ny = cy + Math.sin(nodeAngle) * curR;
         ctx.setLineDash([]);
-        ctx.fillStyle = idx % 2 === 0 ? COLOR_CYAN : COLOR_PINK;
+        ctx.fillStyle = idx % 2 === 0 ? COLOR_TEAL : COLOR_PINK;
         ctx.globalAlpha = 0.55;
         ctx.beginPath();
-        ctx.arc(nx, ny, 2, 0, Math.PI * 2);
+        ctx.arc(nx, ny, 1.8, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       });
     }
 
-    // 3. Draw Sparkling Stardust
+    // 2. Draw Sparkling Stardust
     stardustRef.current.forEach((star) => {
       const sx = star.xRatio * width;
       const sy = star.yRatio * height;
@@ -487,7 +472,7 @@ export default function InteractiveBackground({
       ctx.restore();
     });
 
-    // 4. Draw Messaging Reaction Particles (Reactions 03)
+    // 3. Draw Orbit + Reactions Hybrid Particles
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       const cx = p.x + p.cursor.x;
@@ -496,15 +481,15 @@ export default function InteractiveBackground({
       const dx = cx - mouse.sx;
       const dy = cy - mouse.sy;
       const dist = Math.hypot(dx, dy);
-      const rippleRadius = 185;
+      const rippleRadius = 180;
       const proximity = mouse.set && dist < rippleRadius ? Math.max(0, 1 - dist / rippleRadius) : 0;
 
-      // Opacity and scale boost on hover ripple
-      const currentAlpha = Math.min(0.92, p.baseAlpha + proximity * 0.65);
-      const currentScale = 1 + proximity * 0.25;
+      // 4. On interaction: brighter & more visible (40%-80%), scale up (+20%)
+      const currentAlpha = Math.min(0.82, p.baseAlpha + proximity * 0.62);
+      const currentScale = 1 + proximity * 0.22;
       const curSize = p.size * currentScale;
 
-      // Color scheme based on shape (Cyan for bubbles/checks, Pink for hearts, Ice for @)
+      // Color scheme based on shape (Teal for bubbles/checks, Pink for hearts, Ice for @)
       let primaryColor = strokeColor;
       if (p.shape === "heart") {
         primaryColor = pinkColor;
@@ -514,40 +499,65 @@ export default function InteractiveBackground({
         primaryColor = proximity > 0.12 ? accentColor : strokeColor;
       }
 
+      // Draw attached orbit rings for Orbit-style particles (Orbit Ripple 05)
+      if (p.hasOrbitRings && p.orbitRings) {
+        p.orbitRings.forEach((ring) => {
+          ctx.save();
+          ctx.strokeStyle = ring.dotColor === COLOR_PINK ? "rgba(255, 77, 184, 0.15)" : "rgba(0, 214, 180, 0.15)";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 6]);
+          ctx.beginPath();
+          ctx.arc(cx, cy, ring.radius * currentScale, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Satellite node travelling on orbit
+          const curAngle = ring.dotAngle + time * ring.speed;
+          const sx = cx + Math.cos(curAngle) * (ring.radius * currentScale);
+          const sy = cy + Math.sin(curAngle) * (ring.radius * currentScale);
+          ctx.setLineDash([]);
+          ctx.fillStyle = ring.dotColor;
+          ctx.globalAlpha = Math.min(0.85, 0.35 + proximity * 0.5);
+          ctx.beginPath();
+          ctx.arc(sx, sy, ring.dotSize, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+      }
+
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(p.angle + p.rotationOffset);
       ctx.globalAlpha = currentAlpha;
       ctx.strokeStyle = primaryColor;
-      ctx.lineWidth = curSize >= 22 ? 1.6 : curSize >= 16 ? 1.4 : 1.2;
+      ctx.lineWidth = curSize >= 22 ? 1.55 : curSize >= 16 ? 1.35 : 1.15;
 
-      // Draw clean vector messaging symbols matching infographic
+      // Draw clean vector messaging symbols
       switch (p.shape) {
         case "bubble": {
           // Smooth rounded Chat Bubble Outline
           const bw = curSize;
           const bh = curSize * 0.72;
-          const br = curSize * 0.26;
+          const br = curSize * 0.25;
 
           ctx.beginPath();
           ctx.moveTo(-bw / 2 + br, -bh / 2);
           ctx.lineTo(bw / 2 - br, -bh / 2);
           ctx.arcTo(bw / 2, -bh / 2, bw / 2, bh / 2, br);
           ctx.arcTo(bw / 2, bh / 2, -bw / 2, bh / 2, br);
-          // Tail notch at bottom left
+          // Sleek corner tail notch
           ctx.lineTo(-bw / 2 + br * 1.35, bh / 2);
-          ctx.lineTo(-bw / 2 - curSize * 0.15, bh / 2 + curSize * 0.22);
+          ctx.lineTo(-bw / 2 - curSize * 0.14, bh / 2 + curSize * 0.22);
           ctx.lineTo(-bw / 2 + curSize * 0.04, bh / 2 - curSize * 0.06);
           ctx.arcTo(-bw / 2, -bh / 2, bw / 2, -bh / 2, br);
           ctx.closePath();
           ctx.stroke();
 
-          // Subtle internal communication line for large bubbles
+          // Subtle internal line for large bubbles
           if (p.hasLines && curSize >= 18) {
             ctx.beginPath();
-            ctx.moveTo(-bw * 0.25, -bh * 0.08);
-            ctx.lineTo(bw * 0.25, -bh * 0.08);
-            ctx.moveTo(-bw * 0.25, bh * 0.2);
+            ctx.moveTo(-bw * 0.24, -bh * 0.08);
+            ctx.lineTo(bw * 0.24, -bh * 0.08);
+            ctx.moveTo(-bw * 0.24, bh * 0.2);
             ctx.lineTo(bw * 0.06, bh * 0.2);
             ctx.stroke();
           }
@@ -557,13 +567,12 @@ export default function InteractiveBackground({
         case "check": {
           // Double-check read receipt symbol
           const cs = curSize * 0.52;
-          // First checkmark
           ctx.beginPath();
           ctx.moveTo(-cs * 0.95, -cs * 0.05);
           ctx.lineTo(-cs * 0.35, cs * 0.55);
           ctx.lineTo(cs * 0.55, -cs * 0.6);
           ctx.stroke();
-          // Second checkmark
+
           ctx.beginPath();
           ctx.moveTo(-cs * 0.45, -cs * 0.05);
           ctx.lineTo(cs * 0.15, cs * 0.55);
@@ -573,7 +582,7 @@ export default function InteractiveBackground({
         }
 
         case "heart": {
-          // Reaction heart outline in soft neon pink
+          // Free-floating reaction heart outline in soft pink/magenta
           const hs = curSize * 0.48;
           ctx.beginPath();
           ctx.moveTo(0, hs * 0.7);
@@ -584,7 +593,7 @@ export default function InteractiveBackground({
         }
 
         case "at": {
-          // Communication @ symbol / node outline
+          // Communication @ / node outline
           const rad = curSize * 0.38;
           ctx.beginPath();
           ctx.arc(0, 0, rad * 0.42, 0, Math.PI * 2);
@@ -607,7 +616,7 @@ export default function InteractiveBackground({
     if (!container || !canvasRef.current) return;
     noiseRef.current = createNoise2D(SEED);
     setSize();
-    initOrbitsAndStardust();
+    initStardust();
     setParticles();
 
     const onResize = () => {
