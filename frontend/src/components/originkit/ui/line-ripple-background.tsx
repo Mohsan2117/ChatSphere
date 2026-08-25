@@ -78,28 +78,47 @@ function createNoise2D(seed = 0.5) {
   };
 }
 
-type ParticleShape = "bubble" | "check" | "heart" | "at";
+// Color Palette Specification:
+const COLOR_CYAN = "#18E0FF";
+const COLOR_BLUE = "#4F7CFF";
+const COLOR_PINK = "#FF5FA2";
+const COLOR_PURPLE = "#9B7BFF";
 
-interface ParticleOrbitRing {
-  radius: number;
-  speed: number;
-  dotAngle: number;
-  dotSize: number;
-  dotColor: string;
-}
+type ParticleShape = "bubble" | "check" | "heart" | "at" | "dot";
 
-interface Point {
+interface Particle {
   x: number;
   y: number;
+  baseX: number;
+  baseY: number;
   angle: number;
   cursor: { x: number; y: number; vx: number; vy: number };
   shape: ParticleShape;
   size: number;
   baseAlpha: number;
   rotationOffset: number;
+  layer: 1 | 2 | 3; // 1: far, 2: mid, 3: foreground
+  color: string;
   hasLines?: boolean;
-  hasOrbitRings?: boolean;
-  orbitRings?: ParticleOrbitRing[];
+}
+
+interface OrbitRing {
+  radius: number;
+  speed: number;
+  dotAngle: number;
+  hasDot: boolean;
+  dotSize: number;
+  dotColor: string;
+}
+
+interface OrbitCluster {
+  xRatio: number;
+  yRatio: number;
+  centerShape: "bubble" | "heart" | "check";
+  centerSize: number;
+  centerColor: string;
+  rings: OrbitRing[];
+  pulseOffset: number;
 }
 
 interface StarDust {
@@ -129,20 +148,16 @@ const BASE_ANGLE = 0;
 const CURL = 3;
 const SEED = 0.5;
 
-// Exact color palette matching the Reactions (03) + Orbit (05) design:
-const COLOR_TEAL = "#00d6b4";
-const COLOR_PINK = "#ff4db8";
-const COLOR_ICE = "#7fe8db";
-
 export default function InteractiveBackground({
-  strokeColor = COLOR_TEAL,
-  accentColor = COLOR_TEAL,
-  pinkColor = COLOR_PINK,
+  strokeColor,
+  accentColor,
+  pinkColor,
   backgroundColor = "transparent",
-  count = 34,
+  count,
   movement = 14,
   hover = true,
   force = 3.5,
+  resolution,
   className = "",
 }: InteractiveBackgroundProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -159,31 +174,13 @@ export default function InteractiveBackground({
     a: 0,
     set: false,
   });
-  const pointsRef = useRef<Point[]>([]);
+  const particlesRef = useRef<Particle[]>([]);
+  const clustersRef = useRef<OrbitCluster[]>([]);
   const stardustRef = useRef<StarDust[]>([]);
   const noiseRef = useRef<((x: number, y: number) => number) | null>(null);
   const rafRef = useRef<number | null>(null);
   const boundingRef = useRef<{ width: number; height: number; dpr: number } | null>(null);
   const isVisibleRef = useRef(true);
-
-  const cfgRef = useRef({
-    strokeColor,
-    accentColor,
-    pinkColor,
-    count,
-    movement,
-    hover,
-    force,
-  });
-  cfgRef.current = {
-    strokeColor,
-    accentColor,
-    pinkColor,
-    count,
-    movement,
-    hover,
-    force,
-  };
 
   const setSize = () => {
     const container = containerRef.current;
@@ -200,17 +197,125 @@ export default function InteractiveBackground({
     canvas.style.height = `${height}px`;
   };
 
+  // Generate only 4 to 6 large, atmospheric orbit clusters across the screen
+  const initOrbitClusters = (width: number, isMobile: boolean) => {
+    if (isMobile) {
+      clustersRef.current = [
+        {
+          xRatio: 0.5,
+          yRatio: 0.38,
+          centerShape: "bubble",
+          centerSize: 28,
+          centerColor: COLOR_CYAN,
+          pulseOffset: 0,
+          rings: [
+            { radius: 65, speed: 0.0006, dotAngle: 0.8, hasDot: true, dotSize: 2.2, dotColor: COLOR_CYAN },
+            { radius: 125, speed: -0.0004, dotAngle: 2.5, hasDot: true, dotSize: 2.5, dotColor: COLOR_PINK },
+            { radius: 190, speed: 0.0003, dotAngle: 4.2, hasDot: true, dotSize: 2.2, dotColor: COLOR_BLUE },
+          ],
+        },
+        {
+          xRatio: 0.85,
+          yRatio: 0.78,
+          centerShape: "heart",
+          centerSize: 24,
+          centerColor: COLOR_PINK,
+          pulseOffset: 1.8,
+          rings: [
+            { radius: 55, speed: -0.0007, dotAngle: 1.4, hasDot: true, dotSize: 2, dotColor: COLOR_PINK },
+            { radius: 110, speed: 0.0004, dotAngle: 3.8, hasDot: true, dotSize: 2.2, dotColor: COLOR_CYAN },
+          ],
+        },
+      ];
+      return;
+    }
+
+    // Desktop: 5 atmospheric clusters (1-2 large, 2 medium, 1-2 small)
+    clustersRef.current = [
+      // 1. Major central atmospheric cluster (Large: ~420px diameter)
+      {
+        xRatio: 0.48,
+        yRatio: 0.46,
+        centerShape: "bubble",
+        centerSize: 34,
+        centerColor: COLOR_CYAN,
+        pulseOffset: 0,
+        rings: [
+          { radius: 58, speed: 0.0006, dotAngle: 0.6, hasDot: true, dotSize: 2.4, dotColor: COLOR_CYAN },
+          { radius: 115, speed: -0.0004, dotAngle: 2.2, hasDot: true, dotSize: 2.8, dotColor: COLOR_PINK },
+          { radius: 175, speed: 0.0003, dotAngle: 3.9, hasDot: true, dotSize: 2.4, dotColor: COLOR_BLUE },
+          { radius: 235, speed: -0.0002, dotAngle: 5.4, hasDot: false, dotSize: 2, dotColor: COLOR_CYAN },
+        ],
+      },
+      // 2. Upper Right Cluster (Medium/Large: ~320px diameter)
+      {
+        xRatio: 0.84,
+        yRatio: 0.26,
+        centerShape: "bubble",
+        centerSize: 28,
+        centerColor: COLOR_CYAN,
+        pulseOffset: 1.2,
+        rings: [
+          { radius: 50, speed: -0.0007, dotAngle: 1.1, hasDot: true, dotSize: 2.2, dotColor: COLOR_BLUE },
+          { radius: 105, speed: 0.0005, dotAngle: 3.1, hasDot: true, dotSize: 2.5, dotColor: COLOR_CYAN },
+          { radius: 160, speed: -0.0003, dotAngle: 4.8, hasDot: true, dotSize: 2, dotColor: COLOR_PINK },
+        ],
+      },
+      // 3. Left Mid Cluster (Medium: ~260px diameter)
+      {
+        xRatio: 0.16,
+        yRatio: 0.36,
+        centerShape: "heart",
+        centerSize: 26,
+        centerColor: COLOR_PINK,
+        pulseOffset: 2.4,
+        rings: [
+          { radius: 45, speed: 0.0008, dotAngle: 0.9, hasDot: true, dotSize: 2.2, dotColor: COLOR_PINK },
+          { radius: 92, speed: -0.0005, dotAngle: 2.8, hasDot: true, dotSize: 2.4, dotColor: COLOR_CYAN },
+          { radius: 135, speed: 0.0003, dotAngle: 4.5, hasDot: false, dotSize: 2, dotColor: COLOR_BLUE },
+        ],
+      },
+      // 4. Lower Right Cluster (Medium: ~240px diameter)
+      {
+        xRatio: 0.78,
+        yRatio: 0.78,
+        centerShape: "check",
+        centerSize: 26,
+        centerColor: COLOR_CYAN,
+        pulseOffset: 3.6,
+        rings: [
+          { radius: 42, speed: -0.0007, dotAngle: 1.5, hasDot: true, dotSize: 2.2, dotColor: COLOR_CYAN },
+          { radius: 88, speed: 0.0005, dotAngle: 3.6, hasDot: true, dotSize: 2.2, dotColor: COLOR_PURPLE },
+          { radius: 125, speed: -0.0003, dotAngle: 5.1, hasDot: true, dotSize: 2, dotColor: COLOR_PINK },
+        ],
+      },
+      // 5. Lower Left Cluster (Small: ~160px diameter)
+      {
+        xRatio: 0.28,
+        yRatio: 0.82,
+        centerShape: "bubble",
+        centerSize: 22,
+        centerColor: COLOR_BLUE,
+        pulseOffset: 4.8,
+        rings: [
+          { radius: 38, speed: 0.0008, dotAngle: 0.4, hasDot: true, dotSize: 2, dotColor: COLOR_CYAN },
+          { radius: 78, speed: -0.0005, dotAngle: 2.9, hasDot: true, dotSize: 2.2, dotColor: COLOR_CYAN },
+        ],
+      },
+    ];
+  };
+
   const initStardust = () => {
-    // Sparkling stardust
     const stars: StarDust[] = [];
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < 40; i++) {
       const isPink = i % 4 === 0;
+      const isBlue = i % 3 === 0;
       stars.push({
         xRatio: Math.sin(i * 91.31 + 4.17) * 0.5 + 0.5,
         yRatio: Math.cos(i * 67.89 + 1.23) * 0.5 + 0.5,
-        size: 1 + (i % 3) * 0.45,
-        color: isPink ? COLOR_PINK : COLOR_TEAL,
-        alpha: 0.1 + (i % 4) * 0.04,
+        size: 1 + (i % 3) * 0.4,
+        color: isPink ? COLOR_PINK : isBlue ? COLOR_BLUE : COLOR_CYAN,
+        alpha: 0.08 + (i % 4) * 0.03,
         speed: 0.001 + (i % 3) * 0.0007,
         phase: i * 0.7,
       });
@@ -218,125 +323,98 @@ export default function InteractiveBackground({
     stardustRef.current = stars;
   };
 
+  // Generate naturally scattered floating particles (92-95% of total elements)
   const setParticles = () => {
     if (!boundingRef.current) return;
     const { width, height } = boundingRef.current;
-    const { count } = cfgRef.current;
 
     const isMobile = width < 768;
-    const adjustedCount = isMobile ? Math.min(count, 22) : count;
+    const targetCount = isMobile ? 48 : 85; // Natural count with airy breathing room
 
-    const c = Math.max(1, Math.min(100, adjustedCount));
-    const gap = 145 - ((c - 1) / 99) * 75;
-    const cols = Math.ceil((width + gap) / gap);
-    const rows = Math.ceil((height + gap) / gap);
-    const xStart = (width - gap * (cols - 1)) / 2;
-    const yStart = (height - gap * (rows - 1)) / 2;
+    initOrbitClusters(width, isMobile);
+    initStardust();
 
-    const points: Point[] = [];
-    let idx = 0;
+    const particles: Particle[] = [];
 
-    for (let i = 0; i < cols; i++) {
-      for (let j = 0; j < rows; j++) {
-        idx++;
-        const rType = Math.sin(idx * 37.17 + i * 13.23 + j * 97.41) * 0.5 + 0.5;
-        const rSizeTier = Math.sin(idx * 59.81 + i * 29.11) * 0.5 + 0.5;
-        const rJitterX = Math.sin(idx * 19.33 + j * 43.17);
-        const rJitterY = Math.cos(idx * 83.19 + i * 31.73);
-        const rRot = (Math.sin(idx * 43.11 + j * 17.51) * Math.PI) / 6;
-        const rAlpha = Math.sin(idx * 73.29 + 1.61) * 0.5 + 0.5;
+    for (let i = 0; i < targetCount; i++) {
+      // Stratified spatial distribution with organic clustering & voids
+      const u = Math.sin(i * 37.17 + 4.19) * 0.5 + 0.5;
+      const v = Math.cos(i * 83.23 + 1.87) * 0.5 + 0.5;
+      const jx = Math.sin(i * 19.33 + 7.51) * 0.08;
+      const jy = Math.cos(i * 53.11 + 3.19) * 0.08;
 
-        // 1. PARTICLE SHAPES (MUST USE from specification):
-        // 60% Chat Bubble Outlines (Teal)
-        // 20% Message Ticks (Teal)
-        // 10% Reaction Hearts (Pink/Magenta)
-        // 10% Dots & @ Symbols (Ice/Teal)
-        let shape: ParticleShape = "bubble";
-        if (rType >= 0.60 && rType < 0.80) {
-          shape = "check";
-        } else if (rType >= 0.80 && rType < 0.90) {
-          shape = "heart";
-        } else if (rType >= 0.90) {
-          shape = "at";
-        }
+      const xPos = Math.max(20, Math.min(width - 20, (u + jx) * width));
+      const yPos = Math.max(20, Math.min(height - 20, (v + jy) * height));
 
-        // 3. SIZES (from specification):
-        // Small: 10-14px (majority)
-        // Medium: 16-20px
-        // Large: 22-28px (few)
-        let size = 12;
-        let hasLines = false;
-        if (rSizeTier >= 0.88) {
-          // Large (few)
-          size = 23 + Math.floor(rSizeTier * 4.5);
-          hasLines = shape === "bubble";
-        } else if (rSizeTier >= 0.62) {
-          // Medium
-          size = 16 + Math.floor(rSizeTier * 3.5);
-          hasLines = shape === "bubble" && rType < 0.35;
-        } else {
-          // Small (majority)
-          size = 11 + Math.floor(rSizeTier * 2.5);
-        }
+      const rType = Math.sin(i * 47.31 + 2.11) * 0.5 + 0.5;
+      const rSize = Math.sin(i * 61.19 + 5.43) * 0.5 + 0.5;
+      const rRot = (Math.sin(i * 43.11 + 1.51) * Math.PI) / 5;
 
-        // 7. ORBIT + REACTIONS MIX:
-        // Some particles (mainly chat bubbles and @) have orbit rings (like Orbit Ripple 05)
-        // Hearts and ticks float freely like Reactions Ripple 03
-        const hasOrbitRings =
-          (shape === "bubble" && size >= 17 && idx % 3 === 0) ||
-          (shape === "at" && idx % 2 === 0);
+      // 3. Shape Distribution:
+      // 55% Chat bubbles (Cyan)
+      // 20% Double-check read icons (Cyan / Blue)
+      // 15% Reaction hearts (Pink)
+      // 5% @ (Blue / Purple)
+      // 5% Dots / micro-circles (Cyan / Pink / Blue)
+      let shape: ParticleShape = "bubble";
+      let color = COLOR_CYAN;
 
-        let orbitRings: ParticleOrbitRing[] | undefined;
-        if (hasOrbitRings) {
-          orbitRings = [
-            {
-              radius: size * 1.5,
-              speed: 0.0007 * (idx % 2 === 0 ? 1 : -1),
-              dotAngle: idx * 1.2,
-              dotSize: 1.8,
-              dotColor: COLOR_TEAL,
-            },
-            {
-              radius: size * 2.5,
-              speed: -0.0005 * (idx % 2 === 0 ? 1 : -1),
-              dotAngle: idx * 2.4,
-              dotSize: 2.2,
-              dotColor: idx % 4 === 0 ? COLOR_PINK : COLOR_TEAL,
-            },
-            {
-              radius: size * 3.6,
-              speed: 0.0003 * (idx % 2 === 0 ? 1 : -1),
-              dotAngle: idx * 3.8,
-              dotSize: 1.8,
-              dotColor: COLOR_ICE,
-            },
-          ];
-        }
-
-        // 2. DISTRIBUTION: Natural scattering across entire screen (no strict rows or grid)
-        const jitterAmount = gap * 0.32;
-        const xPos = xStart + gap * i + rJitterX * jitterAmount;
-        const yPos = yStart + gap * j + rJitterY * jitterAmount;
-
-        // 4. Default state: low opacity (10%-25%)
-        const baseAlpha = 0.11 + rAlpha * 0.13;
-
-        points.push({
-          x: xPos,
-          y: yPos,
-          angle: 0,
-          cursor: { x: 0, y: 0, vx: 0, vy: 0 },
-          shape,
-          size,
-          baseAlpha,
-          rotationOffset: rRot,
-          hasLines,
-          hasOrbitRings,
-          orbitRings,
-        });
+      if (rType >= 0.55 && rType < 0.75) {
+        shape = "check";
+        color = i % 2 === 0 ? COLOR_CYAN : COLOR_BLUE;
+      } else if (rType >= 0.75 && rType < 0.90) {
+        shape = "heart";
+        color = COLOR_PINK;
+      } else if (rType >= 0.90 && rType < 0.95) {
+        shape = "at";
+        color = i % 2 === 0 ? COLOR_BLUE : COLOR_PURPLE;
+      } else if (rType >= 0.95) {
+        shape = "dot";
+        color = i % 3 === 0 ? COLOR_PINK : i % 2 === 0 ? COLOR_BLUE : COLOR_CYAN;
       }
+
+      // 7. 3 Size Levels & Layering:
+      // Small: 8-12px (majority ~65%)
+      // Medium: 14-20px (some ~25%)
+      // Large: 22-30px (few ~10%)
+      let size = 10;
+      let layer: 1 | 2 | 3 = 1;
+      let baseAlpha = 0.14 + (i % 4) * 0.03; // 0.12 - 0.23
+
+      if (rSize >= 0.90) {
+        // Large
+        size = 23 + Math.floor(rSize * 6);
+        layer = 3;
+        baseAlpha = 0.28 + (i % 3) * 0.04; // 0.28 - 0.36
+      } else if (rSize >= 0.65) {
+        // Medium
+        size = 15 + Math.floor(rSize * 4.5);
+        layer = 2;
+        baseAlpha = 0.20 + (i % 3) * 0.04; // 0.20 - 0.28
+      } else {
+        // Small
+        size = 9 + Math.floor(rSize * 3);
+        layer = 1;
+      }
+
+      particles.push({
+        x: xPos,
+        y: yPos,
+        baseX: xPos,
+        baseY: yPos,
+        angle: 0,
+        cursor: { x: 0, y: 0, vx: 0, vy: 0 },
+        shape,
+        size,
+        baseAlpha,
+        rotationOffset: rRot,
+        layer,
+        color,
+        hasLines: shape === "bubble" && size >= 17,
+      });
     }
-    pointsRef.current = points;
+
+    particlesRef.current = particles;
   };
 
   const updateMousePosition = (clientX: number, clientY: number) => {
@@ -356,37 +434,37 @@ export default function InteractiveBackground({
   };
 
   const movePoints = (time: number) => {
-    const points = pointsRef.current;
+    const particles = particlesRef.current;
     const mouse = mouseRef.current;
     const noiseFn = noiseRef.current;
     if (!noiseFn) return;
-    const { movement, hover, force } = cfgRef.current;
 
     const curl = CURL;
     const base = BASE_ANGLE;
-    const drift = time * movement * 6e-6;
+    const drift = time * 14 * 6e-6;
     const dirX = Math.cos(base) * drift;
     const dirY = Math.sin(base) * drift;
 
-    points.forEach((p) => {
+    particles.forEach((p) => {
       const n = noiseFn(p.x * 0.003 - dirX, p.y * 0.003 - dirY);
       const target = base + n * Math.PI * curl;
 
       const dx = p.x - mouse.sx;
       const dy = p.y - mouse.sy;
       const d = Math.hypot(dx, dy);
-      const l = Math.max(170, mouse.vs * 1.6);
+      const l = Math.max(170, mouse.vs * 1.5);
       let bend = 0;
 
-      // 6. RIPPLE INTERACTION (Gently push away from cursor, rotate, scale up)
+      // 8. Cursor Interaction (Gently push away, scale up, rotate, spring return)
       if (hover && d < l && mouse.set) {
         const s = 1 - d / l;
-        const influence = (force / 10) * 0.018;
+        const layerMult = p.layer === 3 ? 1.3 : p.layer === 2 ? 1.0 : 0.7;
+        const influence = (force / 10) * 0.018 * layerMult;
         const tangent = Math.atan2(dy, dx) + Math.PI / 2;
         bend = (tangent - target) * s * (0.32 + mouse.vs * influence);
 
         const f = Math.cos(d * 0.001) * s;
-        const push = (force / 10) * 5.2e-4;
+        const push = (force / 10) * 5e-4 * layerMult;
         p.cursor.vx += Math.cos(Math.atan2(dy, dx)) * f * l * mouse.vs * push;
         p.cursor.vy += Math.sin(Math.atan2(dy, dx)) * f * l * mouse.vs * push;
       }
@@ -396,15 +474,15 @@ export default function InteractiveBackground({
       while (diff < -Math.PI) diff += 2 * Math.PI;
       p.angle += diff * 0.09;
 
-      // Smooth return to original position
+      // Smooth spring return to original position
       p.cursor.vx += (0 - p.cursor.x) * 0.011;
       p.cursor.vy += (0 - p.cursor.y) * 0.011;
       p.cursor.vx *= 0.93;
       p.cursor.vy *= 0.93;
       p.cursor.x += p.cursor.vx;
       p.cursor.y += p.cursor.vy;
-      p.cursor.x = Math.min(40, Math.max(-40, p.cursor.x));
-      p.cursor.y = Math.min(40, Math.max(-40, p.cursor.y));
+      p.cursor.x = Math.min(38, Math.max(-38, p.cursor.x));
+      p.cursor.y = Math.min(38, Math.max(-38, p.cursor.y));
     });
   };
 
@@ -415,8 +493,9 @@ export default function InteractiveBackground({
     if (!ctx) return;
 
     const { width, height, dpr } = boundingRef.current;
-    const { strokeColor, accentColor, pinkColor } = cfgRef.current;
-    const points = pointsRef.current;
+    const particles = particlesRef.current;
+    const clusters = clustersRef.current;
+    const stardust = stardustRef.current;
     const mouse = mouseRef.current;
 
     ctx.clearRect(0, 0, width * dpr, height * dpr);
@@ -425,43 +504,12 @@ export default function InteractiveBackground({
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // 1. Draw Dynamic Cursor Orbit Ripple Waves (expanding from mouse position)
-    if (mouse.set && mouse.sx > 0 && mouse.sy > 0) {
-      const cx = mouse.sx;
-      const cy = mouse.sy;
-      const cursorRipples = [38, 80, 130, 185];
-
-      cursorRipples.forEach((radius, idx) => {
-        const pulse = Math.sin(time * 0.0022 + idx * 1.4) * 3.5;
-        const curR = radius + pulse;
-        ctx.save();
-        ctx.strokeStyle = idx % 2 === 0 ? "rgba(0, 214, 180, 0.16)" : "rgba(255, 77, 184, 0.13)";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([2, 6]);
-        ctx.beginPath();
-        ctx.arc(cx, cy, curR, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Orbiting micro-node on cursor ring
-        const nodeAngle = time * (0.0006 * (idx % 2 === 0 ? 1 : -1)) + idx * 2.1;
-        const nx = cx + Math.cos(nodeAngle) * curR;
-        const ny = cy + Math.sin(nodeAngle) * curR;
-        ctx.setLineDash([]);
-        ctx.fillStyle = idx % 2 === 0 ? COLOR_TEAL : COLOR_PINK;
-        ctx.globalAlpha = 0.55;
-        ctx.beginPath();
-        ctx.arc(nx, ny, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      });
-    }
-
-    // 2. Draw Sparkling Stardust
-    stardustRef.current.forEach((star) => {
+    // 1. Draw StarDust (Subtle twinkling micro-particles)
+    stardust.forEach((star) => {
       const sx = star.xRatio * width;
       const sy = star.yRatio * height;
       const twinkle = Math.sin(time * star.speed + star.phase) * 0.5 + 0.5;
-      const curAlpha = star.alpha * (0.5 + twinkle * 0.5);
+      const curAlpha = star.alpha * (0.6 + twinkle * 0.4);
 
       ctx.save();
       ctx.fillStyle = star.color;
@@ -472,137 +520,101 @@ export default function InteractiveBackground({
       ctx.restore();
     });
 
-    // 3. Draw Orbit + Reactions Hybrid Particles
-    for (let i = 0; i < points.length; i++) {
-      const p = points[i];
+    // 2. Draw Sparse Atmospheric Orbit Clusters (Only 4-5 on desktop, 2 on mobile)
+    clusters.forEach((cluster) => {
+      const cx = cluster.xRatio * width;
+      const cy = cluster.yRatio * height;
+
+      // Subtle breathing pulse on the orbital rings
+      const breathe = Math.sin(time * 0.0012 + cluster.pulseOffset) * 2.5;
+
+      cluster.rings.forEach((ring) => {
+        const curRadius = ring.radius + breathe;
+
+        ctx.save();
+        // Very low ring opacity (0.05 - 0.12) as requested
+        ctx.strokeStyle = ring.dotColor === COLOR_PINK ? "rgba(255, 95, 162, 0.08)" : "rgba(24, 224, 255, 0.09)";
+        ctx.lineWidth = 0.9;
+        ctx.setLineDash([3, 8]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, curRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Orbiting satellite dot on the track
+        if (ring.hasDot) {
+          const curAngle = ring.dotAngle + time * ring.speed;
+          const dotX = cx + Math.cos(curAngle) * curRadius;
+          const dotY = cy + Math.sin(curAngle) * curRadius;
+
+          ctx.setLineDash([]);
+          ctx.fillStyle = ring.dotColor;
+          ctx.globalAlpha = 0.4;
+          ctx.beginPath();
+          ctx.arc(dotX, dotY, ring.dotSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      });
+
+      // Main communication icon in the center of the orbit cluster
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = cluster.centerColor;
+      ctx.lineWidth = 1.6;
+
+      if (cluster.centerShape === "bubble") {
+        drawChatBubble(ctx, cluster.centerSize, true);
+      } else if (cluster.centerShape === "heart") {
+        drawHeart(ctx, cluster.centerSize);
+      } else if (cluster.centerShape === "check") {
+        drawCheck(ctx, cluster.centerSize);
+      }
+      ctx.restore();
+    });
+
+    // 3. Draw Normal Scattered Floating Particles (92-95% of elements)
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
       const cx = p.x + p.cursor.x;
       const cy = p.y + p.cursor.y;
 
       const dx = cx - mouse.sx;
       const dy = cy - mouse.sy;
       const dist = Math.hypot(dx, dy);
-      const rippleRadius = 180;
+      const rippleRadius = 175;
       const proximity = mouse.set && dist < rippleRadius ? Math.max(0, 1 - dist / rippleRadius) : 0;
 
-      // 4. On interaction: brighter & more visible (40%-80%), scale up (+20%)
-      const currentAlpha = Math.min(0.82, p.baseAlpha + proximity * 0.62);
-      const currentScale = 1 + proximity * 0.22;
+      // Subtle opacity on rest (0.12-0.35), brightens up to (0.65-0.85) on cursor proximity
+      const currentAlpha = Math.min(0.85, p.baseAlpha + proximity * 0.6);
+      const currentScale = 1 + proximity * 0.2;
       const curSize = p.size * currentScale;
-
-      // Color scheme based on shape (Teal for bubbles/checks, Pink for hearts, Ice for @)
-      let primaryColor = strokeColor;
-      if (p.shape === "heart") {
-        primaryColor = pinkColor;
-      } else if (p.shape === "at") {
-        primaryColor = COLOR_ICE;
-      } else {
-        primaryColor = proximity > 0.12 ? accentColor : strokeColor;
-      }
-
-      // Draw attached orbit rings for Orbit-style particles (Orbit Ripple 05)
-      if (p.hasOrbitRings && p.orbitRings) {
-        p.orbitRings.forEach((ring) => {
-          ctx.save();
-          ctx.strokeStyle = ring.dotColor === COLOR_PINK ? "rgba(255, 77, 184, 0.15)" : "rgba(0, 214, 180, 0.15)";
-          ctx.lineWidth = 1;
-          ctx.setLineDash([2, 6]);
-          ctx.beginPath();
-          ctx.arc(cx, cy, ring.radius * currentScale, 0, Math.PI * 2);
-          ctx.stroke();
-
-          // Satellite node travelling on orbit
-          const curAngle = ring.dotAngle + time * ring.speed;
-          const sx = cx + Math.cos(curAngle) * (ring.radius * currentScale);
-          const sy = cy + Math.sin(curAngle) * (ring.radius * currentScale);
-          ctx.setLineDash([]);
-          ctx.fillStyle = ring.dotColor;
-          ctx.globalAlpha = Math.min(0.85, 0.35 + proximity * 0.5);
-          ctx.beginPath();
-          ctx.arc(sx, sy, ring.dotSize, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        });
-      }
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(p.angle + p.rotationOffset);
       ctx.globalAlpha = currentAlpha;
-      ctx.strokeStyle = primaryColor;
-      ctx.lineWidth = curSize >= 22 ? 1.55 : curSize >= 16 ? 1.35 : 1.15;
+      ctx.strokeStyle = proximity > 0.1 ? (p.shape === "heart" ? COLOR_PINK : COLOR_CYAN) : p.color;
+      ctx.lineWidth = curSize >= 22 ? 1.5 : curSize >= 15 ? 1.3 : 1.1;
 
-      // Draw clean vector messaging symbols
       switch (p.shape) {
-        case "bubble": {
-          // Smooth rounded Chat Bubble Outline
-          const bw = curSize;
-          const bh = curSize * 0.72;
-          const br = curSize * 0.25;
-
-          ctx.beginPath();
-          ctx.moveTo(-bw / 2 + br, -bh / 2);
-          ctx.lineTo(bw / 2 - br, -bh / 2);
-          ctx.arcTo(bw / 2, -bh / 2, bw / 2, bh / 2, br);
-          ctx.arcTo(bw / 2, bh / 2, -bw / 2, bh / 2, br);
-          // Sleek corner tail notch
-          ctx.lineTo(-bw / 2 + br * 1.35, bh / 2);
-          ctx.lineTo(-bw / 2 - curSize * 0.14, bh / 2 + curSize * 0.22);
-          ctx.lineTo(-bw / 2 + curSize * 0.04, bh / 2 - curSize * 0.06);
-          ctx.arcTo(-bw / 2, -bh / 2, bw / 2, -bh / 2, br);
-          ctx.closePath();
-          ctx.stroke();
-
-          // Subtle internal line for large bubbles
-          if (p.hasLines && curSize >= 18) {
-            ctx.beginPath();
-            ctx.moveTo(-bw * 0.24, -bh * 0.08);
-            ctx.lineTo(bw * 0.24, -bh * 0.08);
-            ctx.moveTo(-bw * 0.24, bh * 0.2);
-            ctx.lineTo(bw * 0.06, bh * 0.2);
-            ctx.stroke();
-          }
+        case "bubble":
+          drawChatBubble(ctx, curSize, p.hasLines);
           break;
-        }
-
-        case "check": {
-          // Double-check read receipt symbol
-          const cs = curSize * 0.52;
+        case "check":
+          drawCheck(ctx, curSize);
+          break;
+        case "heart":
+          drawHeart(ctx, curSize);
+          break;
+        case "at":
+          drawAtSymbol(ctx, curSize);
+          break;
+        case "dot":
           ctx.beginPath();
-          ctx.moveTo(-cs * 0.95, -cs * 0.05);
-          ctx.lineTo(-cs * 0.35, cs * 0.55);
-          ctx.lineTo(cs * 0.55, -cs * 0.6);
-          ctx.stroke();
-
-          ctx.beginPath();
-          ctx.moveTo(-cs * 0.45, -cs * 0.05);
-          ctx.lineTo(cs * 0.15, cs * 0.55);
-          ctx.lineTo(cs * 1.05, -cs * 0.6);
+          ctx.arc(0, 0, curSize * 0.35, 0, Math.PI * 2);
           ctx.stroke();
           break;
-        }
-
-        case "heart": {
-          // Free-floating reaction heart outline in soft pink/magenta
-          const hs = curSize * 0.48;
-          ctx.beginPath();
-          ctx.moveTo(0, hs * 0.7);
-          ctx.bezierCurveTo(-hs * 1.15, -hs * 0.12, -hs * 1.15, -hs * 1.05, 0, -hs * 0.42);
-          ctx.bezierCurveTo(hs * 1.15, -hs * 1.05, hs * 1.15, -hs * 0.12, 0, hs * 0.7);
-          ctx.stroke();
-          break;
-        }
-
-        case "at": {
-          // Communication @ / node outline
-          const rad = curSize * 0.38;
-          ctx.beginPath();
-          ctx.arc(0, 0, rad * 0.42, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(0, 0, rad, Math.PI * 0.18, Math.PI * 1.85);
-          ctx.stroke();
-          break;
-        }
       }
 
       ctx.restore();
@@ -611,12 +623,75 @@ export default function InteractiveBackground({
     ctx.restore();
   };
 
+  // Helper drawing functions for clean vector outlines
+  const drawChatBubble = (ctx: CanvasRenderingContext2D, size: number, hasLines?: boolean) => {
+    const bw = size;
+    const bh = size * 0.72;
+    const br = size * 0.24;
+
+    ctx.beginPath();
+    ctx.moveTo(-bw / 2 + br, -bh / 2);
+    ctx.lineTo(bw / 2 - br, -bh / 2);
+    ctx.arcTo(bw / 2, -bh / 2, bw / 2, bh / 2, br);
+    ctx.arcTo(bw / 2, bh / 2, -bw / 2, bh / 2, br);
+    // Tail notch on bottom-left
+    ctx.lineTo(-bw / 2 + br * 1.35, bh / 2);
+    ctx.lineTo(-bw / 2 - size * 0.14, bh / 2 + size * 0.2);
+    ctx.lineTo(-bw / 2 + size * 0.04, bh / 2 - size * 0.06);
+    ctx.arcTo(-bw / 2, -bh / 2, bw / 2, -bh / 2, br);
+    ctx.closePath();
+    ctx.stroke();
+
+    if (hasLines && size >= 17) {
+      ctx.beginPath();
+      ctx.moveTo(-bw * 0.24, -bh * 0.08);
+      ctx.lineTo(bw * 0.24, -bh * 0.08);
+      ctx.moveTo(-bw * 0.24, bh * 0.2);
+      ctx.lineTo(bw * 0.06, bh * 0.2);
+      ctx.stroke();
+    }
+  };
+
+  const drawCheck = (ctx: CanvasRenderingContext2D, size: number) => {
+    const cs = size * 0.52;
+    // First check
+    ctx.beginPath();
+    ctx.moveTo(-cs * 0.95, -cs * 0.05);
+    ctx.lineTo(-cs * 0.35, cs * 0.55);
+    ctx.lineTo(cs * 0.55, -cs * 0.6);
+    ctx.stroke();
+    // Second check
+    ctx.beginPath();
+    ctx.moveTo(-cs * 0.45, -cs * 0.05);
+    ctx.lineTo(cs * 0.15, cs * 0.55);
+    ctx.lineTo(cs * 1.05, -cs * 0.6);
+    ctx.stroke();
+  };
+
+  const drawHeart = (ctx: CanvasRenderingContext2D, size: number) => {
+    const hs = size * 0.46;
+    ctx.beginPath();
+    ctx.moveTo(0, hs * 0.7);
+    ctx.bezierCurveTo(-hs * 1.15, -hs * 0.12, -hs * 1.15, -hs * 1.05, 0, -hs * 0.42);
+    ctx.bezierCurveTo(hs * 1.15, -hs * 1.05, hs * 1.15, -hs * 0.12, 0, hs * 0.7);
+    ctx.stroke();
+  };
+
+  const drawAtSymbol = (ctx: CanvasRenderingContext2D, size: number) => {
+    const rad = size * 0.38;
+    ctx.beginPath();
+    ctx.arc(0, 0, rad * 0.42, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, rad, Math.PI * 0.18, Math.PI * 1.85);
+    ctx.stroke();
+  };
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !canvasRef.current) return;
     noiseRef.current = createNoise2D(SEED);
     setSize();
-    initStardust();
     setParticles();
 
     const onResize = () => {
@@ -677,7 +752,7 @@ export default function InteractiveBackground({
       mouse.ly = mouse.y;
       mouse.a = Math.atan2(dy, dx);
 
-      // Animation frame render
+      // Render frame
       if (time - lastTime >= 12) {
         movePoints(time);
         drawAll(time);
