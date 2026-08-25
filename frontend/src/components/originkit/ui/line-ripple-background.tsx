@@ -78,7 +78,7 @@ function createNoise2D(seed = 0.5) {
   };
 }
 
-type ParticleShape = "bubble" | "check" | "heart" | "dot";
+type ParticleShape = "bubble" | "check" | "heart" | "at";
 
 interface Point {
   x: number;
@@ -86,9 +86,10 @@ interface Point {
   angle: number;
   cursor: { x: number; y: number; vx: number; vy: number };
   shape: ParticleShape;
-  baseScale: number;
+  size: number;
   baseAlpha: number;
   rotationOffset: number;
+  hasLines?: boolean;
 }
 
 interface InteractiveBackgroundProps {
@@ -111,10 +112,10 @@ export default function InteractiveBackground({
   strokeColor = "#00a884",
   accentColor = "#25d366",
   backgroundColor = "transparent",
-  count = 45,
-  movement = 18,
+  count = 36,
+  movement = 16,
   hover = true,
-  force = 4,
+  force = 3.5,
   className = "",
 }: InteractiveBackgroundProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -174,12 +175,13 @@ export default function InteractiveBackground({
     const { width, height } = boundingRef.current;
     const { count } = cfgRef.current;
 
-    // Responsive density adjustment: lighter on smaller mobile screens
+    // Reduced density for breathing room (25% less dense than before)
     const isMobile = width < 768;
-    const adjustedCount = isMobile ? Math.min(count, 32) : count;
+    const adjustedCount = isMobile ? Math.min(count, 24) : count;
 
     const c = Math.max(1, Math.min(100, adjustedCount));
-    const gap = 110 - ((c - 1) / 99) * 85;
+    // Gap increased from ~85-110 to 115-145px for airy, premium spacing
+    const gap = 145 - ((c - 1) / 99) * 80;
     const cols = Math.ceil((width + gap) / gap);
     const rows = Math.ceil((height + gap) / gap);
     const xStart = (width - gap * (cols - 1)) / 2;
@@ -191,32 +193,62 @@ export default function InteractiveBackground({
     for (let i = 0; i < cols; i++) {
       for (let j = 0; j < rows; j++) {
         idx++;
-        // Pseudo-random distribution based on coordinate index
-        const randVal = Math.sin(idx * 37.17 + i * 11.23 + j * 91.41) * 0.5 + 0.5;
-        const randScale = Math.sin(idx * 19.81 + 3.14) * 0.5 + 0.5;
-        const randAlpha = Math.sin(idx * 73.29 + 1.61) * 0.5 + 0.5;
-        const randRot = (Math.sin(idx * 43.11) * Math.PI) / 4;
+        // Deterministic pseudo-randomness per cell
+        const rType = Math.sin(idx * 37.17 + i * 13.23 + j * 97.41) * 0.5 + 0.5;
+        const rSizeTier = Math.sin(idx * 59.81 + i * 29.11) * 0.5 + 0.5;
+        const rJitterX = Math.sin(idx * 19.33 + j * 43.17);
+        const rJitterY = Math.cos(idx * 83.19 + i * 31.73);
+        const rRot = (Math.sin(idx * 43.11 + j * 17.51) * Math.PI) / 5;
+        const rAlpha = Math.sin(idx * 73.29 + 1.61) * 0.5 + 0.5;
 
         // Shape distribution:
-        // ~70% Chat Bubble, ~15% Message Check, ~10% Heart reaction, ~5% Dot/@
+        // 60% Chat bubble outlines
+        // 20% Double-check read symbols
+        // 10% Reaction heart outlines
+        // 10% Communication @ / ring outlines
         let shape: ParticleShape = "bubble";
-        if (randVal >= 0.70 && randVal < 0.85) {
+        if (rType >= 0.60 && rType < 0.80) {
           shape = "check";
-        } else if (randVal >= 0.85 && randVal < 0.95) {
+        } else if (rType >= 0.80 && rType < 0.90) {
           shape = "heart";
-        } else if (randVal >= 0.95) {
-          shape = "dot";
+        } else if (rType >= 0.90) {
+          shape = "at";
         }
 
+        // 3 Size tiers:
+        // Small (majority ~65%): 12-14px
+        // Medium (some ~25%): 17-20px
+        // Large (a few ~10%): 23-26px
+        let size = 13;
+        let hasLines = false;
+        if (rSizeTier >= 0.90) {
+          // Large
+          size = 23 + Math.floor(rSizeTier * 3.5);
+          hasLines = shape === "bubble";
+        } else if (rSizeTier >= 0.65) {
+          // Medium
+          size = 17 + Math.floor(rSizeTier * 3);
+          hasLines = shape === "bubble" && rType < 0.35;
+        } else {
+          // Small
+          size = 12 + Math.floor(rSizeTier * 2.5);
+        }
+
+        // Organic positioning with natural jitter (avoids rigid grid pattern)
+        const jitterAmount = gap * 0.28;
+        const xPos = xStart + gap * i + rJitterX * jitterAmount;
+        const yPos = yStart + gap * j + rJitterY * jitterAmount;
+
         points.push({
-          x: xStart + gap * i,
-          y: yStart + gap * j,
+          x: xPos,
+          y: yPos,
           angle: 0,
           cursor: { x: 0, y: 0, vx: 0, vy: 0 },
           shape,
-          baseScale: 0.75 + randScale * 0.35,
-          baseAlpha: 0.16 + randAlpha * 0.14,
-          rotationOffset: randRot,
+          size,
+          baseAlpha: 0.15 + rAlpha * 0.12,
+          rotationOffset: rRot,
+          hasLines,
         });
       }
     }
@@ -248,28 +280,28 @@ export default function InteractiveBackground({
 
     const curl = CURL;
     const base = BASE_ANGLE;
-    const drift = time * movement * 7e-6;
+    const drift = time * movement * 6.5e-6;
     const dirX = Math.cos(base) * drift;
     const dirY = Math.sin(base) * drift;
 
     points.forEach((p) => {
-      const n = noiseFn(p.x * 0.0035 - dirX, p.y * 0.0035 - dirY);
+      const n = noiseFn(p.x * 0.003 - dirX, p.y * 0.003 - dirY);
       const target = base + n * Math.PI * curl;
 
       const dx = p.x - mouse.sx;
       const dy = p.y - mouse.sy;
       const d = Math.hypot(dx, dy);
-      const l = Math.max(160, mouse.vs * 1.5);
+      const l = Math.max(170, mouse.vs * 1.6);
       let bend = 0;
 
       if (hover && d < l && mouse.set) {
         const s = 1 - d / l;
-        const influence = (force / 10) * 0.02;
+        const influence = (force / 10) * 0.018;
         const tangent = Math.atan2(dy, dx) + Math.PI / 2;
-        bend = (tangent - target) * s * (0.35 + mouse.vs * influence);
+        bend = (tangent - target) * s * (0.32 + mouse.vs * influence);
 
         const f = Math.cos(d * 0.001) * s;
-        const push = (force / 10) * 6e-4;
+        const push = (force / 10) * 5.5e-4;
         p.cursor.vx += Math.cos(Math.atan2(dy, dx)) * f * l * mouse.vs * push;
         p.cursor.vy += Math.sin(Math.atan2(dy, dx)) * f * l * mouse.vs * push;
       }
@@ -277,16 +309,16 @@ export default function InteractiveBackground({
       let diff = target + bend - p.angle;
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
-      p.angle += diff * 0.1;
+      p.angle += diff * 0.09;
 
-      p.cursor.vx += (0 - p.cursor.x) * 0.012;
-      p.cursor.vy += (0 - p.cursor.y) * 0.012;
+      p.cursor.vx += (0 - p.cursor.x) * 0.011;
+      p.cursor.vy += (0 - p.cursor.y) * 0.011;
       p.cursor.vx *= 0.94;
       p.cursor.vy *= 0.94;
       p.cursor.x += p.cursor.vx;
       p.cursor.y += p.cursor.vy;
-      p.cursor.x = Math.min(45, Math.max(-45, p.cursor.x));
-      p.cursor.y = Math.min(45, Math.max(-45, p.cursor.y));
+      p.cursor.x = Math.min(42, Math.max(-42, p.cursor.x));
+      p.cursor.y = Math.min(42, Math.max(-42, p.cursor.y));
     });
   };
 
@@ -304,7 +336,6 @@ export default function InteractiveBackground({
     ctx.clearRect(0, 0, width * dpr, height * dpr);
     ctx.save();
     ctx.scale(dpr, dpr);
-    ctx.lineWidth = 1.25;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -313,75 +344,95 @@ export default function InteractiveBackground({
       const cx = p.x + p.cursor.x;
       const cy = p.y + p.cursor.y;
 
-      // Calculate distance to cursor for proximity illumination
+      // Distance to cursor for proximity glow and gentle scale boost
       const dx = cx - mouse.sx;
       const dy = cy - mouse.sy;
       const dist = Math.hypot(dx, dy);
       const rippleRadius = 180;
       const proximity = mouse.set && dist < rippleRadius ? Math.max(0, 1 - dist / rippleRadius) : 0;
 
-      // Opacity and scale boost on hover ripple
-      const currentAlpha = Math.min(0.9, p.baseAlpha + proximity * 0.55);
-      const currentScale = p.baseScale * (1 + proximity * 0.35);
+      // Proximity effects: smoother transition to brighter mint/emerald
+      const currentAlpha = Math.min(0.85, p.baseAlpha + proximity * 0.58);
+      const currentScale = 1 + proximity * 0.22;
+      const curSize = p.size * currentScale;
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(p.angle + p.rotationOffset);
       ctx.globalAlpha = currentAlpha;
-      ctx.strokeStyle = proximity > 0.15 ? accentColor : strokeColor;
+      ctx.strokeStyle = proximity > 0.12 ? accentColor : strokeColor;
+      ctx.lineWidth = curSize >= 20 ? 1.5 : curSize >= 15 ? 1.35 : 1.2;
 
-      // Draw the minimal communication symbol
+      // Draw clean messaging symbols
       switch (p.shape) {
         case "bubble": {
-          // Minimal Chat / Message Bubble Outline
-          const bw = 10 * currentScale;
-          const bh = 7.5 * currentScale;
-          const br = 2.2 * currentScale;
+          // Clear, recognizable chat bubble outline
+          const bw = curSize;
+          const bh = curSize * 0.72;
+          const br = curSize * 0.24;
+
           ctx.beginPath();
           ctx.moveTo(-bw / 2 + br, -bh / 2);
           ctx.lineTo(bw / 2 - br, -bh / 2);
           ctx.arcTo(bw / 2, -bh / 2, bw / 2, bh / 2, br);
           ctx.arcTo(bw / 2, bh / 2, -bw / 2, bh / 2, br);
-          ctx.lineTo(-bw / 2 + 1.8 * currentScale, bh / 2);
-          ctx.lineTo(-bw / 2 - 1.6 * currentScale, bh / 2 + 2.2 * currentScale);
-          ctx.lineTo(-bw / 2 + 0.2 * currentScale, bh / 2 - 1.2 * currentScale);
+          // Sleek bottom-left tail notch
+          ctx.lineTo(-bw / 2 + br * 1.4, bh / 2);
+          ctx.lineTo(-bw / 2 - curSize * 0.14, bh / 2 + curSize * 0.22);
+          ctx.lineTo(-bw / 2 + curSize * 0.04, bh / 2 - curSize * 0.06);
           ctx.arcTo(-bw / 2, -bh / 2, bw / 2, -bh / 2, br);
           ctx.closePath();
           ctx.stroke();
+
+          // Subtle internal communication line for medium/large bubbles
+          if (p.hasLines && curSize >= 16) {
+            ctx.beginPath();
+            ctx.moveTo(-bw * 0.24, -bh * 0.1);
+            ctx.lineTo(bw * 0.24, -bh * 0.1);
+            ctx.moveTo(-bw * 0.24, bh * 0.2);
+            ctx.lineTo(bw * 0.05, bh * 0.2);
+            ctx.stroke();
+          }
           break;
         }
 
         case "check": {
-          // Minimal double-check read receipt symbol
-          const s = 3.6 * currentScale;
+          // Double-check read receipt symbol (crisp & parallel)
+          const cs = curSize * 0.52;
+          // First checkmark
           ctx.beginPath();
-          // First tick
-          ctx.moveTo(-s * 0.9, 0);
-          ctx.lineTo(-s * 0.3, s * 0.65);
-          ctx.lineTo(s * 0.8, -s * 0.6);
-          // Offset second tick
-          ctx.moveTo(-s * 0.4, 0);
-          ctx.lineTo(s * 0.2, s * 0.65);
-          ctx.lineTo(s * 1.3, -s * 0.6);
+          ctx.moveTo(-cs * 0.95, -cs * 0.05);
+          ctx.lineTo(-cs * 0.35, cs * 0.55);
+          ctx.lineTo(cs * 0.55, -cs * 0.6);
+          ctx.stroke();
+          // Second checkmark offset
+          ctx.beginPath();
+          ctx.moveTo(-cs * 0.45, -cs * 0.05);
+          ctx.lineTo(cs * 0.15, cs * 0.55);
+          ctx.lineTo(cs * 1.05, -cs * 0.6);
           ctx.stroke();
           break;
         }
 
         case "heart": {
-          // Minimal reaction heart outline
-          const hs = 3.8 * currentScale;
+          // Reaction heart outline
+          const hs = curSize * 0.46;
           ctx.beginPath();
-          ctx.moveTo(0, hs * 0.55);
-          ctx.bezierCurveTo(-hs * 0.9, -hs * 0.2, -hs * 0.9, -hs * 0.9, 0, -hs * 0.45);
-          ctx.bezierCurveTo(hs * 0.9, -hs * 0.9, hs * 0.9, -hs * 0.2, 0, hs * 0.55);
+          ctx.moveTo(0, hs * 0.68);
+          ctx.bezierCurveTo(-hs * 1.15, -hs * 0.12, -hs * 1.15, -hs * 1.05, 0, -hs * 0.42);
+          ctx.bezierCurveTo(hs * 1.15, -hs * 1.05, hs * 1.15, -hs * 0.12, 0, hs * 0.68);
           ctx.stroke();
           break;
         }
 
-        case "dot": {
-          // Subtle circular communication node
+        case "at": {
+          // Communication @ / concentric node outline
+          const rad = curSize * 0.38;
           ctx.beginPath();
-          ctx.arc(0, 0, 1.8 * currentScale, 0, Math.PI * 2);
+          ctx.arc(0, 0, rad * 0.4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(0, 0, rad, Math.PI * 0.2, Math.PI * 1.85);
           ctx.stroke();
           break;
         }
