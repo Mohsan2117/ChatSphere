@@ -94,8 +94,8 @@ export function MessageBubble<TMessage extends BubbleMessage>({
     ? `flex max-w-[72%] flex-col ${own ? "items-end" : "items-start"}`
     : `flex min-w-0 max-w-[78%] flex-col ${own ? "items-end" : "items-start"}`;
   const bubbleClass = isDirect
-    ? `max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`
-    : `min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${own ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`;
+    ? `max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#38BDF8]/60" : ""} ${own ? "border-[#38BDF8]/25 bg-[#0B3B60] text-white" : "border-white/10 bg-[#152035] text-[#E5E7EB]"}`
+    : `min-w-0 max-w-full rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#38BDF8]/60" : ""} ${own ? "border-[#38BDF8]/25 bg-[#0B3B60] text-white" : "border-white/10 bg-[#152035] text-[#E5E7EB]"}`;
   const isDeletedForEveryone = Boolean(message.deletedForEveryone || message.deletedForEveryoneAt);
   const canUseServerActions = message.status !== "uploading" && message.status !== "sending";
   const canEdit = !isDeletedForEveryone && own && Boolean(message.body?.trim()) && canUseServerActions && message.status !== "failed";
@@ -107,14 +107,14 @@ export function MessageBubble<TMessage extends BubbleMessage>({
       <div className={innerClass}>
         {isDeletedForEveryone ? (
           <div className={bubbleClass}>
-            <div className="flex items-center gap-2 text-sm italic leading-6 text-[#64748b]">
+            <div className="flex items-center gap-2 text-sm italic leading-6 text-[#9AA3B8]">
               <Ban size={15} />
               <span>{own ? "You deleted this message" : "This message was deleted"}</span>
             </div>
             {isDirect ? (
               <DirectMessageMeta message={message} onRetry={onRetry} selectedChatOnline={selectedChatOnline} timestamp={timestamp} />
             ) : (
-              <div className="mt-2 text-right text-[11px] font-semibold text-[#94a3b8]">{timestamp}</div>
+              <div className="mt-2 text-right text-[11px] font-semibold text-[#9AA3B8]">{timestamp}</div>
             )}
           </div>
         ) : isDirect && message.attachment?.kind === "audio" ? (
@@ -130,10 +130,10 @@ export function MessageBubble<TMessage extends BubbleMessage>({
           />
         ) : (
           <div className={bubbleClass}>
-            {!isDirect && !own && senderName ? <div className="mb-1 text-xs font-black text-[#008f70]">{senderName}</div> : null}
+            {!isDirect && !own && senderName ? <div className="mb-1 text-xs font-black text-[#38BDF8]">{senderName}</div> : null}
             {message.replyTo ? <QuotedMessage reply={message.replyTo} onQuoteClick={onQuoteClick} /> : null}
             {message.attachment ? <AttachmentPreview attachment={message.attachment} authToken={authToken} resolveAttachmentSource={resolveAttachmentSource} /> : null}
-            {message.body ? <p className="text-sm leading-6 text-[#18212f]">{message.body}</p> : null}
+            {message.body ? <p className="text-sm leading-6">{message.body}</p> : null}
             {isDirect ? (
               <DirectMessageMeta message={message} onRetry={onRetry} selectedChatOnline={selectedChatOnline} timestamp={timestamp} />
             ) : (
@@ -146,7 +146,7 @@ export function MessageBubble<TMessage extends BubbleMessage>({
           {onReply ? (
             <button
               aria-label="Reply to message"
-              className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884]/30 hover:text-[#00a884]"
+              className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 bg-[#152035] text-[#9AA3B8] shadow-sm transition hover:border-[#38BDF8]/40 hover:text-[#38BDF8]"
               onClick={() => onReply(message)}
               type="button"
             >
@@ -182,12 +182,12 @@ function replyPreviewText(reply: MessageReply) {
 function QuotedMessage({ reply, onQuoteClick }: { reply: MessageReply; onQuoteClick?: (messageId: string) => void }) {
   return (
     <button
-      className="mb-3 w-full min-w-0 rounded-xl border-l-4 border-[#00a884] bg-white/65 px-3 py-2 text-left shadow-sm"
+      className="mb-3 w-full min-w-0 rounded-xl border-l-4 border-[#38BDF8] bg-black/25 px-3 py-2 text-left shadow-sm backdrop-blur-sm"
       onClick={() => onQuoteClick?.(reply.id)}
       type="button"
     >
-      <span className="block truncate text-xs font-black text-[#008f70]">{reply.senderName || "Message"}</span>
-      <span className="mt-0.5 block truncate text-xs font-semibold text-[#64748b]">{replyPreviewText(reply)}</span>
+      <span className="block truncate text-xs font-bold text-[#38BDF8]">{reply.senderName || "Message"}</span>
+      <span className="mt-0.5 block truncate text-xs font-semibold text-[#9AA3B8]">{replyPreviewText(reply)}</span>
     </button>
   );
 }
@@ -241,12 +241,12 @@ function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar, placemen
 
   const menu = open && typeof document !== "undefined" ? createPortal(
     <div
-      className="fixed z-[60] min-w-28 overflow-hidden rounded-xl border border-[#dce1e8] bg-white py-1 text-sm font-bold text-[#334155] shadow-[0_14px_35px_rgba(15,23,42,.14)]"
+      className="fixed z-[60] min-w-28 overflow-hidden rounded-xl border border-white/10 bg-[#0E1726] py-1 text-sm font-semibold text-[#E5E7EB] shadow-[0_14px_35px_rgba(0,0,0,0.6)] backdrop-blur-xl"
       ref={menuRef}
       style={{ left: position?.left ?? -9999, top: position?.top ?? -9999, visibility: position ? "visible" : "hidden" }}
     >
       {onToggleStar ? <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.06] text-[#E5E7EB]"
         onClick={() => {
           setOpen(false);
           onToggleStar();
@@ -257,7 +257,7 @@ function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar, placemen
         {isStarred ? "Unstar" : "Star"}
       </button> : null}
       {onEdit ? <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#f8fafc]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.06] text-[#E5E7EB]"
         onClick={() => {
           setOpen(false);
           onEdit();
@@ -268,7 +268,7 @@ function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar, placemen
         Edit
       </button> : null}
       {onDelete ? <button
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[#b42318] hover:bg-[#fff5f5]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-400 hover:bg-red-500/10"
         onClick={() => {
           setOpen(false);
           onDelete();
@@ -286,7 +286,7 @@ function MessageActionMenu({ isStarred, onDelete, onEdit, onToggleStar, placemen
     <div className="relative mt-1">
       <button
         aria-label="Message actions"
-        className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884]/30 hover:text-[#00a884]"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 bg-[#152035] text-[#9AA3B8] shadow-sm transition hover:border-[#38BDF8]/40 hover:text-[#38BDF8]"
         onClick={() => setOpen((current) => !current)}
         ref={buttonRef}
         type="button"
@@ -310,7 +310,7 @@ function DirectMessageMeta<TMessage extends BubbleMessage>({
   timestamp: ReactNode;
 }) {
   return (
-    <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#94a3b8]">
+    <div className="mt-2 flex justify-end gap-1 text-xs font-semibold text-[#9AA3B8]">
       {message.isStarred ? <Star size={12} className="mt-0.5 fill-[#f59e0b] text-[#f59e0b]" /> : null}
       {timestamp}
       {message.editedAt ? <span>· Edited</span> : null}
@@ -321,11 +321,11 @@ function DirectMessageMeta<TMessage extends BubbleMessage>({
           ) : message.status === "sending" ? (
             <span>{message.progressMsg || "Sending..."}</span>
           ) : message.status === "failed" ? (
-            <span className="text-[#b42318] flex items-center gap-1">
+            <span className="text-red-400 flex items-center gap-1">
               <span>{message.progressMsg || "⚠ Failed"}</span>
               {onRetry ? (
                 <button
-                  className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
+                  className="underline font-bold text-[#38BDF8] hover:text-[#60A5FA] ml-1 cursor-pointer focus:outline-none"
                   onClick={() => onRetry(message)}
                   type="button"
                 >
@@ -337,11 +337,11 @@ function DirectMessageMeta<TMessage extends BubbleMessage>({
             <>
               <span>{message.readAt ? "Seen" : "Sent"}</span>
               {message.readAt ? (
-                <CheckCheck size={15} className="text-[#00a884]" />
+                <CheckCheck size={15} className="text-[#38BDF8]" />
               ) : selectedChatOnline ? (
-                <CheckCheck size={15} className="text-[#94a3b8]" />
+                <CheckCheck size={15} className="text-[#9AA3B8]" />
               ) : (
-                <Check size={15} className="text-[#94a3b8]" />
+                <Check size={15} className="text-[#9AA3B8]" />
               )}
             </>
           )}
@@ -390,8 +390,8 @@ function AttachmentPreview({
   }
 
   return (
-    <a className="mb-3 flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
-      <FileText size={20} />
+    <a className="mb-3 flex items-center gap-3 rounded-md border border-white/10 bg-[#152035]/60 px-3 py-3 text-sm font-semibold text-[#E5E7EB] hover:bg-[#152035]" href={source || undefined} download={attachment.name}>
+      <FileText size={20} className="text-[#38BDF8]" />
       <span className="min-w-0 truncate">{attachment.name}</span>
     </a>
   );
@@ -462,7 +462,7 @@ function AudioPlayer({ source, name }: { source: string; name: string }) {
   };
 
   return (
-    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-[#dce1e8] bg-white/90 p-3 text-sm text-[#334155] w-[calc(72vw-70px)] sm:w-[280px] max-w-[280px] min-w-0 shadow-sm">
+    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-white/10 bg-[#152035]/80 p-3 text-sm text-[#E5E7EB] w-[calc(72vw-70px)] sm:w-[280px] max-w-[280px] min-w-0 shadow-sm">
       <audio
         ref={audioRef}
         src={source}
@@ -473,7 +473,7 @@ function AudioPlayer({ source, name }: { source: string; name: string }) {
       />
       <button
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="cs-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white hover:bg-[#008f70]"
+        className="cs-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-sm hover:brightness-110"
         onClick={togglePlay}
         type="button"
       >
@@ -494,9 +494,9 @@ function AudioPlayer({ source, name }: { source: string; name: string }) {
           max={duration || 100}
           value={currentTime}
           onChange={handleSliderChange}
-          className="w-full accent-[#00a884] cursor-pointer"
+          className="w-full accent-[#38BDF8] cursor-pointer"
         />
-        <div className="flex justify-between text-[10px] font-bold text-[#64748b] mt-1">
+        <div className="flex justify-between text-[10px] font-bold text-[#9AA3B8] mt-1">
           <span>{formatTime(currentTime)}</span>
           <span>{formatTime(duration)}</span>
         </div>
@@ -589,10 +589,10 @@ function VoiceMessageBubble<TMessage extends BubbleMessage>({
 
   if (!canPreview) {
     return (
-      <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${message.mine ? "border-[#00a884]/20 bg-[#dff8ef]" : "border-[#e5e9f0] bg-white"}`}>
+      <div className={`max-w-[72%] rounded-2xl border px-4 py-3 shadow-sm transition ${highlighted ? "ring-2 ring-[#38BDF8]/60" : ""} ${message.mine ? "border-[#38BDF8]/25 bg-[#0B3B60] text-white" : "border-white/10 bg-[#152035] text-[#E5E7EB]"}`}>
         {message.replyTo ? <QuotedMessage reply={message.replyTo} onQuoteClick={onQuoteClick} /> : null}
-        <a className="flex items-center gap-3 rounded-md border border-[#dce1e8] bg-white/70 px-3 py-3 text-sm font-bold text-[#334155]" href={source || undefined} download={attachment.name}>
-          <FileText size={20} />
+        <a className="flex items-center gap-3 rounded-md border border-white/10 bg-[#152035]/60 px-3 py-3 text-sm font-semibold text-[#E5E7EB] hover:bg-[#152035]" href={source || undefined} download={attachment.name}>
+          <FileText size={20} className="text-[#38BDF8]" />
           <span className="min-w-0 truncate">{attachment.name}</span>
         </a>
         <DirectMessageMeta message={message} onRetry={onRetry} selectedChatOnline={selectedChatOnline} timestamp={timestamp} />
@@ -752,16 +752,16 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
   const displayTime = isPlaying || currentTime > 0 ? currentTime : duration;
 
   return (
-    <div className={`relative flex flex-col gap-3 p-3 pl-4 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.12)] border select-none w-full max-w-[280px] sm:max-w-[320px] min-w-[240px] transition ${highlighted ? "ring-2 ring-[#00a884]/45" : ""} ${
+    <div className={`relative flex flex-col gap-3 p-3 pl-4 rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.4)] border select-none w-full max-w-[280px] sm:max-w-[320px] min-w-[240px] transition ${highlighted ? "ring-2 ring-[#38BDF8]/60" : ""} ${
       message.mine
-        ? "bg-[#dff8ef] border-[#00a884]/15 rounded-bl-2xl rounded-br-none"
-        : "bg-white border-[#e5e9f0] rounded-2xl rounded-bl-none ml-2"
+        ? "bg-[#0B3B60] border-[#38BDF8]/25 rounded-bl-2xl rounded-br-none text-white"
+        : "bg-[#152035] border-white/10 rounded-2xl rounded-bl-none ml-2 text-[#E5E7EB]"
     }`}>
       {message.replyTo ? <QuotedMessage reply={message.replyTo} onQuoteClick={onQuoteClick} /> : null}
       <div className="flex w-full items-center gap-3">
       <svg
         className={`absolute bottom-0 left-[-7px] h-[13px] w-[8px] fill-current ${
-          message.mine ? "text-[#dff8ef]" : "text-white"
+          message.mine ? "text-[#0B3B60]" : "text-[#152035]"
         }`}
         viewBox="0 0 8 13"
         xmlns="http://www.w3.org/2000/svg"
@@ -782,14 +782,14 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
 
       <button
         aria-label={isPlaying ? "Pause" : "Play"}
-        className="cs-press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#0284c7] hover:bg-[#0369a1] text-white transition-colors shadow-sm"
+        className="cs-press flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-sm hover:brightness-110"
         onClick={togglePlay}
         type="button"
       >
         {isPlaying ? (
-          <Pause className="h-5 w-5 fill-white text-white" />
+          <Pause className="h-5 w-5 fill-[#071019] text-[#071019]" />
         ) : (
-          <Play className="h-5 w-5 fill-white text-white translate-x-[1.5px]" />
+          <Play className="h-5 w-5 fill-[#071019] text-[#071019] translate-x-[1.5px]" />
         )}
       </button>
 
@@ -809,7 +809,7 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
                 style={{
                   height: `${peak * 100}%`,
                   maxHeight: "100%",
-                  backgroundColor: isPlayed ? "#0284c7" : "#cbd5e1",
+                  backgroundColor: isPlayed ? "#38BDF8" : "#334155",
                   minHeight: "4px"
                 }}
               />
@@ -817,7 +817,7 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
           })}
         </div>
 
-        <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-medium text-[#64748b] mt-1 select-none">
+        <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-semibold text-[#9AA3B8] mt-1 select-none">
           <span>{formatTime(displayTime)}</span>
           <div className="flex items-center gap-1">
             {message.isStarred ? <Star size={12} className="fill-[#f59e0b] text-[#f59e0b]" /> : null}
@@ -830,12 +830,12 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
                 ) : message.status === "sending" ? (
                   <span>{message.progressMsg || "Sending..."}</span>
                 ) : message.status === "failed" ? (
-                  <span className="text-[#b42318] flex items-center gap-1">
+                  <span className="text-red-400 flex items-center gap-1">
                     <span>{message.progressMsg || "⚠ Failed"}</span>
                     {onRetry ? (
                       <button
                         onClick={() => onRetry(message)}
-                        className="underline font-bold text-sky-600 hover:text-sky-800 ml-1 cursor-pointer focus:outline-none"
+                        className="underline font-bold text-[#38BDF8] hover:text-[#60A5FA] ml-1 cursor-pointer focus:outline-none"
                         type="button"
                       >
                         Retry
@@ -846,11 +846,11 @@ function VoiceMessagePlayer<TMessage extends BubbleMessage>({
                   <>
                     <span>{message.readAt ? "Seen" : "Sent"}</span>
                     {message.readAt ? (
-                      <CheckCheck size={14} className="text-[#00a884]" />
+                      <CheckCheck size={14} className="text-[#38BDF8]" />
                     ) : selectedChatOnline ? (
-                      <CheckCheck size={14} className="text-[#94a3b8]" />
+                      <CheckCheck size={14} className="text-[#9AA3B8]" />
                     ) : (
-                      <Check size={14} className="text-[#94a3b8]" />
+                      <Check size={14} className="text-[#9AA3B8]" />
                     )}
                   </>
                 )}

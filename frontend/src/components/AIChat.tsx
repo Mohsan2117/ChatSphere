@@ -196,19 +196,19 @@ export function AIChat({
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#f7f9fb]">
+    <div className="flex h-full flex-col bg-[#071019] text-[#E5E7EB]">
       {/* Header */}
-      <header className="flex min-h-[80px] shrink-0 items-center justify-between gap-3 border-b border-[#e5e9f0] bg-white px-4 sm:px-8">
+      <header className="flex min-h-[80px] shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#0E1726] px-4 sm:px-8">
         <div className="flex items-center gap-3.5">
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_22px_rgba(124,58,237,.35)]">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_8px_22px_rgba(56,189,248,.35)]">
             <Bot size={22} />
           </span>
           <div>
-            <h2 className="text-xl font-black tracking-normal text-[#111827]">AI Assistant</h2>
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-[#64748b]">
+            <h2 className="text-xl font-bold tracking-normal text-[#E5E7EB]">AI Assistant</h2>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-[#9AA3B8]">
               <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#38BDF8] opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#38BDF8]" />
               </span>
               {isLoading ? "Thinking..." : "Online"}
             </p>
@@ -219,7 +219,7 @@ export function AIChat({
             <button
               aria-label="Clear chat history"
               title="Clear chat history"
-              className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#64748b] transition hover:bg-[#f1f5f9] hover:text-red-600"
+              className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#9AA3B8] transition hover:bg-white/10 hover:text-red-400"
               onClick={clearHistory}
               type="button"
             >
@@ -229,7 +229,7 @@ export function AIChat({
           {onClose ? (
             <button
               aria-label="Close AI Assistant"
-              className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#64748b] transition hover:bg-[#f1f5f9] hover:text-[#18212f]"
+              className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#9AA3B8] transition hover:bg-white/10 hover:text-white"
               onClick={onClose}
               type="button"
             >
@@ -240,28 +240,28 @@ export function AIChat({
       </header>
 
       {/* Messages area */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8 bg-[#071019]">
         <div className="space-y-8">
           {messages.map((msg) => (
             <div key={msg.id} className={`cs-message-in flex w-full items-end gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
               {msg.role === "assistant" ? (
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_4px_14px_rgba(124,58,237,.3)]">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_4px_14px_rgba(56,189,248,.3)]">
                   <Bot size={17} />
                 </span>
               ) : null}
               <div
                 className={`max-w-[80%] px-4 py-3 text-sm leading-7 sm:max-w-[70%] ${
                   msg.role === "user"
-                    ? "rounded-2xl rounded-br-md border border-[#7c3aed]/15 bg-gradient-to-br from-[#8b5cf6]/10 to-[#3b82f6]/10 text-[#111827]"
+                    ? "rounded-2xl rounded-br-md border border-[#38BDF8]/25 bg-[#0B3B60] text-white"
                     : msg.error
-                      ? "rounded-2xl rounded-bl-md border border-amber-200 bg-amber-50 text-amber-800"
-                      : "rounded-2xl rounded-bl-md border border-[#e5e9f0] bg-white text-[#111827] shadow-[0_1px_3px_rgba(15,23,42,.06)]"
+                      ? "rounded-2xl rounded-bl-md border border-red-500/30 bg-red-950/40 text-red-300"
+                      : "rounded-2xl rounded-bl-md border border-white/10 bg-[#152035] text-[#E5E7EB] shadow-[0_1px_3px_rgba(0,0,0,0.4)]"
                 }`}
               >
                 {msg.content}
               </div>
               {msg.role === "user" ? (
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#111827] text-xs font-black text-white">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#152035] border border-white/10 text-xs font-bold text-[#E5E7EB]">
                   You
                 </span>
               ) : null}
@@ -269,12 +269,12 @@ export function AIChat({
           ))}
           {isLoading ? (
             <div className="cs-message-in flex w-full items-end gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_4px_14px_rgba(124,58,237,.3)]">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_4px_14px_rgba(56,189,248,.3)]">
                 <Bot size={17} />
               </span>
-              <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-[#e5e9f0] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,.06)] sm:max-w-[70%]">
-                <div className="flex items-center gap-2 text-sm text-[#64748b]">
-                  <Loader2 className="animate-spin" size={16} />
+              <div className="max-w-[80%] rounded-2xl rounded-bl-md border border-white/10 bg-[#152035] px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.4)] sm:max-w-[70%]">
+                <div className="flex items-center gap-2 text-sm text-[#9AA3B8]">
+                  <Loader2 className="animate-spin text-[#38BDF8]" size={16} />
                   Thinking...
                 </div>
               </div>
@@ -285,11 +285,11 @@ export function AIChat({
       </div>
 
       {/* Composer */}
-      <footer className="shrink-0 border-t border-[#e5e9f0] bg-white/85 px-4 py-4 backdrop-blur sm:px-8">
-        {error ? <div className="mx-auto mb-3 max-w-3xl rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700">{error}</div> : null}
-        <form className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-3xl border border-[#e2e6ed] bg-white p-2 shadow-[0_8px_30px_rgba(15,23,42,.08)] focus-within:border-[#8b5cf6]/40" onSubmit={sendMessage}>
+      <footer className="shrink-0 border-t border-white/10 bg-[#0E1726]/95 px-4 py-4 backdrop-blur sm:px-8">
+        {error ? <div className="mx-auto mb-3 max-w-3xl rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-2.5 text-sm font-semibold text-red-300">{error}</div> : null}
+        <form className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-3xl border border-white/10 bg-[#152035]/70 p-2 shadow-[0_8px_30px_rgba(0,0,0,0.4)] focus-within:border-[#38BDF8]/60 transition" onSubmit={sendMessage}>
           <input
-            className="h-10 min-w-0 flex-1 bg-transparent px-1 text-sm outline-none focus-visible:!outline-none placeholder:text-[#94a3b8] sm:px-2"
+            className="h-10 min-w-0 flex-1 bg-transparent px-1 text-sm text-[#E5E7EB] outline-none focus-visible:!outline-none placeholder:text-[#64748B] sm:px-2"
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask the AI assistant..."
@@ -298,7 +298,7 @@ export function AIChat({
           />
           <button
             aria-label="Send"
-            className="cs-press flex h-10 shrink-0 items-center justify-center gap-1 rounded-full bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] px-4 text-sm font-black text-white shadow-[0_6px_18px_rgba(124,58,237,.35)] transition disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
+            className="cs-press flex h-10 shrink-0 items-center justify-center gap-1 rounded-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] px-4 text-sm font-bold text-[#071019] shadow-[0_6px_18px_rgba(56,189,248,.35)] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 sm:px-5"
             disabled={isLoading || !input.trim()}
             type="submit"
           >
@@ -306,7 +306,7 @@ export function AIChat({
             <span className="hidden sm:inline">Send</span>
           </button>
         </form>
-        <p className="mx-auto mt-3 max-w-3xl text-center text-xs text-[#94a3b8]">
+        <p className="mx-auto mt-3 max-w-3xl text-center text-xs text-[#64748B]">
           ChatSphere AI can make mistakes. Consider checking important information.
         </p>
       </footer>

@@ -30,7 +30,7 @@ export function MessageReactions({
     <div className={`relative mt-1 flex flex-wrap items-center gap-1 ${align === "right" ? "justify-end" : "justify-start"}`} data-reaction-picker={isPickerOpen ? "true" : undefined}>
       <button
         aria-label="React to message"
-        className="grid h-7 w-7 place-items-center rounded-full border border-[#dce1e8] bg-white text-[#64748b] shadow-sm transition hover:border-[#00a884] hover:text-[#00a884]"
+        className="grid h-7 w-7 place-items-center rounded-full border border-white/10 bg-[#152035] text-[#9AA3B8] shadow-sm transition hover:border-[#38BDF8]/40 hover:text-[#38BDF8]"
         onClick={(event) => {
           event.stopPropagation();
           setPickerTarget(isPickerOpen ? null : target);
@@ -41,8 +41,8 @@ export function MessageReactions({
       </button>
       {(reactions ?? []).map((reaction) => (
         <button
-          className={`inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-black ${
-            reaction.reactedByMe ? "border-[#00a884]/40 bg-[#e7f8f2] text-[#008f70]" : "border-[#dce1e8] bg-white text-[#334155]"
+          className={`inline-flex h-7 items-center gap-1 rounded-full border px-2 text-xs font-bold transition ${
+            reaction.reactedByMe ? "border-[#38BDF8]/40 bg-[#38BDF8]/15 text-[#38BDF8]" : "border-white/10 bg-[#152035] text-[#E5E7EB] hover:border-white/20"
           }`}
           key={reaction.emoji}
           onClick={() => onShowDetails({ emoji: reaction.emoji, users: reaction.users ?? [] })}
@@ -53,10 +53,10 @@ export function MessageReactions({
         </button>
       ))}
       {isPickerOpen ? (
-        <div className={`absolute bottom-9 z-40 flex gap-1 rounded-full border border-[#dce1e8] bg-white p-1 shadow-[0_14px_35px_rgba(15,23,42,.16)] ${align === "right" ? "right-0" : "left-0"}`}>
+        <div className={`absolute bottom-9 z-40 flex gap-1 rounded-full border border-white/10 bg-[#0E1726] p-1 shadow-[0_14px_35px_rgba(0,0,0,0.6)] backdrop-blur-xl ${align === "right" ? "right-0" : "left-0"}`}>
           {REACTION_EMOJIS.map((emoji) => (
             <button
-              className="grid h-9 w-9 place-items-center rounded-full text-lg transition hover:bg-[#e7f8f2]"
+              className="grid h-9 w-9 place-items-center rounded-full text-lg transition hover:bg-white/10"
               key={emoji}
               onClick={(event) => {
                 event.stopPropagation();
