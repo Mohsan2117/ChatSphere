@@ -53,6 +53,8 @@ func newAIHandler(cfg config.Config, dataStore *store.Store, caller geminiCaller
 
 func (h *aiHandler) register(group *gin.RouterGroup) {
 	group.POST("/chat", h.chat)
+	group.GET("/messages", h.listMessages)
+	group.DELETE("/messages", h.clearMessages)
 }
 
 // chat handles POST /api/v1/ai/chat.
@@ -125,8 +127,45 @@ func (h *aiHandler) chat(c *gin.Context) {
 		return
 	}
 
+	// Persist the conversation turn in the database.
+	userMsg, _ := h.dataStore.SaveAIMessage("", userID, "user", message)
+	aiMsg, _ := h.dataStore.SaveAIMessage("", userID, "assistant", response)
+
 	log.Printf("[gemini] success user=%s status=200 latency_ms=%d", userID, time.Since(start).Milliseconds())
-	c.JSON(http.StatusOK, gin.H{"response": response})
+	c.JSON(http.StatusOK, gin.H{
+		"response":    response,
+		"userMessage": userMsg,
+		"aiMessage":   aiMsg,
+	})
+}
+
+// listMessages handles GET /api/v1/ai/messages.
+func (h *aiHandler) listMessages(c *gin.Context) {
+	auth, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	messages, err := h.dataStore.ListAIMessages(auth.ID, 100)
+	if err != nil {
+		log.Printf("[gemini] list messages failed user=%s: %v", auth.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load AI messages"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
+// clearMessages handles DELETE /api/v1/ai/messages.
+func (h *aiHandler) clearMessages(c *gin.Context) {
+	auth, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	if err := h.dataStore.ClearAIMessages(auth.ID); err != nil {
+		log.Printf("[gemini] clear messages failed user=%s: %v", auth.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not clear AI messages"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "cleared"})
 }
 
 // allowCooldown returns true if the user is allowed to send another request

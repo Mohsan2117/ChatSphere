@@ -1,7 +1,7 @@
 "use client";
 
-import { Dispatch, FormEvent, KeyboardEvent, SetStateAction, useRef } from "react";
-import { Bot, Loader2, Send, X } from "lucide-react";
+import { Dispatch, FormEvent, KeyboardEvent, SetStateAction, useEffect, useRef } from "react";
+import { Bot, Loader2, Send, Trash2, X } from "lucide-react";
 
 export type AIMessage = {
   id: string;
@@ -14,6 +14,7 @@ type AIChatProps = {
   apiUrl: string;
   authToken: string;
   onClose?: () => void;
+  onUnauthorized?: () => void;
   messages: AIMessage[];
   setMessages: Dispatch<SetStateAction<AIMessage[]>>;
   input: string;
@@ -28,6 +29,7 @@ export function AIChat({
   apiUrl,
   authToken,
   onClose,
+  onUnauthorized,
   messages,
   setMessages,
   input,
@@ -43,6 +45,58 @@ export function AIChat({
     window.setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 50);
+  }
+
+  // Load chat history from backend database on mount
+  useEffect(() => {
+    if (!authToken) return;
+    let cancelled = false;
+    fetch(`${apiUrl}/api/v1/ai/messages`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`
+      }
+    })
+      .then((res) => {
+        if (res.status === 401) {
+          onUnauthorized?.();
+          return null;
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.messages)) return;
+        if (data.messages.length > 0) {
+          setMessages(
+            data.messages.map((m: any) => ({
+              id: m.id || `msg-${Date.now()}-${Math.random()}`,
+              role: m.role === "assistant" ? "assistant" : "user",
+              content: m.content || ""
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiUrl, authToken, onUnauthorized, setMessages]);
+
+  async function clearHistory() {
+    if (!confirm("Are you sure you want to clear AI chat history?")) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/v1/ai/messages`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`
+        }
+      });
+      if (res.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
+      setMessages([]);
+    } catch {}
   }
 
   async function sendMessage(event?: FormEvent<HTMLFormElement>) {
@@ -71,6 +125,11 @@ export function AIChat({
         },
         body: JSON.stringify({ message: text })
       });
+
+      if (response.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
 
       const data = await response.json().catch(() => ({}));
 
@@ -155,16 +214,29 @@ export function AIChat({
             </p>
           </div>
         </div>
-        {onClose ? (
-          <button
-            aria-label="Close AI Assistant"
-            className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#64748b] transition hover:bg-[#f1f5f9] hover:text-[#18212f]"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={22} />
-          </button>
-        ) : null}
+        <div className="flex items-center gap-1">
+          {messages.length > 0 ? (
+            <button
+              aria-label="Clear chat history"
+              title="Clear chat history"
+              className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#64748b] transition hover:bg-[#f1f5f9] hover:text-red-600"
+              onClick={clearHistory}
+              type="button"
+            >
+              <Trash2 size={19} />
+            </button>
+          ) : null}
+          {onClose ? (
+            <button
+              aria-label="Close AI Assistant"
+              className="cs-press grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#64748b] transition hover:bg-[#f1f5f9] hover:text-[#18212f]"
+              onClick={onClose}
+              type="button"
+            >
+              <X size={22} />
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {/* Messages area */}

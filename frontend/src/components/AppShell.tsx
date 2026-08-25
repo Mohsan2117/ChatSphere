@@ -30,6 +30,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  EyeOff,
   Plus,
   Star,
   Trash2
@@ -244,6 +245,10 @@ export function AppShell() {
   const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
+  const [loginWelcome, setLoginWelcome] = useState<{ userName: string; countdown: number } | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState("");
   const [selectedBuiltInAvatar, setSelectedBuiltInAvatar] = useState("");
@@ -454,11 +459,47 @@ export function AppShell() {
   const [isCallHistoryLoading, setIsCallHistoryLoading] = useState(false);
   const [callHistorySearch, setCallHistorySearch] = useState("");
 
+  const handleUnauthorized = useCallback((message?: string) => {
+    window.localStorage.removeItem("chatsphere-admin-token");
+    window.localStorage.removeItem("chatsphere-auth");
+    window.localStorage.removeItem("chatsphere-email");
+    window.localStorage.removeItem("chatsphere-profile-complete");
+    window.localStorage.removeItem("chatsphere-profile");
+    window.localStorage.removeItem("chatsphere-user-id");
+    window.localStorage.removeItem("chatsphere-token");
+    window.localStorage.removeItem("chatsphere-onboarding-draft");
+    setIsAuthed(false);
+    setIsAdmin(false);
+    setAdminToken("");
+    setAuthToken("");
+    setAdminUsers([]);
+    setCurrentUserId("");
+    setAuthStep("login");
+    setIsAppInitializing(false);
+    setIsInboxLoading(false);
+    setInboxError("");
+    setDirectoryError("");
+    setWorkspaceMode("inbox");
+    setSelectedChatId("");
+    setSelectedChatSnapshot(null);
+    setIsMobileAIChatOpen(false);
+    setIsMobileDrawerOpen(false);
+    setChatSearch("");
+    setVerificationCode("");
+    setAuthMessage("");
+    setAuthError(message || "Your session has expired. Please log in again.");
+    setResendSeconds(0);
+  }, []);
+
   const fetchGroups = useCallback(async () => {
     if (!authToken) return;
     setIsGroupsLoading(true);
     try {
       const response = await fetch(`${apiUrl()}/api/v1/groups`, { headers: authHeaders(authToken) });
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) throw new Error("Could not load groups");
       const data = await response.json();
       setGroups(Array.isArray(data.groups) ? data.groups : []);
@@ -468,7 +509,7 @@ export function AppShell() {
     } finally {
       setIsGroupsLoading(false);
     }
-  }, [authToken]);
+  }, [authToken, handleUnauthorized]);
 
   useEffect(() => {
     if (mobileTab === "groups") fetchGroups();
@@ -481,6 +522,10 @@ export function AppShell() {
       const res = await fetch(`${apiUrl()}/api/v1/calls/history?limit=50`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!res.ok) throw new Error("Failed to fetch call history");
       const data = await res.json();
       setCallHistory(data.calls || []);
@@ -489,7 +534,7 @@ export function AppShell() {
     } finally {
       setIsCallHistoryLoading(false);
     }
-  }, [authToken]);
+  }, [authToken, handleUnauthorized]);
 
   useEffect(() => {
     if (mobileTab === "calls") {
@@ -690,6 +735,20 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    if (!loginWelcome) return;
+    if (loginWelcome.countdown <= 0) {
+      const timer = window.setTimeout(() => {
+        setLoginWelcome(null);
+      }, 400);
+      return () => window.clearTimeout(timer);
+    }
+    const timer = window.setTimeout(() => {
+      setLoginWelcome((prev) => (prev ? { ...prev, countdown: prev.countdown - 1 } : null));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [loginWelcome]);
+
+  useEffect(() => {
     if (!isAuthed) return;
     setSelectedChatId("");
     setSelectedChatSnapshot(null);
@@ -733,11 +792,15 @@ export function AppShell() {
       headers: authHeaders(authToken)
     })
       .then((response) => {
+        if (response.status === 401) {
+          handleUnauthorized();
+          return null;
+        }
         if (!response.ok) throw new Error("Conversation could not be loaded");
         return response.json();
       })
       .then((data) => {
-        if (cancelled || chatId !== selectedChatIdRef.current) return;
+        if (cancelled || !data || chatId !== selectedChatIdRef.current) return;
         const messages = Array.isArray(data.messages) ? data.messages : [];
         setChatMessages((current) => {
           const existing = current[chatId] ?? [];
@@ -757,7 +820,7 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [authToken, isAuthed, selectedChatId]);
+  }, [authToken, handleUnauthorized, isAuthed, selectedChatId]);
 
   useEffect(() => {
     if (!isAuthed || !authToken || !selectedGroupId) return;
@@ -768,11 +831,16 @@ export function AppShell() {
       fetch(`${apiUrl()}/api/v1/groups/${selectedGroupId}/messages?limit=100`, { headers })
     ])
       .then(async ([detailsResponse, messagesResponse]) => {
+        if (detailsResponse.status === 401 || messagesResponse.status === 401) {
+          handleUnauthorized();
+          return null;
+        }
         if (!detailsResponse.ok || !messagesResponse.ok) throw new Error("Group could not be loaded");
         return { details: await detailsResponse.json(), messages: await messagesResponse.json() };
       })
-      .then(({ details, messages }) => {
-        if (cancelled) return;
+      .then((res) => {
+        if (cancelled || !res) return;
+        const { details, messages } = res;
         setSelectedGroupDetails(details.group ?? null);
         const loaded: GroupChatMessage[] = Array.isArray(messages.messages)
           ? messages.messages.map((message: GroupChatMessage) => ({ ...message, mine: message.senderId === currentUserId }))
@@ -783,7 +851,7 @@ export function AppShell() {
         if (!cancelled) setGroupsError(error instanceof Error ? error.message : "Could not load group");
       });
     return () => { cancelled = true; };
-  }, [authToken, currentUserId, isAuthed, selectedGroupId]);
+  }, [authToken, currentUserId, handleUnauthorized, isAuthed, selectedGroupId]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -1144,11 +1212,15 @@ export function AppShell() {
         headers: authHeaders(authToken)
       })
         .then((response) => {
+          if (response.status === 401) {
+            handleUnauthorized();
+            return null;
+          }
           if (!response.ok) throw new Error("Could not load users");
           return response.json();
         })
         .then((data) => {
-          if (cancelled) return;
+          if (cancelled || !data) return;
           const users: DirectoryUser[] = Array.isArray(data.users) ? data.users : [];
           setDirectoryChats((current) => {
             if (users.length === 0 && current.length > 0) return current;
@@ -1184,7 +1256,7 @@ export function AppShell() {
       cancelled = true;
       window.clearInterval(refresh);
     };
-  }, [authToken, email, isAuthed, retryAttempt]);
+  }, [authToken, email, handleUnauthorized, isAuthed, retryAttempt]);
 
   useEffect(() => {
     if (!isAuthed || !authToken || !currentUserId) return;
@@ -1196,11 +1268,15 @@ export function AppShell() {
       headers: authHeaders(authToken)
     })
       .then((response) => {
+        if (response.status === 401) {
+          handleUnauthorized();
+          return null;
+        }
         if (!response.ok) throw new Error("Could not load inbox");
         return response.json();
       })
       .then((data) => {
-        if (cancelled) return;
+        if (cancelled || !data) return;
         const messages: ChatMessage[] = Array.isArray(data.messages) ? data.messages : [];
         const grouped = messages.reduce<MessageStore>((next, message) => {
           const chatId = message.senderEmail?.toLowerCase() === email.toLowerCase() ? message.recipientId : message.senderId;
@@ -1227,7 +1303,7 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [authToken, currentUserId, email, isAuthed, retryAttempt]);
+  }, [authToken, currentUserId, email, handleUnauthorized, isAuthed, retryAttempt]);
 
   useEffect(() => {
     if (!selectedChatId || !authToken) return;
@@ -1335,7 +1411,7 @@ export function AppShell() {
       const response = await fetch(`${apiUrl()}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password, rememberMe: keepSignedIn })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error ?? "Invalid email or password");
@@ -1369,6 +1445,8 @@ export function AppShell() {
           avatarPreview: user.avatarUrl ?? ""
         })
       );
+      const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email?.split("@")[0] || email.split("@")[0];
+      setLoginWelcome({ userName: displayName, countdown: 3 });
       setIsInboxLoading(true);
       setInboxError("");
       setDirectoryError("");
@@ -3131,23 +3209,45 @@ export function AppShell() {
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Set password</span>
-                  <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Create password"
-                    type="password"
-                  />
+                  <div className="relative mt-2">
+                    <input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Create password"
+                      type={showPassword ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Confirm password</span>
-                  <input
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Repeat password"
-                    type="password"
-                  />
+                  <div className="relative mt-2">
+                    <input
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Repeat password"
+                      type={showConfirmPassword ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </label>
                 <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   {isSubmitting ? "Creating account..." : "Signup"}
@@ -3171,13 +3271,33 @@ export function AppShell() {
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Password</span>
+                  <div className="relative mt-2">
+                    <input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Enter password"
+                      type={showPassword ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </label>
+                <label className="flex items-center gap-2.5 cursor-pointer text-sm font-medium text-[#d1d7db] select-none hover:text-white transition">
                   <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Enter password"
-                    type="password"
+                    type="checkbox"
+                    checked={keepSignedIn}
+                    onChange={(e) => setKeepSignedIn(e.target.checked)}
+                    className="h-4 w-4 rounded border border-white/20 bg-[#17251f] accent-[#00a884] cursor-pointer"
                   />
+                  <span>Keep me signed in for 30 days</span>
                 </label>
                 <button disabled={isSubmitting} className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   {isSubmitting ? "Logging in..." : "Login"}
@@ -3252,23 +3372,45 @@ export function AppShell() {
               <form className="mt-5 space-y-5" onSubmit={completePasswordReset}>
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">New password</span>
-                  <input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Enter new password"
-                    type="password"
-                  />
+                  <div className="relative mt-2">
+                    <input
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Enter new password"
+                      type={showPassword ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </label>
                 <label className="block">
                   <span className="text-sm font-semibold text-[#d1d7db]">Confirm new password</span>
-                  <input
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    className="mt-2 h-12 w-full rounded-xl border border-white/10 bg-[#17251f] px-4 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
-                    placeholder="Repeat new password"
-                    type="password"
-                  />
+                  <div className="relative mt-2">
+                    <input
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-[#17251f] pl-4 pr-11 text-white outline-none transition placeholder:text-[#6f8188] focus:border-[#00a884] focus:bg-[#1c2d26]"
+                      placeholder="Repeat new password"
+                      type={showConfirmPassword ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((prev) => !prev)}
+                      className="cs-press absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#8696a0] hover:text-white transition"
+                      aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                      tabIndex={-1}
+                    >
+                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </label>
                 <button className="cs-press flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] font-bold text-[#06130f] shadow-[0_14px_34px_rgba(0,168,132,.22)] transition hover:bg-[#14c49c]">
                   Update password
@@ -3917,6 +4059,7 @@ export function AppShell() {
             <AIChat
               apiUrl={apiUrl()}
               authToken={authToken}
+              onUnauthorized={handleUnauthorized}
               messages={aiMessages}
               setMessages={setAiMessages}
               input={aiInput}
@@ -4261,6 +4404,7 @@ export function AppShell() {
             apiUrl={apiUrl()}
             authToken={authToken}
             onClose={() => setIsMobileAIChatOpen(false)}
+            onUnauthorized={handleUnauthorized}
             messages={aiMessages}
             setMessages={setAiMessages}
             input={aiInput}
@@ -4397,6 +4541,40 @@ export function AppShell() {
         participantsCameraOn={participantsCameraOn}
         participantsMuted={participantsMuted}
       />
+
+      {loginWelcome ? (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md px-4 transition-all duration-500 animate-in fade-in">
+          {/* Subtle background ambient lights */}
+          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-red-600/10 blur-3xl -top-10" />
+          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-emerald-600/10 blur-3xl -bottom-10" />
+
+          <div className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-white/10 bg-[#12141a]/95 p-8 text-center shadow-[0_25px_70px_rgba(0,0,0,0.85)] cs-scale-in">
+            {/* Circular badge with green checkmark and red ring/glow */}
+            <div className="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border-2 border-red-500/80 bg-[#181a22] shadow-[0_0_24px_rgba(239,68,68,0.35)]">
+              <span className="absolute inset-0 rounded-full animate-ping opacity-25 border-2 border-red-500" />
+              <Check className="h-8 w-8 text-emerald-400 stroke-[3]" />
+            </div>
+
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Welcome <span className="text-[#ff6b6b] font-serif italic">back</span>!
+            </h2>
+
+            <p className="mt-3 text-sm text-[#cbd5e1]">
+              Good to see you again, <span className="font-bold text-white">{loginWelcome.userName}</span>.
+            </p>
+            <p className="mt-1 text-xs text-[#94a3b8]">
+              Your conversations are right where you left them.
+            </p>
+
+            <div className="mt-8 flex items-center justify-center gap-1.5 text-xs font-mono tracking-wider text-[#64748b]">
+              <span>redirecting to chat in</span>
+              <span className="font-bold text-[#ff6b6b] transition-all duration-300">
+                {loginWelcome.countdown > 0 ? `${loginWelcome.countdown}s` : "now!..."}
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

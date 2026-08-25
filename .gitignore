@@ -16,3 +16,10 @@ backend/data/
 .vercel
 .env*
 import.env
+
+# Android & IDE
+.gradle/
+.idea/
+backend/keepalive
+
+.env*

@@ -150,8 +150,9 @@ func registerAuthRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *st
 func loginUser(dataStore *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
+			Email      string `json:"email"`
+			Password   string `json:"password"`
+			RememberMe bool   `json:"rememberMe"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -164,10 +165,15 @@ func loginUser(dataStore *store.Store) gin.HandlerFunc {
 			return
 		}
 
+		ttl := tokenTTL()
+		if body.RememberMe {
+			ttl = 30 * 24 * time.Hour
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
 			"user":   publicUser(user),
-			"token":  signUserToken(user),
+			"token":  signUserTokenWithTTL(user, ttl),
 		})
 	}
 }
@@ -1644,13 +1650,28 @@ func registerFileRoutes(group *gin.RouterGroup, dataStore *store.Store) {
 // client is created here so the API key only ever lives on the backend.
 func registerAIRoutes(group *gin.RouterGroup, cfg config.Config, dataStore *store.Store) {
 	if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
-		// No key configured: register a stub that returns 503 so the endpoint
-		// exists but never attempts to contact Gemini.
+		// No key configured: register stubs so endpoints exist.
 		group.POST("/chat", func(c *gin.Context) {
 			if _, ok := requireUser(c); !ok {
 				return
 			}
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI assistant is not configured"})
+		})
+		group.GET("/messages", func(c *gin.Context) {
+			auth, ok := requireUser(c)
+			if !ok {
+				return
+			}
+			messages, _ := dataStore.ListAIMessages(auth.ID, 100)
+			c.JSON(http.StatusOK, gin.H{"messages": messages})
+		})
+		group.DELETE("/messages", func(c *gin.Context) {
+			auth, ok := requireUser(c)
+			if !ok {
+				return
+			}
+			_ = dataStore.ClearAIMessages(auth.ID)
+			c.JSON(http.StatusOK, gin.H{"status": "cleared"})
 		})
 		return
 	}
@@ -1765,7 +1786,11 @@ func requireUser(c *gin.Context) (authUser, bool) {
 }
 
 func signUserToken(user store.User) string {
-	payload := user.ID + "|" + user.Email + "|" + strconv.FormatInt(time.Now().Add(tokenTTL()).Unix(), 10)
+	return signUserTokenWithTTL(user, tokenTTL())
+}
+
+func signUserTokenWithTTL(user store.User, ttl time.Duration) string {
+	payload := user.ID + "|" + user.Email + "|" + strconv.FormatInt(time.Now().Add(ttl).Unix(), 10)
 	signature := signPayload(payload)
 	return base64.RawURLEncoding.EncodeToString([]byte(payload + "|" + signature))
 }

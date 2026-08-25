@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type messageRows interface {
 type dataFile struct {
 	Users         []User                    `json:"users"`
 	AIUsage       map[string]map[string]int `json:"aiUsage,omitempty"`
+	AIMessages    []AIMessage               `json:"aiMessages,omitempty"`
 	CallHistory   []CallHistory             `json:"callHistory,omitempty"`
 	Statuses      []Status                  `json:"statuses,omitempty"`
 	StatusViews   []StatusView              `json:"statusViews,omitempty"`
@@ -167,6 +169,14 @@ type GroupMessage struct {
 	DeletedForEveryoneBy string            `json:"deletedForEveryoneBy,omitempty"`
 	Reactions            []ReactionSummary `json:"reactions,omitempty"`
 	IsStarred            bool              `json:"isStarred,omitempty"`
+}
+
+type AIMessage struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"userId"`
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type MessageReaction struct {
@@ -1438,6 +1448,14 @@ func (s *Store) migrate(ctx context.Context) error {
 				primary key (user_id, usage_date)
 			)`,
 			`
+			create table if not exists ai_messages (
+				id varchar(64) primary key,
+				user_id varchar(64) not null,
+				role varchar(16) not null,
+				content mediumtext not null,
+				created_at datetime not null default current_timestamp
+			)`,
+			`
 			create table if not exists call_history (
 				id varchar(255) primary key,
 				caller_id varchar(64) not null,
@@ -1675,6 +1693,14 @@ func (s *Store) migrate(ctx context.Context) error {
 			request_count bigint not null default 0,
 			primary key (user_id, usage_date)
 		);
+		create table if not exists ai_messages (
+			id text primary key,
+			user_id text not null,
+			role text not null,
+			content text not null,
+			created_at timestamptz not null default now()
+		);
+		create index if not exists idx_ai_messages_user on ai_messages(user_id, created_at);
 		create table if not exists call_history (
 			id text primary key,
 			caller_id text not null,
@@ -2909,6 +2935,140 @@ func (s *Store) DecrementAIUsage(userID string) {
 		s.data.AIUsage[userID][today]--
 		_ = s.saveLocked()
 	}
+}
+
+// SaveAIMessage persists an AI chat message (from user or assistant).
+func (s *Store) SaveAIMessage(id, userID, role, content string) (AIMessage, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		id = "aimsg-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	userID = strings.TrimSpace(userID)
+	role = strings.TrimSpace(role)
+	content = strings.TrimSpace(content)
+	now := time.Now().UTC()
+
+	msg := AIMessage{
+		ID:        id,
+		UserID:    userID,
+		Role:      role,
+		Content:   content,
+		CreatedAt: now,
+	}
+
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `
+			insert into ai_messages (id, user_id, role, content, created_at)
+			values ($1, $2, $3, $4, $5)
+			on conflict (id) do nothing
+		`, id, userID, role, content, now)
+		return msg, err
+	}
+	if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `
+			insert ignore into ai_messages (id, user_id, role, content, created_at)
+			values (?, ?, ?, ?, ?)
+		`, id, userID, role, content, now)
+		return msg, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data.AIMessages = append(s.data.AIMessages, msg)
+	return msg, s.saveLocked()
+}
+
+// ListAIMessages returns the persisted AI messages for a user in chronological order.
+func (s *Store) ListAIMessages(userID string, limit int) ([]AIMessage, error) {
+	userID = strings.TrimSpace(userID)
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	if s.db != nil {
+		rows, err := s.db.Query(context.Background(), `
+			select id, user_id, role, content, created_at
+			from ai_messages
+			where user_id = $1
+			order by created_at asc
+			limit $2
+		`, userID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		messages := []AIMessage{}
+		for rows.Next() {
+			var m AIMessage
+			if err := rows.Scan(&m.ID, &m.UserID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+				return nil, err
+			}
+			messages = append(messages, m)
+		}
+		return messages, rows.Err()
+	}
+
+	if s.my != nil {
+		rows, err := s.my.QueryContext(context.Background(), `
+			select id, user_id, role, content, created_at
+			from ai_messages
+			where user_id = ?
+			order by created_at asc
+			limit ?
+		`, userID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		messages := []AIMessage{}
+		for rows.Next() {
+			var m AIMessage
+			if err := rows.Scan(&m.ID, &m.UserID, &m.Role, &m.Content, &m.CreatedAt); err != nil {
+				return nil, err
+			}
+			messages = append(messages, m)
+		}
+		return messages, rows.Err()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	messages := []AIMessage{}
+	for _, m := range s.data.AIMessages {
+		if m.UserID == userID {
+			messages = append(messages, m)
+		}
+	}
+	if len(messages) > limit {
+		messages = messages[len(messages)-limit:]
+	}
+	return messages, nil
+}
+
+// ClearAIMessages removes all persisted AI messages for a user.
+func (s *Store) ClearAIMessages(userID string) error {
+	userID = strings.TrimSpace(userID)
+	if s.db != nil {
+		_, err := s.db.Exec(context.Background(), `delete from ai_messages where user_id = $1`, userID)
+		return err
+	}
+	if s.my != nil {
+		_, err := s.my.ExecContext(context.Background(), `delete from ai_messages where user_id = ?`, userID)
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var remaining []AIMessage
+	for _, m := range s.data.AIMessages {
+		if m.UserID != userID {
+			remaining = append(remaining, m)
+		}
+	}
+	s.data.AIMessages = remaining
+	return s.saveLocked()
 }
 
 func conversationID(email string, otherUserID string) string {
