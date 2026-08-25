@@ -3037,13 +3037,13 @@ export function AppShell() {
 
   if (isAppInitializing) {
     return (
-      <main className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0b1120] text-white px-6">
+      <main className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#071019] text-[#E5E7EB] px-6">
         <div className="flex flex-col items-center max-w-sm w-full text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#00a884] text-[#0b1120] shadow-[0_16px_40px_rgba(0,168,132,.3)] transition-transform duration-500 hover:scale-105">
-            <MessageCircle size={36} />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#38BDF8] to-[#60A5FA] text-[#071019] shadow-[0_0_45px_rgba(56,189,248,0.35)] transition-transform duration-500 hover:scale-105">
+            <MessageCircle size={36} strokeWidth={2.4} />
           </div>
           
-          <h1 className="mt-8 text-3xl font-black tracking-normal text-white">ChatSphere</h1>
+          <h1 className="mt-8 text-3xl font-bold tracking-tight text-[#E5E7EB]">ChatSphere</h1>
           
           {inboxError || directoryError ? (
             <div className="mt-6 w-full">
@@ -3053,7 +3053,7 @@ export function AppShell() {
                 </p>
               </div>
               <button
-                className="cs-press mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-[#00a884] py-3 text-sm font-black text-[#0b1120] shadow-[0_8px_24px_rgba(0,168,132,.25)] hover:bg-[#00c298] transition"
+                className="cs-press mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] py-3 text-sm font-bold text-[#071019] shadow-[0_10px_25px_rgba(56,189,248,0.25)] hover:brightness-105 transition"
                 onClick={() => {
                   setInboxError("");
                   setDirectoryError("");
@@ -3066,8 +3066,8 @@ export function AppShell() {
             </div>
           ) : (
             <div className="mt-8 flex flex-col items-center gap-4">
-              <Loader2 className="animate-spin text-[#00a884]" size={36} />
-              <p className="text-sm font-bold text-[#94a3b8] tracking-wide animate-pulse">
+              <Loader2 className="animate-spin text-[#38BDF8]" size={36} />
+              <p className="text-sm font-medium text-[#9AA3B8] tracking-wide animate-pulse">
                 Initializing secure session...
               </p>
             </div>
@@ -3080,10 +3080,10 @@ export function AppShell() {
   if (!isAuthed) {
     if (isRestoring) {
       return (
-        <main className="grid min-h-screen place-items-center bg-[#07130f] text-white">
+        <main className="grid min-h-screen place-items-center bg-[#071019] text-[#E5E7EB]">
           <div className="flex flex-col items-center gap-4">
-            <Loader2 className="animate-spin text-[#00a884]" size={40} />
-            <p className="text-sm font-bold text-[#aebac1]">Restoring your session...</p>
+            <Loader2 className="animate-spin text-[#38BDF8]" size={40} />
+            <p className="text-sm font-medium text-[#9AA3B8]">Restoring your session...</p>
           </div>
         </main>
       );
@@ -3339,7 +3339,7 @@ export function AppShell() {
                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
                 </button>
 
-                <div className="text-center pt-1">
+                <div className="text-center pt-2">
                   <button
                     className="text-xs font-semibold text-[#38BDF8] hover:text-[#60A5FA] transition"
                     onClick={() => {
@@ -3353,48 +3353,6 @@ export function AppShell() {
                     type="button"
                   >
                     Forgot password?
-                  </button>
-                </div>
-
-                {/* Divider "or" */}
-                <div className="relative my-3 flex items-center justify-center">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-white/10" />
-                  </div>
-                  <span className="relative bg-[#121c2e] px-3 text-xs font-medium text-[#9AA3B8]">or</span>
-                </div>
-
-                {/* Social Buttons: Google, Apple, Discord */}
-                <div className="grid grid-cols-3 gap-2.5">
-                  <button
-                    type="button"
-                    className="cs-press flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition"
-                    aria-label="Continue with Google"
-                  >
-                    <svg className="h-5 w-5" viewBox="0 0 24 24">
-                      <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.3 9 5 12 5z"/>
-                      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9C2.2-2 3.7-5 3.7-8.8z"/>
-                      <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15.1s.7 5.4 1.9 7.8l3.7-2.9z"/>
-                      <path fill="#34A853" d="M12 23.5c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.3-6.4-5.2L1.9 16.5C3.7 20.2 7.5 23.5 12 23.5z"/>
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    className="cs-press flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition text-white"
-                    aria-label="Continue with Apple"
-                  >
-                    <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
-                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.63-.77 1.06-1.85.94-2.93-.91.04-2.02.6-2.67 1.37-.58.67-1.08 1.76-.94 2.81 1.02.08 2.04-.48 2.67-1.25z"/>
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    className="cs-press flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/20 transition text-[#5865F2]"
-                    aria-label="Continue with Discord"
-                  >
-                    <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
-                      <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
-                    </svg>
                   </button>
                 </div>
 
@@ -4663,31 +4621,31 @@ export function AppShell() {
       {loginWelcome ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md px-4 transition-all duration-500 animate-in fade-in">
           {/* Subtle brand ambient glows */}
-          <div className="pointer-events-none absolute h-80 w-80 rounded-full bg-[#00a884]/20 blur-3xl -top-10" />
-          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-[#25d366]/15 blur-3xl -bottom-10" />
+          <div className="pointer-events-none absolute h-80 w-80 rounded-full bg-[#38BDF8]/20 blur-3xl -top-10" />
+          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-[#60A5FA]/15 blur-3xl -bottom-10" />
 
-          <div className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-[#00a884]/30 bg-gradient-to-b from-[#182520]/95 via-[#111b21]/95 to-[#0b141a]/95 p-8 text-center shadow-[0_25px_80px_rgba(0,0,0,0.85)] cs-scale-in">
-            {/* Circular badge with animated drawing checkmark and glowing emerald pulse */}
-            <div className="relative mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#00a884] bg-[#0c1f19] shadow-[0_0_35px_rgba(0,168,132,0.45)] cs-checkmark-circle cs-pulse-ring">
-              <svg className="h-10 w-10 text-[#00a884]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                <path className="cs-checkmark-check text-[#00a884]" d="M5 13l4 4L19 7" />
+          <div className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-[#38BDF8]/20 bg-gradient-to-b from-[#152035]/95 via-[#0B1323]/95 to-[#071019]/95 p-8 text-center shadow-[0_25px_80px_rgba(0,0,0,0.85),0_0_40px_rgba(56,189,248,0.1)] backdrop-blur-xl cs-scale-in">
+            {/* Circular badge with animated drawing checkmark and glowing cyan pulse */}
+            <div className="relative mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#38BDF8] bg-[#0B1323] shadow-[0_0_35px_rgba(56,189,248,0.45)] cs-checkmark-circle cs-pulse-ring">
+              <svg className="h-10 w-10 text-[#38BDF8]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                <path className="cs-checkmark-check text-[#38BDF8]" d="M5 13l4 4L19 7" />
               </svg>
             </div>
 
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Welcome <span className="bg-gradient-to-r from-[#00a884] to-[#25d366] bg-clip-text text-transparent font-serif italic">back</span>!
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-[#E5E7EB] tracking-tight">
+              Welcome <span className="bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] bg-clip-text text-transparent font-serif italic">back</span>!
             </h2>
 
-            <p className="mt-3 text-sm text-[#d1d7db]">
-              Good to see you again, <span className="font-bold text-white">{loginWelcome.userName}</span>.
+            <p className="mt-3 text-sm text-[#E5E7EB]">
+              Good to see you again, <span className="font-bold text-[#38BDF8]">{loginWelcome.userName}</span>.
             </p>
-            <p className="mt-1 text-xs text-[#8696a0]">
+            <p className="mt-1 text-xs text-[#9AA3B8]">
               Your conversations are right where you left them.
             </p>
 
-            <div className="mt-7 flex items-center justify-center gap-1.5 text-xs font-mono tracking-wider text-[#8696a0]">
+            <div className="mt-7 flex items-center justify-center gap-1.5 text-xs font-mono tracking-wider text-[#9AA3B8]">
               <span>redirecting to chat in</span>
-              <span className="font-bold text-[#00a884] transition-all duration-300">
+              <span className="font-bold text-[#38BDF8] transition-all duration-300">
                 {loginWelcome.countdown > 0 ? `${loginWelcome.countdown}s` : "now!..."}
               </span>
             </div>
@@ -4695,7 +4653,7 @@ export function AppShell() {
             {/* Subtle animated progress bar */}
             <div className="mx-auto mt-4 h-1 w-36 overflow-hidden rounded-full bg-white/10">
               <div
-                className="h-full bg-gradient-to-r from-[#00a884] to-[#25d366] transition-all duration-1000 ease-linear rounded-full shadow-[0_0_8px_rgba(0,168,132,0.6)]"
+                className="h-full bg-gradient-to-r from-[#38BDF8] to-[#60A5FA] transition-all duration-1000 ease-linear rounded-full shadow-[0_0_8px_rgba(56,189,248,0.6)]"
                 style={{ width: `${Math.min(100, Math.max(0, ((3 - loginWelcome.countdown) / 3) * 100))}%` }}
               />
             </div>
