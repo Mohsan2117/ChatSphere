@@ -92,9 +92,26 @@ interface Point {
   hasLines?: boolean;
 }
 
+interface OrbitCenter {
+  xRatio: number;
+  yRatio: number;
+  rings: { radius: number; speed: number; dotAngle: number; dotSize: number; dotColor: string }[];
+}
+
+interface StarDust {
+  xRatio: number;
+  yRatio: number;
+  size: number;
+  color: string;
+  alpha: number;
+  speed: number;
+  phase: number;
+}
+
 interface InteractiveBackgroundProps {
   strokeColor?: string;
   accentColor?: string;
+  pinkColor?: string;
   backgroundColor?: string;
   count?: number;
   movement?: number;
@@ -108,12 +125,18 @@ const BASE_ANGLE = 0;
 const CURL = 3;
 const SEED = 0.5;
 
+// Exact color palette matching the Reactions (03) + Orbit (05) design:
+const COLOR_CYAN = "#00e5bc";
+const COLOR_PINK = "#ff4d88";
+const COLOR_ICE = "#7fe8db";
+
 export default function InteractiveBackground({
-  strokeColor = "#00a884",
-  accentColor = "#25d366",
+  strokeColor = COLOR_CYAN,
+  accentColor = COLOR_CYAN,
+  pinkColor = COLOR_PINK,
   backgroundColor = "transparent",
-  count = 36,
-  movement = 16,
+  count = 38,
+  movement = 15,
   hover = true,
   force = 3.5,
   className = "",
@@ -133,6 +156,8 @@ export default function InteractiveBackground({
     set: false,
   });
   const pointsRef = useRef<Point[]>([]);
+  const stardustRef = useRef<StarDust[]>([]);
+  const orbitsRef = useRef<OrbitCenter[]>([]);
   const noiseRef = useRef<((x: number, y: number) => number) | null>(null);
   const rafRef = useRef<number | null>(null);
   const boundingRef = useRef<{ width: number; height: number; dpr: number } | null>(null);
@@ -141,6 +166,7 @@ export default function InteractiveBackground({
   const cfgRef = useRef({
     strokeColor,
     accentColor,
+    pinkColor,
     count,
     movement,
     hover,
@@ -149,6 +175,7 @@ export default function InteractiveBackground({
   cfgRef.current = {
     strokeColor,
     accentColor,
+    pinkColor,
     count,
     movement,
     hover,
@@ -170,18 +197,66 @@ export default function InteractiveBackground({
     canvas.style.height = `${height}px`;
   };
 
+  const initOrbitsAndStardust = () => {
+    // Ambient focal Orbit systems (Orbit Ripple 05)
+    orbitsRef.current = [
+      {
+        xRatio: 0.5,
+        yRatio: 0.48,
+        rings: [
+          { radius: 36, speed: 0.0008, dotAngle: 0.4, dotSize: 2.2, dotColor: COLOR_CYAN },
+          { radius: 72, speed: -0.0006, dotAngle: 2.1, dotSize: 2.5, dotColor: COLOR_PINK },
+          { radius: 118, speed: 0.0004, dotAngle: 4.3, dotSize: 2.8, dotColor: COLOR_CYAN },
+          { radius: 172, speed: -0.0003, dotAngle: 1.2, dotSize: 2.2, dotColor: COLOR_ICE },
+        ],
+      },
+      {
+        xRatio: 0.18,
+        yRatio: 0.35,
+        rings: [
+          { radius: 30, speed: 0.0007, dotAngle: 1.1, dotSize: 2, dotColor: COLOR_PINK },
+          { radius: 62, speed: -0.0005, dotAngle: 3.5, dotSize: 2.4, dotColor: COLOR_CYAN },
+          { radius: 102, speed: 0.0003, dotAngle: 5.2, dotSize: 2, dotColor: COLOR_PINK },
+        ],
+      },
+      {
+        xRatio: 0.82,
+        yRatio: 0.32,
+        rings: [
+          { radius: 32, speed: -0.0008, dotAngle: 0.8, dotSize: 2, dotColor: COLOR_CYAN },
+          { radius: 68, speed: 0.0005, dotAngle: 2.7, dotSize: 2.5, dotColor: COLOR_CYAN },
+          { radius: 112, speed: -0.0004, dotAngle: 4.8, dotSize: 2, dotColor: COLOR_PINK },
+        ],
+      },
+    ];
+
+    // Subtle twinkling stardust
+    const stars: StarDust[] = [];
+    for (let i = 0; i < 48; i++) {
+      const isPink = i % 4 === 0;
+      stars.push({
+        xRatio: (Math.sin(i * 91.31 + 4.17) * 0.5 + 0.5),
+        yRatio: (Math.cos(i * 67.89 + 1.23) * 0.5 + 0.5),
+        size: 1 + (i % 3) * 0.5,
+        color: isPink ? COLOR_PINK : COLOR_CYAN,
+        alpha: 0.12 + (i % 5) * 0.04,
+        speed: 0.001 + (i % 3) * 0.0008,
+        phase: i * 0.7,
+      });
+    }
+    stardustRef.current = stars;
+  };
+
   const setParticles = () => {
     if (!boundingRef.current) return;
     const { width, height } = boundingRef.current;
     const { count } = cfgRef.current;
 
-    // Reduced density for breathing room (25% less dense than before)
     const isMobile = width < 768;
-    const adjustedCount = isMobile ? Math.min(count, 24) : count;
+    const adjustedCount = isMobile ? Math.min(count, 22) : count;
 
     const c = Math.max(1, Math.min(100, adjustedCount));
-    // Gap increased from ~85-110 to 115-145px for airy, premium spacing
-    const gap = 145 - ((c - 1) / 99) * 80;
+    const gap = 145 - ((c - 1) / 99) * 75;
     const cols = Math.ceil((width + gap) / gap);
     const rows = Math.ceil((height + gap) / gap);
     const xStart = (width - gap * (cols - 1)) / 2;
@@ -193,19 +268,18 @@ export default function InteractiveBackground({
     for (let i = 0; i < cols; i++) {
       for (let j = 0; j < rows; j++) {
         idx++;
-        // Deterministic pseudo-randomness per cell
         const rType = Math.sin(idx * 37.17 + i * 13.23 + j * 97.41) * 0.5 + 0.5;
         const rSizeTier = Math.sin(idx * 59.81 + i * 29.11) * 0.5 + 0.5;
         const rJitterX = Math.sin(idx * 19.33 + j * 43.17);
         const rJitterY = Math.cos(idx * 83.19 + i * 31.73);
-        const rRot = (Math.sin(idx * 43.11 + j * 17.51) * Math.PI) / 5;
+        const rRot = (Math.sin(idx * 43.11 + j * 17.51) * Math.PI) / 6;
         const rAlpha = Math.sin(idx * 73.29 + 1.61) * 0.5 + 0.5;
 
-        // Shape distribution:
-        // 60% Chat bubble outlines
-        // 20% Double-check read symbols
-        // 10% Reaction heart outlines
-        // 10% Communication @ / ring outlines
+        // Shape distribution exactly as in infographic:
+        // 60% Chat Bubble Outlines (Cyan)
+        // 20% Message Ticks (Cyan / Mint)
+        // 10% Reaction Hearts (Pink)
+        // 10% Dots & @ Symbols (Ice Cyan)
         let shape: ParticleShape = "bubble";
         if (rType >= 0.60 && rType < 0.80) {
           shape = "check";
@@ -216,26 +290,23 @@ export default function InteractiveBackground({
         }
 
         // 3 Size tiers:
-        // Small (majority ~65%): 12-14px
-        // Medium (some ~25%): 17-20px
-        // Large (a few ~10%): 23-26px
-        let size = 13;
+        // Small (majority): 13-15px
+        // Medium: 18-21px
+        // Large: 25-29px
+        let size = 14;
         let hasLines = false;
-        if (rSizeTier >= 0.90) {
-          // Large
-          size = 23 + Math.floor(rSizeTier * 3.5);
+        if (rSizeTier >= 0.88) {
+          size = 25 + Math.floor(rSizeTier * 4);
           hasLines = shape === "bubble";
-        } else if (rSizeTier >= 0.65) {
-          // Medium
-          size = 17 + Math.floor(rSizeTier * 3);
+        } else if (rSizeTier >= 0.62) {
+          size = 18 + Math.floor(rSizeTier * 3.5);
           hasLines = shape === "bubble" && rType < 0.35;
         } else {
-          // Small
-          size = 12 + Math.floor(rSizeTier * 2.5);
+          size = 13 + Math.floor(rSizeTier * 2.5);
         }
 
-        // Organic positioning with natural jitter (avoids rigid grid pattern)
-        const jitterAmount = gap * 0.28;
+        // Natural jitter to break grid patterns
+        const jitterAmount = gap * 0.3;
         const xPos = xStart + gap * i + rJitterX * jitterAmount;
         const yPos = yStart + gap * j + rJitterY * jitterAmount;
 
@@ -246,7 +317,7 @@ export default function InteractiveBackground({
           cursor: { x: 0, y: 0, vx: 0, vy: 0 },
           shape,
           size,
-          baseAlpha: 0.15 + rAlpha * 0.12,
+          baseAlpha: 0.16 + rAlpha * 0.14,
           rotationOffset: rRot,
           hasLines,
         });
@@ -291,7 +362,7 @@ export default function InteractiveBackground({
       const dx = p.x - mouse.sx;
       const dy = p.y - mouse.sy;
       const d = Math.hypot(dx, dy);
-      const l = Math.max(170, mouse.vs * 1.6);
+      const l = Math.max(175, mouse.vs * 1.6);
       let bend = 0;
 
       if (hover && d < l && mouse.set) {
@@ -313,8 +384,8 @@ export default function InteractiveBackground({
 
       p.cursor.vx += (0 - p.cursor.x) * 0.011;
       p.cursor.vy += (0 - p.cursor.y) * 0.011;
-      p.cursor.vx *= 0.94;
-      p.cursor.vy *= 0.94;
+      p.cursor.vx *= 0.93;
+      p.cursor.vy *= 0.93;
       p.cursor.x += p.cursor.vx;
       p.cursor.y += p.cursor.vy;
       p.cursor.x = Math.min(42, Math.max(-42, p.cursor.x));
@@ -322,14 +393,14 @@ export default function InteractiveBackground({
     });
   };
 
-  const drawParticles = () => {
+  const drawAll = (time: number) => {
     const canvas = canvasRef.current;
     if (!canvas || !boundingRef.current) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const { width, height, dpr } = boundingRef.current;
-    const { strokeColor, accentColor } = cfgRef.current;
+    const { strokeColor, accentColor, pinkColor } = cfgRef.current;
     const points = pointsRef.current;
     const mouse = mouseRef.current;
 
@@ -339,65 +410,152 @@ export default function InteractiveBackground({
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
+    // 1. Draw Orbit Ripple Rings (Orbit 05)
+    orbitsRef.current.forEach((orbit) => {
+      const ox = orbit.xRatio * width;
+      const oy = orbit.yRatio * height;
+
+      orbit.rings.forEach((ring) => {
+        // Concentric dotted orbit track
+        ctx.save();
+        ctx.strokeStyle = ring.dotColor === COLOR_PINK ? "rgba(255, 77, 136, 0.12)" : "rgba(0, 229, 188, 0.12)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 7]);
+        ctx.beginPath();
+        ctx.arc(ox, oy, ring.radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Orbiting satellite dot
+        const curAngle = ring.dotAngle + time * ring.speed;
+        const dotX = ox + Math.cos(curAngle) * ring.radius;
+        const dotY = oy + Math.sin(curAngle) * ring.radius;
+
+        ctx.setLineDash([]);
+        ctx.fillStyle = ring.dotColor;
+        ctx.globalAlpha = 0.45;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, ring.dotSize, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    });
+
+    // 2. Draw Dynamic Orbit Ripple from Active Cursor
+    if (mouse.set && mouse.sx > 0 && mouse.sy > 0) {
+      const cx = mouse.sx;
+      const cy = mouse.sy;
+      const cursorRipples = [42, 86, 138, 195];
+
+      cursorRipples.forEach((radius, idx) => {
+        const pulse = Math.sin(time * 0.0025 + idx * 1.5) * 4;
+        const curR = radius + pulse;
+        ctx.save();
+        ctx.strokeStyle = idx % 2 === 0 ? "rgba(0, 229, 188, 0.18)" : "rgba(255, 77, 136, 0.14)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 6]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, curR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Micro-node travelling on cursor ring
+        const nodeAngle = time * (0.0006 * (idx % 2 === 0 ? 1 : -1)) + idx * 2.1;
+        const nx = cx + Math.cos(nodeAngle) * curR;
+        const ny = cy + Math.sin(nodeAngle) * curR;
+        ctx.setLineDash([]);
+        ctx.fillStyle = idx % 2 === 0 ? COLOR_CYAN : COLOR_PINK;
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    }
+
+    // 3. Draw Sparkling Stardust
+    stardustRef.current.forEach((star) => {
+      const sx = star.xRatio * width;
+      const sy = star.yRatio * height;
+      const twinkle = Math.sin(time * star.speed + star.phase) * 0.5 + 0.5;
+      const curAlpha = star.alpha * (0.5 + twinkle * 0.5);
+
+      ctx.save();
+      ctx.fillStyle = star.color;
+      ctx.globalAlpha = curAlpha;
+      ctx.beginPath();
+      ctx.arc(sx, sy, star.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // 4. Draw Messaging Reaction Particles (Reactions 03)
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       const cx = p.x + p.cursor.x;
       const cy = p.y + p.cursor.y;
 
-      // Distance to cursor for proximity glow and gentle scale boost
       const dx = cx - mouse.sx;
       const dy = cy - mouse.sy;
       const dist = Math.hypot(dx, dy);
-      const rippleRadius = 180;
+      const rippleRadius = 185;
       const proximity = mouse.set && dist < rippleRadius ? Math.max(0, 1 - dist / rippleRadius) : 0;
 
-      // Proximity effects: smoother transition to brighter mint/emerald
-      const currentAlpha = Math.min(0.85, p.baseAlpha + proximity * 0.58);
-      const currentScale = 1 + proximity * 0.22;
+      // Opacity and scale boost on hover ripple
+      const currentAlpha = Math.min(0.92, p.baseAlpha + proximity * 0.65);
+      const currentScale = 1 + proximity * 0.25;
       const curSize = p.size * currentScale;
+
+      // Color scheme based on shape (Cyan for bubbles/checks, Pink for hearts, Ice for @)
+      let primaryColor = strokeColor;
+      if (p.shape === "heart") {
+        primaryColor = pinkColor;
+      } else if (p.shape === "at") {
+        primaryColor = COLOR_ICE;
+      } else {
+        primaryColor = proximity > 0.12 ? accentColor : strokeColor;
+      }
 
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(p.angle + p.rotationOffset);
       ctx.globalAlpha = currentAlpha;
-      ctx.strokeStyle = proximity > 0.12 ? accentColor : strokeColor;
-      ctx.lineWidth = curSize >= 20 ? 1.5 : curSize >= 15 ? 1.35 : 1.2;
+      ctx.strokeStyle = primaryColor;
+      ctx.lineWidth = curSize >= 22 ? 1.6 : curSize >= 16 ? 1.4 : 1.2;
 
-      // Draw clean messaging symbols
+      // Draw clean vector messaging symbols matching infographic
       switch (p.shape) {
         case "bubble": {
-          // Clear, recognizable chat bubble outline
+          // Smooth rounded Chat Bubble Outline
           const bw = curSize;
           const bh = curSize * 0.72;
-          const br = curSize * 0.24;
+          const br = curSize * 0.26;
 
           ctx.beginPath();
           ctx.moveTo(-bw / 2 + br, -bh / 2);
           ctx.lineTo(bw / 2 - br, -bh / 2);
           ctx.arcTo(bw / 2, -bh / 2, bw / 2, bh / 2, br);
           ctx.arcTo(bw / 2, bh / 2, -bw / 2, bh / 2, br);
-          // Sleek bottom-left tail notch
-          ctx.lineTo(-bw / 2 + br * 1.4, bh / 2);
-          ctx.lineTo(-bw / 2 - curSize * 0.14, bh / 2 + curSize * 0.22);
+          // Tail notch at bottom left
+          ctx.lineTo(-bw / 2 + br * 1.35, bh / 2);
+          ctx.lineTo(-bw / 2 - curSize * 0.15, bh / 2 + curSize * 0.22);
           ctx.lineTo(-bw / 2 + curSize * 0.04, bh / 2 - curSize * 0.06);
           ctx.arcTo(-bw / 2, -bh / 2, bw / 2, -bh / 2, br);
           ctx.closePath();
           ctx.stroke();
 
-          // Subtle internal communication line for medium/large bubbles
-          if (p.hasLines && curSize >= 16) {
+          // Subtle internal communication line for large bubbles
+          if (p.hasLines && curSize >= 18) {
             ctx.beginPath();
-            ctx.moveTo(-bw * 0.24, -bh * 0.1);
-            ctx.lineTo(bw * 0.24, -bh * 0.1);
-            ctx.moveTo(-bw * 0.24, bh * 0.2);
-            ctx.lineTo(bw * 0.05, bh * 0.2);
+            ctx.moveTo(-bw * 0.25, -bh * 0.08);
+            ctx.lineTo(bw * 0.25, -bh * 0.08);
+            ctx.moveTo(-bw * 0.25, bh * 0.2);
+            ctx.lineTo(bw * 0.06, bh * 0.2);
             ctx.stroke();
           }
           break;
         }
 
         case "check": {
-          // Double-check read receipt symbol (crisp & parallel)
+          // Double-check read receipt symbol
           const cs = curSize * 0.52;
           // First checkmark
           ctx.beginPath();
@@ -405,7 +563,7 @@ export default function InteractiveBackground({
           ctx.lineTo(-cs * 0.35, cs * 0.55);
           ctx.lineTo(cs * 0.55, -cs * 0.6);
           ctx.stroke();
-          // Second checkmark offset
+          // Second checkmark
           ctx.beginPath();
           ctx.moveTo(-cs * 0.45, -cs * 0.05);
           ctx.lineTo(cs * 0.15, cs * 0.55);
@@ -415,24 +573,24 @@ export default function InteractiveBackground({
         }
 
         case "heart": {
-          // Reaction heart outline
-          const hs = curSize * 0.46;
+          // Reaction heart outline in soft neon pink
+          const hs = curSize * 0.48;
           ctx.beginPath();
-          ctx.moveTo(0, hs * 0.68);
+          ctx.moveTo(0, hs * 0.7);
           ctx.bezierCurveTo(-hs * 1.15, -hs * 0.12, -hs * 1.15, -hs * 1.05, 0, -hs * 0.42);
-          ctx.bezierCurveTo(hs * 1.15, -hs * 1.05, hs * 1.15, -hs * 0.12, 0, hs * 0.68);
+          ctx.bezierCurveTo(hs * 1.15, -hs * 1.05, hs * 1.15, -hs * 0.12, 0, hs * 0.7);
           ctx.stroke();
           break;
         }
 
         case "at": {
-          // Communication @ / concentric node outline
+          // Communication @ symbol / node outline
           const rad = curSize * 0.38;
           ctx.beginPath();
-          ctx.arc(0, 0, rad * 0.4, 0, Math.PI * 2);
+          ctx.arc(0, 0, rad * 0.42, 0, Math.PI * 2);
           ctx.stroke();
           ctx.beginPath();
-          ctx.arc(0, 0, rad, Math.PI * 0.2, Math.PI * 1.85);
+          ctx.arc(0, 0, rad, Math.PI * 0.18, Math.PI * 1.85);
           ctx.stroke();
           break;
         }
@@ -449,6 +607,7 @@ export default function InteractiveBackground({
     if (!container || !canvasRef.current) return;
     noiseRef.current = createNoise2D(SEED);
     setSize();
+    initOrbitsAndStardust();
     setParticles();
 
     const onResize = () => {
@@ -495,7 +654,7 @@ export default function InteractiveBackground({
         return;
       }
 
-      // Smooth mouse interpolation
+      // Smooth mouse momentum
       const mouse = mouseRef.current;
       mouse.sx += (mouse.x - mouse.sx) * 0.12;
       mouse.sy += (mouse.y - mouse.sy) * 0.12;
@@ -509,10 +668,10 @@ export default function InteractiveBackground({
       mouse.ly = mouse.y;
       mouse.a = Math.atan2(dy, dx);
 
-      // Frame rate stabilization
+      // Animation frame render
       if (time - lastTime >= 12) {
         movePoints(time);
-        drawParticles();
+        drawAll(time);
         lastTime = time;
       }
 
@@ -543,4 +702,5 @@ export default function InteractiveBackground({
       />
     </div>
   );
-}
+}
+
