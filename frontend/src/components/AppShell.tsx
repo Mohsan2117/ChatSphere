@@ -44,6 +44,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel";
 import { MessageBubble, type BubbleAttachment, type MessageReply } from "@/components/chat/MessageBubble";
 import { MessageComposer } from "@/components/chat/MessageComposer";
 import type { ReactionSummary, ReactionTarget, ReactionUser } from "@/components/chat/MessageReactions";
+import LineRippleBackground from "@/components/originkit/ui/line-ripple-background";
 
 type AuthStep = "signup" | "login" | "code" | "profile" | "forgot" | "reset-code" | "reset-password";
 type ChatMessage = {
@@ -3086,8 +3087,21 @@ export function AppShell() {
       );
     }
     return (
-      <main className="min-h-screen bg-[#07130f] text-white">
-        <section className="mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
+      <main className="relative min-h-screen bg-[#07130f] text-white overflow-hidden">
+        {/* Originkit Line Ripple Background with ChatSphere-themed communication particles */}
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden="true">
+          <LineRippleBackground
+            backgroundColor="transparent"
+            strokeColor="#00a884"
+            accentColor="#25d366"
+            count={42}
+            movement={18}
+            force={4}
+            hover={true}
+          />
+        </div>
+
+        <section className="relative z-10 mx-auto grid min-h-screen max-w-6xl items-center gap-8 px-5 py-10 lg:grid-cols-[1fr_460px]">
           <div className="hidden lg:block cs-fade-up-delay max-w-2xl">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#00a884] text-[#07130f] shadow-[0_18px_50px_rgba(0,168,132,.25)]">
               <MessageCircle size={31} />

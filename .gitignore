@@ -21,5 +21,6 @@ import.env
 .gradle/
 .idea/
 backend/keepalive
+.originkit/
 
 .env*
