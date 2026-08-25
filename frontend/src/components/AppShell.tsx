@@ -3660,72 +3660,75 @@ export function AppShell() {
           onClick={() => setIsMobileDrawerOpen(false)}
         />
         <div
-          className={`relative flex w-full max-w-[280px] flex-col bg-[#0b1120] text-white shadow-2xl transition-transform duration-300 ease-in-out h-full ${
+          className={`relative flex w-full max-w-[280px] flex-col overflow-hidden bg-[#0b1120] text-white shadow-2xl transition-transform duration-300 ease-in-out h-full ${
             isMobileDrawerOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
-            <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white">
-                <MessageCircle size={18} />
-              </span>
-              <span className="text-base font-black tracking-tight">ChatSphere</span>
+          <LineRippleBackground className="opacity-85" />
+          <div className="relative z-10 flex h-full flex-col">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-md">
+                  <MessageCircle size={18} />
+                </span>
+                <span className="text-base font-black tracking-tight">ChatSphere</span>
+              </div>
+              <button
+                aria-label="Close menu"
+                onClick={() => setIsMobileDrawerOpen(false)}
+                className="grid h-8 w-8 place-items-center rounded-lg text-[#94a3b8] hover:bg-white/10 hover:text-white transition"
+                type="button"
+              >
+                <X size={18} />
+              </button>
             </div>
-            <button
-              aria-label="Close menu"
-              onClick={() => setIsMobileDrawerOpen(false)}
-              className="grid h-8 w-8 place-items-center rounded-lg text-[#94a3b8] hover:bg-white/10 hover:text-white transition"
-              type="button"
-            >
-              <X size={18} />
-            </button>
-          </div>
 
-          <nav className="flex-1 space-y-1.5 px-4 py-6">
-            {[
-              { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
-              { label: "Search", mode: "search" as const, icon: Search },
-              { label: "Users", mode: "contacts" as const, icon: Users },
-              { label: "AI Assistant", mode: "ai" as const, icon: Bot }
-            ].map(({ icon: Icon, label, mode }) => {
-              const isActive = workspaceMode === mode;
-              return (
-                <button
-                  aria-label={label}
-                  className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                    isActive && mode === "ai"
-                      ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
-                      : isActive
-                        ? "bg-white/10 text-white"
-                        : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
-                  }`}
-                  key={mode}
-                  onClick={() => {
-                    openWorkspace(mode);
-                    setIsMobileDrawerOpen(false);
-                  }}
-                  type="button"
-                >
-                  <Icon size={18} />
-                  <span>{label}</span>
-                </button>
-              );
-            })}
-          </nav>
+            <nav className="flex-1 space-y-1.5 px-4 py-6">
+              {[
+                { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
+                { label: "Search", mode: "search" as const, icon: Search },
+                { label: "Users", mode: "contacts" as const, icon: Users },
+                { label: "AI Assistant", mode: "ai" as const, icon: Bot }
+              ].map(({ icon: Icon, label, mode }) => {
+                const isActive = workspaceMode === mode;
+                return (
+                  <button
+                    aria-label={label}
+                    className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                      isActive && mode === "ai"
+                        ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
+                        : isActive
+                          ? "bg-white/15 backdrop-blur-xs text-white shadow-sm"
+                          : "text-[#94a3b8] hover:bg-white/10 hover:text-white"
+                    }`}
+                    key={mode}
+                    onClick={() => {
+                      openWorkspace(mode);
+                      setIsMobileDrawerOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <Icon size={18} />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </nav>
 
-          <div className="border-t border-white/10 p-4">
-            <button
-              aria-label="Logout"
-              className="cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/5 hover:text-white"
-              onClick={() => {
-                logout();
-                setIsMobileDrawerOpen(false);
-              }}
-              type="button"
-            >
-              <LogOut size={18} />
-              <span>Logout</span>
-            </button>
+            <div className="border-t border-white/10 p-4">
+              <button
+                aria-label="Logout"
+                className="cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/10 hover:text-white"
+                onClick={() => {
+                  logout();
+                  setIsMobileDrawerOpen(false);
+                }}
+                type="button"
+              >
+                <LogOut size={18} />
+                <span>Logout</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -3737,50 +3740,53 @@ export function AppShell() {
             : "lg:grid-cols-[250px_350px_minmax(0,1fr)] xl:grid-cols-[270px_390px_minmax(0,1fr)]"
         }`}
       >
-        <aside className="hidden h-screen flex-col border-r border-white/5 bg-[#0b1120] px-4 py-6 text-white lg:flex">
-          <div className="flex items-center gap-3 px-2">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_6px_18px_rgba(124,58,237,.4)]">
-              <MessageCircle size={20} />
-            </span>
-            <span className="text-lg font-black tracking-tight">ChatSphere</span>
+        <aside className="relative hidden h-screen flex-col overflow-hidden border-r border-white/5 bg-[#0b1120] px-4 py-6 text-white lg:flex">
+          <LineRippleBackground className="opacity-85" />
+          <div className="relative z-10 flex h-full flex-col">
+            <div className="flex items-center gap-3 px-2">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_6px_18px_rgba(124,58,237,.4)]">
+                <MessageCircle size={20} />
+              </span>
+              <span className="text-lg font-black tracking-tight">ChatSphere</span>
+            </div>
+            <nav className="mt-8 space-y-1.5">
+              {[
+                { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
+                { label: "Search", mode: "search" as const, icon: Search },
+                { label: "Users", mode: "contacts" as const, icon: Users },
+                { label: "AI Assistant", mode: "ai" as const, icon: Bot }
+              ].map(({ icon: Icon, label, mode }) => {
+                const isActive = workspaceMode === mode;
+                return (
+                  <button
+                    aria-label={label}
+                    className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                      isActive && mode === "ai"
+                        ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
+                        : isActive
+                          ? "bg-white/15 backdrop-blur-xs text-white shadow-sm"
+                          : "text-[#94a3b8] hover:bg-white/10 hover:text-white"
+                    }`}
+                    key={mode}
+                    onClick={() => openWorkspace(mode)}
+                    type="button"
+                  >
+                    <Icon size={18} />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+            <button
+              aria-label="Logout"
+              className="cs-press mt-auto flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/10 hover:text-white"
+              onClick={logout}
+              type="button"
+            >
+              <LogOut size={18} />
+              <span>Logout</span>
+            </button>
           </div>
-          <nav className="mt-8 space-y-1.5">
-            {[
-              { label: "Chats", mode: "inbox" as const, icon: MessageCircle },
-              { label: "Search", mode: "search" as const, icon: Search },
-              { label: "Users", mode: "contacts" as const, icon: Users },
-              { label: "AI Assistant", mode: "ai" as const, icon: Bot }
-            ].map(({ icon: Icon, label, mode }) => {
-              const isActive = workspaceMode === mode;
-              return (
-                <button
-                  aria-label={label}
-                  className={`cs-press flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
-                    isActive && mode === "ai"
-                      ? "bg-gradient-to-r from-[#7c3aed] to-[#3b82f6] text-white shadow-[0_8px_24px_rgba(124,58,237,.4)]"
-                      : isActive
-                        ? "bg-white/10 text-white"
-                        : "text-[#94a3b8] hover:bg-white/5 hover:text-white"
-                  }`}
-                  key={mode}
-                  onClick={() => openWorkspace(mode)}
-                  type="button"
-                >
-                  <Icon size={18} />
-                  <span>{label}</span>
-                </button>
-              );
-            })}
-          </nav>
-          <button
-            aria-label="Logout"
-            className="cs-press mt-auto flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#94a3b8] transition hover:bg-white/5 hover:text-white"
-            onClick={logout}
-            type="button"
-          >
-            <LogOut size={18} />
-            <span>Logout</span>
-          </button>
         </aside>
 
         {workspaceMode !== "ai" ? (
