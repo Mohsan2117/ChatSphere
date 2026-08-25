@@ -4544,33 +4544,42 @@ export function AppShell() {
 
       {loginWelcome ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md px-4 transition-all duration-500 animate-in fade-in">
-          {/* Subtle background ambient lights */}
-          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-red-600/10 blur-3xl -top-10" />
-          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-emerald-600/10 blur-3xl -bottom-10" />
+          {/* Subtle brand ambient glows */}
+          <div className="pointer-events-none absolute h-80 w-80 rounded-full bg-[#00a884]/20 blur-3xl -top-10" />
+          <div className="pointer-events-none absolute h-72 w-72 rounded-full bg-[#25d366]/15 blur-3xl -bottom-10" />
 
-          <div className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-white/10 bg-[#12141a]/95 p-8 text-center shadow-[0_25px_70px_rgba(0,0,0,0.85)] cs-scale-in">
-            {/* Circular badge with green checkmark and red ring/glow */}
-            <div className="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full border-2 border-red-500/80 bg-[#181a22] shadow-[0_0_24px_rgba(239,68,68,0.35)]">
-              <span className="absolute inset-0 rounded-full animate-ping opacity-25 border-2 border-red-500" />
-              <Check className="h-8 w-8 text-emerald-400 stroke-[3]" />
+          <div className="relative w-full max-w-sm sm:max-w-md rounded-3xl border border-[#00a884]/30 bg-gradient-to-b from-[#182520]/95 via-[#111b21]/95 to-[#0b141a]/95 p-8 text-center shadow-[0_25px_80px_rgba(0,0,0,0.85)] cs-scale-in">
+            {/* Circular badge with animated drawing checkmark and glowing emerald pulse */}
+            <div className="relative mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border-2 border-[#00a884] bg-[#0c1f19] shadow-[0_0_35px_rgba(0,168,132,0.45)] cs-checkmark-circle cs-pulse-ring">
+              <svg className="h-10 w-10 text-[#00a884]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                <path className="cs-checkmark-check text-[#00a884]" d="M5 13l4 4L19 7" />
+              </svg>
             </div>
 
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Welcome <span className="text-[#ff6b6b] font-serif italic">back</span>!
+              Welcome <span className="bg-gradient-to-r from-[#00a884] to-[#25d366] bg-clip-text text-transparent font-serif italic">back</span>!
             </h2>
 
-            <p className="mt-3 text-sm text-[#cbd5e1]">
+            <p className="mt-3 text-sm text-[#d1d7db]">
               Good to see you again, <span className="font-bold text-white">{loginWelcome.userName}</span>.
             </p>
-            <p className="mt-1 text-xs text-[#94a3b8]">
+            <p className="mt-1 text-xs text-[#8696a0]">
               Your conversations are right where you left them.
             </p>
 
-            <div className="mt-8 flex items-center justify-center gap-1.5 text-xs font-mono tracking-wider text-[#64748b]">
+            <div className="mt-7 flex items-center justify-center gap-1.5 text-xs font-mono tracking-wider text-[#8696a0]">
               <span>redirecting to chat in</span>
-              <span className="font-bold text-[#ff6b6b] transition-all duration-300">
+              <span className="font-bold text-[#00a884] transition-all duration-300">
                 {loginWelcome.countdown > 0 ? `${loginWelcome.countdown}s` : "now!..."}
               </span>
+            </div>
+
+            {/* Subtle animated progress bar */}
+            <div className="mx-auto mt-4 h-1 w-36 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full bg-gradient-to-r from-[#00a884] to-[#25d366] transition-all duration-1000 ease-linear rounded-full shadow-[0_0_8px_rgba(0,168,132,0.6)]"
+                style={{ width: `${Math.min(100, Math.max(0, ((3 - loginWelcome.countdown) / 3) * 100))}%` }}
+              />
             </div>
           </div>
         </div>
